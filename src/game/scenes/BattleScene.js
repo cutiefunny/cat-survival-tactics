@@ -7,6 +7,7 @@ import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
 import Dealer from '../objects/roles/Dealer';
 import Normal from '../objects/roles/Normal';
+import Leader from '../objects/roles/Leader';
 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
@@ -17,7 +18,7 @@ const UnitClasses = {
     'Tanker': Tanker,
     'Dealer': Dealer,
     'Normal': Normal,
-    'Leader': Unit,
+    'Leader': Leader,
     'NormalDog': Normal 
 };
 
@@ -58,6 +59,9 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('blueCat', '/images/cat_walk_3frame_sprite.png', { frameWidth: 100, frameHeight: 100 });
         this.load.image('cat_hit', '/images/cat_hit.png');
         this.load.image('cat_punch', '/images/cat_punch.png');
+        // [NEW] 하악질 이미지 로드
+        this.load.image('cat_haak', '/images/cat_haak.png');
+        
         this.load.spritesheet('redDog', '/images/dog_2frame_horizontal.png', { frameWidth: 100, frameHeight: 100 });
     }
 
@@ -68,7 +72,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.physics.world.setBounds(0, 0, 1600, 1200);
 
-        // 드래그 로직 (배치 단계용)
         this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
             if (this.isSetupPhase) {
                 gameObject.x = dragX;
@@ -110,7 +113,7 @@ export default class BattleScene extends Phaser.Scene {
     startGame(config) {
         this.isGameOver = false;
         this.battleStarted = false;
-        this.isSetupPhase = true; // 배치 단계 시작
+        this.isSetupPhase = true;
         this.checkBattleTimer = 0;
 
         if (!this.anims.exists('cat_walk')) this.anims.create({ key: 'cat_walk', frames: this.anims.generateFrameNumbers('blueCat', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
@@ -133,7 +136,6 @@ export default class BattleScene extends Phaser.Scene {
         const redRoles = config.redTeamRoles || [config.redTeamStats]; 
         const aiConfig = config.aiSettings;
 
-        // [Factory Method]
         const createUnit = (scene, x, y, texture, team, targetGroup, stats, isLeader) => {
             stats.aiConfig = aiConfig;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
@@ -147,7 +149,6 @@ export default class BattleScene extends Phaser.Scene {
 
         const leaderIndex = 0;
 
-        // Blue Team
         for (let i = 0; i < blueCount; i++) {
             const by = startY + (i * spawnGap);
             const bx = 300;
@@ -158,7 +159,6 @@ export default class BattleScene extends Phaser.Scene {
             this.blueTeam.add(blueUnit);
         }
 
-        // Red Team
         for (let i = 0; i < redCount; i++) {
             const by = startY + (i * spawnGap);
             const rx = 1300;
@@ -167,7 +167,6 @@ export default class BattleScene extends Phaser.Scene {
             this.redTeam.add(redUnit);
         }
 
-        // 초기 오프셋 설정 (기본은 I 대형처럼 보임)
         if(this.playerUnit && this.playerUnit.active) {
             this.blueTeam.getChildren().forEach(unit => {
                 if (unit.active) unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
@@ -178,7 +177,6 @@ export default class BattleScene extends Phaser.Scene {
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
 
-        // [NEW] 포메이션 변경 UI 생성
         this.createFormationUI();
 
         this.startButton = this.add.text(800, 550, 'CLICK TO START', {
@@ -197,30 +195,21 @@ export default class BattleScene extends Phaser.Scene {
         }).setOrigin(0.5).setAlpha(0);
     }
 
-    // [NEW] 포메이션 UI 생성
     createFormationUI() {
         const x = 50;
         const y = 50;
         const gap = 60;
 
-        // 스타일 정의
         const createBtn = (label, offsetX, formationType) => {
             const btn = this.add.text(x + offsetX, y, label, {
-                fontSize: '24px', 
-                fill: '#ffffff', 
-                backgroundColor: '#444444', 
-                padding: { x: 10, y: 5 },
+                fontSize: '24px', fill: '#ffffff', backgroundColor: '#444444', padding: { x: 10, y: 5 },
                 fixedWidth: 50, align: 'center'
-            })
-            .setInteractive()
-            .setScrollFactor(0); // 카메라 이동해도 UI 고정
+            }).setInteractive().setScrollFactor(0);
 
             btn.on('pointerdown', () => {
                 this.applyFormation(formationType);
-                // 버튼 시각적 피드백
                 this.tweens.add({ targets: btn, scale: 0.9, duration: 50, yoyo: true });
             });
-
             return btn;
         };
 
@@ -229,7 +218,6 @@ export default class BattleScene extends Phaser.Scene {
         this.btnFree = createBtn('Free', gap * 2, 'free');
     }
 
-    // [NEW] 포메이션 적용 로직
     applyFormation(type) {
         if (!this.playerUnit || !this.isSetupPhase) return;
 
@@ -237,54 +225,31 @@ export default class BattleScene extends Phaser.Scene {
         const leaderX = this.playerUnit.x;
         const leaderY = this.playerUnit.y;
         
-        // 'Free'는 유닛을 움직이지 않음 (사용자 배치 존중)
         if (type === 'free') {
             this.infoText.setVisible(true).setText("Free Formation Selected");
             this.time.delayedCall(1000, () => this.infoText.setVisible(false));
             return;
         }
 
-        // 포메이션별 좌표 계산
         units.forEach((unit, index) => {
             let targetX, targetY;
+            if (unit === this.playerUnit) return; 
 
-            if (unit === this.playerUnit) return; // 리더는 기준점
-
-            // 리더가 index 0이라고 가정하고 나머지 정렬
-            // 하지만 units 배열에서 리더의 위치는 섞여있을 수 있음
-            // 리더를 제외한 유닛들의 상대적 인덱스 계산
             const relativeIndex = index > units.indexOf(this.playerUnit) ? index - 1 : index; 
 
             if (type === 'line') {
-                // I 대형 (수직 일렬)
-                const gapY = 80;
-                targetX = leaderX;
-                targetY = leaderY + ((relativeIndex + 1) * gapY * (this.playerUnit.team === 'blue' ? 1 : -1)); // 뒤로 줄섬 (사실상 Y축 정렬)
-                // 위 코드는 Y축 아래로만 뻗어나감. 중앙 정렬을 원하면 로직 수정 필요.
-                // 기존 spawn 로직과 유사하게 리더 기준 위아래로 펼치거나, 리더 뒤로 줄을 세움.
-                // 여기서는 리더 뒤(화면상 위/아래)가 아니라 Y축 기준 정렬로 단순화
-                
-                // 다시: 리더 기준 '뒤'로 일렬
-                // Blue팀은 오른쪽이 적이므로, '뒤'는 왼쪽? 아니면 위아래? 
-                // 통상적으로 'I' 대형은 전열/후열 개념이 아니라 세로 배치(StartY 기준)
                 targetX = leaderX; 
-                targetY = 250 + (index * 90); // 초기 배치와 동일한 로직
+                targetY = 250 + (index * 90); 
             } 
             else if (type === 'wedge') {
-                // > 대형 (쐐기)
-                // 리더가 맨 앞(X축 가장 오른쪽), 나머지는 뒤쪽(X축 왼쪽) 위아래로 퍼짐
                 const gapX = 60;
                 const gapY = 60;
-                
-                // 1,2번은 1열 뒤, 3,4번은 2열 뒤...
                 const col = Math.floor((relativeIndex) / 2) + 1;
-                const rowDir = (relativeIndex % 2 === 0) ? 1 : -1; // 위/아래 번갈아
-                
+                const rowDir = (relativeIndex % 2 === 0) ? 1 : -1; 
                 targetX = leaderX - (col * gapX);
                 targetY = leaderY + (col * gapY * rowDir);
             }
 
-            // 부드러운 이동 (Tween)
             if (targetX !== undefined) {
                 this.tweens.add({
                     targets: unit,
@@ -293,7 +258,6 @@ export default class BattleScene extends Phaser.Scene {
                     duration: 300,
                     ease: 'Power2',
                     onUpdate: () => {
-                        // 물리 바디도 같이 이동
                         if(unit.body) { unit.body.x = unit.x - unit.body.width/2; unit.body.y = unit.y - unit.body.height/2; }
                     }
                 });
@@ -302,27 +266,12 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     handleStartBattle() {
-        console.log("🔥 [BattleScene] START BATTLE CLICKED");
-
-        // [FIX & LOG] 1. 가장 먼저 현재 배치된 위치를 '포메이션'으로 확정 저장합니다.
-        // AI가 움직이기 시작하기 전에 값을 고정해야 합니다.
         if (this.playerUnit && this.playerUnit.active) {
-            console.log(`📍 Leader Position: (${this.playerUnit.x.toFixed(0)}, ${this.playerUnit.y.toFixed(0)})`);
-            
-            this.blueTeam.getChildren().forEach((unit, index) => {
-                if (unit.active && unit !== this.playerUnit) {
-                    // 저장 전 위치 확인
-                    const prevX = unit.x;
-                    const prevY = unit.y;
-                    
-                    unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
-                    
-                    console.log(`   └ Unit [${unit.role}] saved offset. Pos:(${prevX.toFixed(0)},${prevY.toFixed(0)}) -> Offset:(${unit.formationOffset.x.toFixed(0)}, ${unit.formationOffset.y.toFixed(0)})`);
-                }
+            this.blueTeam.getChildren().forEach(unit => {
+                if (unit.active) unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
             });
         }
 
-        // 2. 이제 게임 상태 변경 (AI 가동 시작)
         this.isSetupPhase = false;
         
         if(this.startButton) this.startButton.destroy();
@@ -362,7 +311,6 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    // ... (나머지 메서드들은 기존 코드와 동일) ...
     handleRangedAttacks() {
         const allUnits = [...this.blueTeam.getChildren(), ...this.redTeam.getChildren()];
         allUnits.forEach(unit => {

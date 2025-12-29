@@ -3,14 +3,13 @@ import Phaser from 'phaser';
 
 export default class Shooter extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {
-        // [설정] 슈터 전용
         stats.role = 'Shooter';
         stats.attackRange = stats.attackRange || 250; 
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
         
-        if (!isLeader && team === 'blue') this.setTint(0xff88ff);
+        this.isFlanking = false;
 
-        this.isFlanking = false; // 현재 우회 기동 중인지 여부
+        if (!isLeader && team === 'blue') this.setTint(0x99ff99);
     }
 
     updateAI(delta) {

@@ -13,6 +13,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
+        this.baseAttackPower = stats.attackPower;
         this.attackPower = stats.attackPower;
         this.moveSpeed = stats.moveSpeed;
         this.attackRange = stats.attackRange || 50;
@@ -21,6 +22,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset = { x: 0, y: 0 };
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
+        
+        // [NEW] 스킬 관련 설정
+        this.skillMaxCooldown = 0; // 자식 클래스에서 설정 (ms)
+        this.skillTimer = 0;       // 현재 남은 쿨타임
         
         this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
@@ -36,6 +41,31 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this.initVisuals();
         this.hpBar = scene.add.graphics();
+
+        // [NEW] 전투 중 유닛 클릭 시 스킬 발동
+        this.on('pointerdown', () => {
+            if (this.scene.battleStarted && this.team === 'blue') {
+                this.tryUseSkill();
+            }
+        });
+    }
+
+    // [NEW] 스킬 발동 시도
+    tryUseSkill() {
+        if (this.skillTimer <= 0 && this.skillMaxCooldown > 0) {
+            this.performSkill(); // 자식 클래스에서 구현
+            this.skillTimer = this.skillMaxCooldown;
+            // 스킬 사용 시각적 피드백 (흰색 플래시)
+            this.setTint(0xffffff);
+            this.scene.time.delayedCall(100, () => this.resetVisuals());
+        } else if (this.skillTimer > 0) {
+            console.log(`⏳ Skill Cooldown: ${(this.skillTimer/1000).toFixed(1)}s`);
+        }
+    }
+
+    // [NEW] 자식 클래스에서 Override 할 메서드
+    performSkill() {
+        console.log(`${this.role} has no skill implementation.`);
     }
 
     initVisuals() {
@@ -55,11 +85,27 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.scale = 1;
         this.setDisplaySize(this.baseSize, this.baseSize);
         if (this.body) this.body.setCircle(50, 0, 0);
+        
+        // 색상 복구 (기존 로직 유지)
+        if (this.team === 'blue') {
+            if (this.isLeader) this.setTint(0xffffaa);
+            else if (this.role === 'Shooter') this.setTint(0x22ff22);
+            else if (this.role === 'Dealer') this.setTint(0xff2222);
+            else this.clearTint();
+        } else {
+            if (this.isLeader) this.setTint(0xffff00);
+            else this.clearTint();
+        }
     }
 
     update(time, delta) {
         if (!this.active) return;
         this.updateUI();
+
+        // [NEW] 스킬 쿨타임 감소
+        if (this.skillTimer > 0) {
+            this.skillTimer -= delta;
+        }
 
         if (this.scene.isSetupPhase) {
             this.setVelocity(0, 0);
@@ -81,8 +127,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         } else if (this.scene.battleStarted) {
             this.updateAI(delta);
         } else {
-            // [LOG] battleStarted가 false인데 여기로 들어오는지 확인
-            // console.log(`[Unit ${this.role}] Waiting for battle start...`);
             this.updateFormationFollow();
         }
         
@@ -93,7 +137,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const bounds = this.scene.physics.world.bounds;
         const padding = this.baseSize / 2; 
 
-        // [CLEAN] 로그 제거 및 좌표 강제 보정만 수행
         const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
         const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
 
@@ -241,6 +284,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     updateUI() {
         this.hpBar.setPosition(this.x, this.y - (this.baseSize / 2) + 20);
+        
+        // [NEW] 쿨타임 표시바 (옵션)
+        // 만약 필요하면 HP바 아래에 파란색으로 쿨타임 게이지 추가 가능
     }
 
     updateAnimation() {
@@ -275,9 +321,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                     this.setTexture('blueCat');
                     this.play('cat_walk');
                     this.resetVisuals();
-                    if (this.isLeader) this.setTint(0xffffaa);
-                    else if (this.role === 'Shooter') this.setTint(0xff88ff);
-                    else this.clearTint();
                 }
             });
         }
@@ -315,9 +358,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                     this.setTexture('blueCat');
                     this.play('cat_walk');
                     this.resetVisuals();
-                    if(this.isLeader) this.setTint(0xffffaa);
-                    else if(this.role === 'Shooter') this.setTint(0xff88ff);
-                    else this.clearTint();
                 }
             });
         }
@@ -328,33 +368,25 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.destroy();
     }
 
+    setFormationOffset(lx, ly) {
+        this.formationOffset.x = this.x - lx;
+        this.formationOffset.y = this.y - ly;
+    }
+    
+    // [NEW] Follow Leader Logic (from previous step)
     followLeader() {
         if (!this.scene.playerUnit || !this.scene.playerUnit.active) {
             this.setVelocity(0, 0);
             return;
         }
-
         const targetX = this.scene.playerUnit.x + this.formationOffset.x;
         const targetY = this.scene.playerUnit.y + this.formationOffset.y;
-        
         const distSq = Phaser.Math.Distance.Squared(this.x, this.y, targetX, targetY);
-        
-        // [DEBUG LOG] 유닛이 어디로 가려는지 60프레임 중 한 번만 출력 (콘솔 도배 방지)
-        if (Math.random() < 0.01) {
-             console.log(`🏃 [${this.role}] Following Leader. Current:(${this.x.toFixed(0)},${this.y.toFixed(0)}) Target:(${targetX.toFixed(0)},${targetY.toFixed(0)}) Offset:(${this.formationOffset.x.toFixed(0)}, ${this.formationOffset.y.toFixed(0)})`);
-        }
-
         if (distSq > 100) { 
             this.scene.physics.moveTo(this, targetX, targetY, this.moveSpeed);
             this.updateFlipX();
         } else {
             this.setVelocity(0, 0);
         }
-    }
-
-    setFormationOffset(lx, ly) {
-        // 현재 위치 - 리더 위치 = 오프셋
-        this.formationOffset.x = this.x - lx;
-        this.formationOffset.y = this.y - ly;
     }
 }
