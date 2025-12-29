@@ -1,5 +1,39 @@
 import Phaser from 'phaser';
 
+// [Role Visuals] 역할별 비주얼 설정 매핑 (Idle, Hit 추가)
+const ROLE_VISUALS = {
+    'Tanker': { 
+        idle: 'tanker_idle', walkAnim: 'tanker_walk_anim', attack: 'tanker_haak', hit: 'tanker_hit',
+        useFrameForIdle: false 
+    },
+    'Shooter': { 
+        idle: 'shooter_idle', walkAnim: 'shooter_walk_anim', attack: 'shooter_shot', hit: 'shooter_hit',
+        useFrameForIdle: false 
+    },
+    'Runner': { 
+        idle: 'runner_idle', walkAnim: 'runner_walk_anim', attack: 'runner_attack', hit: 'runner_hit',
+        useFrameForIdle: false 
+    },
+    // 기존/기타 역할
+    'Dealer': { 
+        idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit',
+        useFrameForIdle: true 
+    },
+    'Leader': { 
+        idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit',
+        useFrameForIdle: true 
+    },
+    'Normal': { 
+        idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit',
+        useFrameForIdle: true 
+    },
+    // 적 팀
+    'NormalDog': { 
+        idle: 'redDog', walkAnim: 'dog_walk', attack: null, hit: null, 
+        useFrameForIdle: true 
+    }
+};
+
 export default class Unit extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = false) {
         super(scene, x, y, texture);
@@ -25,14 +59,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
         
-        // 스킬 정보 로드
         this.skillMaxCooldown = stats.skillCooldown || 0; 
         this.skillRange = stats.skillRange || 0;
         this.skillDuration = stats.skillDuration || 0;
         this.skillEffect = stats.skillEffect || 0; 
 
         this.skillTimer = 0;
-        // [FIX] 스킬 사용 상태 플래그 추가
         this.isUsingSkill = false;
         
         this.thinkTimer = Math.random() * 200; 
@@ -40,6 +72,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.currentTarget = null;
         this._tempVec = new Phaser.Math.Vector2();
         
+        // [Visual Config]
+        this.visualConfig = ROLE_VISUALS[this.role] || ROLE_VISUALS['Normal'];
+        if (this.team === 'red') {
+            this.visualConfig = ROLE_VISUALS['NormalDog'];
+        }
+
         scene.add.existing(this);
         scene.physics.add.existing(this);
         
@@ -71,8 +109,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     initVisuals() {
+        if (this.visualConfig.useFrameForIdle) {
+            this.play(this.visualConfig.walkAnim);
+        } else {
+            this.setTexture(this.visualConfig.idle);
+        }
+
         if (this.team === 'blue') {
-            this.play('cat_walk');
             this.setFlipX(true);
             if (this.isLeader) this.setTint(0xffffaa);
         } else {
@@ -88,14 +131,20 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.setDisplaySize(this.baseSize, this.baseSize);
         if (this.body) this.body.setCircle(50, 0, 0);
         
+        // [FIX] 틴트 제거 (Leader만 유지)
         if (this.team === 'blue') {
             if (this.isLeader) this.setTint(0xffffaa);
-            else if (this.role === 'Shooter') this.setTint(0x22ff22);
-            else if (this.role === 'Dealer') this.setTint(0xff2222);
-            else this.clearTint();
+            else this.clearTint(); 
         } else {
             if (this.isLeader) this.setTint(0xffff00);
             else this.clearTint();
+        }
+
+        // Idle 상태 복구
+        if (!this.anims.isPlaying && !this.isUsingSkill && !this.isAttacking) {
+             if (!this.visualConfig.useFrameForIdle) {
+                 this.setTexture(this.visualConfig.idle);
+             }
         }
     }
 
@@ -287,13 +336,24 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateAnimation() {
-        // [FIX] 스킬 사용 중(this.isUsingSkill)에는 애니메이션 업데이트 방지
         const isBusy = (this.isTakingDamage || this.isAttacking || this.isUsingSkill);
-        if (!isBusy && this.body.velocity.length() > 5) {
-            if (!this.anims.isPlaying) {
-                if (this.team === 'blue') this.play('cat_walk', true);
-                else this.play('dog_walk', true);
-                this.resetVisuals();
+        
+        if (!isBusy) {
+            if (this.body.velocity.length() > 5) {
+                if (!this.anims.isPlaying || this.anims.currentAnim.key !== this.visualConfig.walkAnim) {
+                    this.play(this.visualConfig.walkAnim, true);
+                    this.resetVisuals();
+                }
+            } else {
+                if (this.visualConfig.useFrameForIdle) {
+                    if (this.anims.isPlaying) this.stop();
+                } else {
+                    if (this.anims.isPlaying) {
+                        this.stop();
+                        this.setTexture(this.visualConfig.idle);
+                        this.resetVisuals();
+                    }
+                }
             }
         }
     }
@@ -305,7 +365,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team === 'blue') {
             this.isTakingDamage = true;
             this.isAttacking = false;
-            this.setTexture('cat_hit');
+            
+            // [FIX] 역할별 피격 이미지 적용
+            const hitTex = this.visualConfig.hit || 'cat_hit';
+            this.setTexture(hitTex);
+            
             this.resetVisuals();
             this.scene.tweens.killTweensOf(this);
             const popSize = this.baseSize * 1.2;
@@ -316,8 +380,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.scene.time.delayedCall(500, () => {
                 if (this.active && this.hp > 0) {
                     this.isTakingDamage = false;
-                    this.setTexture('blueCat');
-                    this.play('cat_walk');
+                    if (!this.visualConfig.useFrameForIdle) {
+                        this.setTexture(this.visualConfig.idle);
+                    } else {
+                        this.play(this.visualConfig.walkAnim); 
+                    }
                     this.resetVisuals();
                 }
             });
@@ -342,7 +409,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     triggerAttackVisuals() {
         if (this.team === 'blue' && !this.isTakingDamage) {
             this.isAttacking = true;
-            this.setTexture('cat_punch');
+            
+            const attackTex = this.visualConfig.attack || 'cat_punch';
+            this.setTexture(attackTex);
+            
             this.resetVisuals();
             this.scene.tweens.killTweensOf(this);
             const popSize = this.baseSize * 1.2;
@@ -353,8 +423,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.scene.time.delayedCall(300, () => {
                 if(this.active) {
                     this.isAttacking = false;
-                    this.setTexture('blueCat');
-                    this.play('cat_walk');
+                    if (!this.visualConfig.useFrameForIdle) {
+                        this.setTexture(this.visualConfig.idle);
+                    } else {
+                        this.play(this.visualConfig.walkAnim);
+                    }
                     this.resetVisuals();
                 }
             });

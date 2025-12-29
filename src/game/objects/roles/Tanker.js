@@ -11,11 +11,13 @@ export default class Tanker extends Unit {
         console.log("🛡️ [Tanker] performSkill START");
         
         // 1. 이미지 로드 확인
-        const textureExists = this.scene.textures.exists('cat_haak');
-        console.log(`   ▶ Texture 'cat_haak' exists? ${textureExists}`);
+        // [Fixed] cat_haak -> tanker_haak
+        const textureKey = 'tanker_haak';
+        const textureExists = this.scene.textures.exists(textureKey);
+        console.log(`   ▶ Texture '${textureKey}' exists? ${textureExists}`);
         
         if (!textureExists) {
-            console.error("   🚨 ERROR: 'cat_haak' image is NOT loaded! Check BattleScene.preload()");
+            console.error(`   🚨 ERROR: '${textureKey}' image is NOT loaded! Check BattleScene.preload()`);
             return;
         }
 
@@ -28,7 +30,7 @@ export default class Tanker extends Unit {
 
         // 3. 텍스처 강제 변경
         const prevTexture = this.texture.key;
-        this.setTexture('cat_haak');
+        this.setTexture(textureKey);
         console.log(`   ▶ Texture Change: ${prevTexture} -> ${this.texture.key}`);
 
         // 1초 후 복구
@@ -36,9 +38,10 @@ export default class Tanker extends Unit {
             console.log("🛡️ [Tanker] Skill Effect End. Restoring...");
             this.isUsingSkill = false;
             if(this.active) {
+                // 원래 상태로 복구
                 if (this.team === 'blue') {
-                    this.setTexture('blueCat');
-                    this.play('cat_walk');
+                    // Tanker는 Idle 이미지가 따로 있으므로 Idle로 복귀
+                    this.setTexture('tanker_idle');
                 } else {
                     this.setTexture('redDog'); 
                     this.play('dog_walk');

@@ -12,6 +12,11 @@ import Leader from '../objects/roles/Leader';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
+// [Map Assets] 맵 데이터와 타일셋 이미지 Import
+import stage1Data from '../../assets/maps/stage1.json';
+import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
+import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
+
 const UnitClasses = {
     'Shooter': Shooter,
     'Runner': Runner,
@@ -22,7 +27,7 @@ const UnitClasses = {
     'NormalDog': Normal 
 };
 
-// [FIX] 안전장치용 기본 스탯 정의 (DB 데이터 누락 대비)
+// [Safe Config]
 const ROLE_BASE_STATS = {
     'Leader': { skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
     'Tanker': { skillCooldown: 10000, skillRange: 200 }
@@ -46,7 +51,6 @@ const DEFAULT_CONFIG = {
     ],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     
-    // 기본값 (DB 로드 실패 시 사용)
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
         { role: 'Runner', hp: 100, attackPower: 12, moveSpeed: 140 },
@@ -63,19 +67,70 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     preload() {
+        // [Existing] 기본 에셋
         this.load.spritesheet('blueCat', '/images/cat_walk_3frame_sprite.png', { frameWidth: 100, frameHeight: 100 });
         this.load.image('cat_hit', '/images/cat_hit.png');
         this.load.image('cat_punch', '/images/cat_punch.png');
         this.load.image('cat_haak', '/images/cat_haak.png');
         this.load.spritesheet('redDog', '/images/dog_2frame_horizontal.png', { frameWidth: 100, frameHeight: 100 });
+
+        // [Asset] Hit Images
+        this.load.image('tanker_hit', '/images/tanker_hit.png');
+        this.load.image('shooter_hit', '/images/shooter_hit.png');
+        this.load.image('runner_hit', '/images/runner_hit.png');
+
+        // [Asset] 역할별 추가 이미지
+        this.load.image('tanker_idle', '/images/tanker_idle.png');
+        this.load.spritesheet('tanker_walk', '/images/tanker_walk.png', { frameWidth: 100, frameHeight: 100 });
+        this.load.image('tanker_haak', '/images/tanker_haak.png');
+        
+        this.load.image('shooter_idle', '/images/shooter_idle.png');
+        this.load.spritesheet('shooter_walk', '/images/shooter_walk.png', { frameWidth: 100, frameHeight: 100 });
+        this.load.image('shooter_shot', '/images/shooter_shot.png');
+
+        this.load.image('runner_idle', '/images/runner_idle.png');
+        this.load.spritesheet('runner_walk', '/images/runner_walk.png', { frameWidth: 100, frameHeight: 100 });
+        this.load.image('runner_attack', '/images/runner_attack.png');
+
+        // [Map] 맵 데이터 및 타일셋 로드
+        this.load.tilemapTiledJSON('stage1', stage1Data);
+        this.load.image('tiles_grass', tilesetGrassImg);
+        this.load.image('tiles_plant', tilesetPlantImg);
     }
 
     create() {
-        this.loadingText = this.add.text(800, 600, 'Loading Tactics Config...', {
+        this.loadingText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 'Loading Tactics Config...', {
             fontSize: '40px', fill: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0.5);
+        }).setOrigin(0.5).setScrollFactor(0);
 
-        this.physics.world.setBounds(0, 0, 1600, 1200);
+        // [Map] 맵 생성
+        const map = this.make.tilemap({ key: 'stage1' });
+        
+        console.log("🗺️ Map Loaded. Available Layers:", map.layers.map(l => l.name));
+        console.log("🗺️ Map Tilesets:", map.tilesets.map(t => t.name));
+
+        // [Map] 타일셋 연결 (로그 기반 이름 매핑)
+        const tilesetGrass = map.addTilesetImage('tileser_nature', 'tiles_grass');
+        const tilesetPlant = map.addTilesetImage('tileset_trees', 'tiles_plant');
+        
+        const tilesets = [];
+        if (tilesetGrass) tilesets.push(tilesetGrass);
+        else console.warn("⚠️ Tileset 'tileser_nature' (Grass) load failed!");
+        
+        if (tilesetPlant) tilesets.push(tilesetPlant);
+        else console.warn("⚠️ Tileset 'tileset_trees' (Tree) load failed!");
+
+        // [Map] 레이어 생성
+        const groundLayer = map.createLayer('Ground', tilesets, 0, 0);
+        const wallLayer = map.createLayer('Walls', tilesets, 0, 0);
+        const blockLayer = map.createLayer('Blocks', tilesets, 0, 0);
+
+        // [Map] 충돌 설정
+        if (wallLayer) wallLayer.setCollisionByExclusion([-1]);
+        if (blockLayer) blockLayer.setCollisionByExclusion([-1]);
+
+        // [Map] 월드 경계 설정
+        this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
         this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
             if (this.isSetupPhase) {
@@ -88,10 +143,10 @@ export default class BattleScene extends Phaser.Scene {
             }
         });
 
-        this.fetchConfigAndStart();
+        this.fetchConfigAndStart(wallLayer, blockLayer);
     }
 
-    async fetchConfigAndStart() {
+    async fetchConfigAndStart(wallLayer, blockLayer) {
         let config = DEFAULT_CONFIG;
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
@@ -115,23 +170,25 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         if (this.loadingText && this.loadingText.active) this.loadingText.destroy();
-        this.startGame(config);
+        this.startGame(config, wallLayer, blockLayer);
     }
 
-    startGame(config) {
+    startGame(config, wallLayer, blockLayer) {
         this.isGameOver = false;
         this.battleStarted = false;
         this.isSetupPhase = true;
         this.checkBattleTimer = 0;
 
+        // [Anim] 애니메이션 정의
         if (!this.anims.exists('cat_walk')) this.anims.create({ key: 'cat_walk', frames: this.anims.generateFrameNumbers('blueCat', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
         if (!this.anims.exists('dog_walk')) this.anims.create({ key: 'dog_walk', frames: this.anims.generateFrameNumbers('redDog', { start: 0, end: 1 }), frameRate: 6, repeat: -1 });
 
+        if (!this.anims.exists('tanker_walk_anim')) this.anims.create({ key: 'tanker_walk_anim', frames: this.anims.generateFrameNumbers('tanker_walk', { start: 0, end: 1 }), frameRate: 6, repeat: -1 });
+        if (!this.anims.exists('shooter_walk_anim')) this.anims.create({ key: 'shooter_walk_anim', frames: this.anims.generateFrameNumbers('shooter_walk', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
+        if (!this.anims.exists('runner_walk_anim')) this.anims.create({ key: 'runner_walk_anim', frames: this.anims.generateFrameNumbers('runner_walk', { start: 0, end: 1 }), frameRate: 10, repeat: -1 });
+
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({ up: 'W', left: 'A', down: 'S', right: 'D' });
-
-        this.add.grid(800, 600, 1600, 1200, 32, 32, 0x000000).setAlpha(0.2);
-        this.add.line(0, 0, 800, 0, 800, 1200, 0xffffff, 0.1).setOrigin(0);
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
@@ -162,8 +219,6 @@ export default class BattleScene extends Phaser.Scene {
             const bx = 300;
             const isLeader = (i === leaderIndex);
             
-            // [FIX] 데이터 병합 로직 강화
-            // DB에서 불러온 스탯(configStats)에 스킬 정보가 없으면, ROLE_BASE_STATS의 기본값을 채워넣음
             const configStats = blueRoles[i % blueRoles.length] || DEFAULT_CONFIG.blueTeamRoles[i % DEFAULT_CONFIG.blueTeamRoles.length];
             const baseDefaults = ROLE_BASE_STATS[configStats.role] || {};
             const finalStats = { ...baseDefaults, ...configStats }; 
@@ -181,10 +236,33 @@ export default class BattleScene extends Phaser.Scene {
             this.redTeam.add(redUnit);
         }
 
+        // [Camera] 카메라 설정 (리더 추적 + 데드존)
         if(this.playerUnit && this.playerUnit.active) {
             this.blueTeam.getChildren().forEach(unit => {
                 if (unit.active) unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
             });
+
+            // 1. 카메라 월드 경계 설정
+            this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
+            
+            // 2. 리더 추적 시작
+            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+
+            // 3. 데드존 설정 (화면의 30% ~ 70% 영역 안에서는 카메라 이동 X)
+            // 즉, 데드존의 크기는 화면 크기의 40% (0.7 - 0.3 = 0.4)
+            const deadzoneW = this.cameras.main.width * 0.4;
+            const deadzoneH = this.cameras.main.height * 0.4;
+            this.cameras.main.setDeadzone(deadzoneW, deadzoneH);
+        }
+
+        // [Physics] 충돌 설정
+        if (wallLayer) {
+            this.physics.add.collider(this.blueTeam, wallLayer);
+            this.physics.add.collider(this.redTeam, wallLayer);
+        }
+        if (blockLayer) {
+            this.physics.add.collider(this.blueTeam, blockLayer);
+            this.physics.add.collider(this.redTeam, blockLayer);
         }
 
         this.physics.add.collider(this.blueTeam, this.redTeam, this.handleCombat, null, this);
@@ -193,20 +271,23 @@ export default class BattleScene extends Phaser.Scene {
 
         this.createFormationUI();
 
-        this.startButton = this.add.text(800, 550, 'CLICK TO START', {
+        // [UI] Start Button
+        this.startButton = this.add.text(this.cameras.main.centerX, 550, 'CLICK TO START', {
             fontSize: '50px', fill: '#ffffff', backgroundColor: '#00aa00', padding: { x: 20, y: 15 },
             fontStyle: 'bold'
-        }).setOrigin(0.5).setInteractive();
+        }).setOrigin(0.5).setInteractive().setScrollFactor(0); 
 
         this.startButton.on('pointerdown', () => this.handleStartBattle());
 
-        this.infoText = this.add.text(800, 50, '', {
-            fontSize: '24px', fill: '#ffffff'
-        }).setOrigin(0.5).setVisible(false);
+        // [UI] Info Text
+        this.infoText = this.add.text(this.cameras.main.centerX, 50, '', {
+            fontSize: '24px', fill: '#ffffff', stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5).setVisible(false).setScrollFactor(0); 
 
-        this.battleText = this.add.text(800, 600, 'FIGHT!', {
+        // [UI] Battle Text
+        this.battleText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 'FIGHT!', {
             fontSize: '80px', fill: '#ff0000', fontStyle: 'bold', stroke: '#ffffff', strokeThickness: 8
-        }).setOrigin(0.5).setAlpha(0);
+        }).setOrigin(0.5).setAlpha(0).setScrollFactor(0); 
     }
 
     createFormationUI() {
@@ -401,9 +482,9 @@ export default class BattleScene extends Phaser.Scene {
         this.isGameOver = true;
         this.infoText.setText(message).setStyle({ fontSize: '60px', fill: color });
         this.physics.pause();
-        const restartText = this.add.text(800, 400, 'Click to Restart', {
+        const restartText = this.add.text(this.cameras.main.centerX, 400, 'Click to Restart', {
             fontSize: '40px', fill: '#ffffff', backgroundColor: '#000000', padding: { x: 20, y: 10 }
-        }).setOrigin(0.5).setInteractive();
+        }).setOrigin(0.5).setInteractive().setScrollFactor(0); 
         restartText.on('pointerdown', () => this.scene.restart());
     }
 }

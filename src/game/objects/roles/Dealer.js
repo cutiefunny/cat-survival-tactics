@@ -6,8 +6,6 @@ export default class Dealer extends Unit {
         stats.role = 'Dealer';
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
 
-        // [CHANGE] 딜러는 이제 빨간색 (Red)
-        if (!isLeader && team === 'blue') this.setTint(0xffaaaa);
     }
 
     updateAI(delta) {
