@@ -1,16 +1,24 @@
 import Phaser from 'phaser';
-import Unit from '../objects/Unit';
+
+// [Refactoring] 역할별 클래스 Import
+import Unit from '../objects/Unit'; // 기본 클래스 (Leader 및 Fallback용)
+import Shooter from '../objects/roles/Shooter';
+import Runner from '../objects/roles/Runner';
+import Tanker from '../objects/roles/Tanker';
+import Dealer from '../objects/roles/Dealer';
+import Normal from '../objects/roles/Normal';
+
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
-// [기본값 확장] AI 설정 추가
+// [기본값] 설정
 const DEFAULT_CONFIG = {
-    gameSettings: { unitCount: 5, spawnGap: 100, startY: 300 },
-    // [NEW] AI 세부 설정
+    gameSettings: { unitCount: 6, spawnGap: 90, startY: 250 },
     aiSettings: {
-        common: { thinkTimeMin: 150, thinkTimeVar: 100 }, // 반응 속도 (ms)
-        runner: { ambushDistance: 60, fleeDuration: 1500 }, // 암살 거리, 도망 시간
-        dealer: { safeDistance: 150, followDistance: 50 }   // 도망 거리, 탱커 호위 거리
+        common: { thinkTimeMin: 150, thinkTimeVar: 100 }, 
+        runner: { ambushDistance: 60, fleeDuration: 1500 }, 
+        dealer: { safeDistance: 150, followDistance: 50 },
+        shooter: { attackRange: 250, kiteDistance: 200 } 
     },
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
@@ -18,7 +26,8 @@ const DEFAULT_CONFIG = {
         { role: 'Runner', hp: 100, attackPower: 12, moveSpeed: 140 },
         { role: 'Dealer', hp: 90, attackPower: 40, moveSpeed: 70 },
         { role: 'Tanker', hp: 400, attackPower: 10, moveSpeed: 40 },
-        { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 }
+        { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 },
+        { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250 } 
     ]
 };
 
@@ -47,12 +56,25 @@ export default class BattleScene extends Phaser.Scene {
             const docRef = doc(db, "settings", "tacticsConfig");
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-                console.log("✅ Config Loaded:", docSnap.data());
-                // DB에 aiSettings가 없을 경우를 대비해 병합
-                config = { ...DEFAULT_CONFIG, ...docSnap.data() };
-                if (!config.aiSettings) config.aiSettings = DEFAULT_CONFIG.aiSettings;
+                console.log("✅ Config Loaded from DB:", docSnap.data());
+                const dbData = docSnap.data();
+                config = { ...DEFAULT_CONFIG, ...dbData };
+
+                if (dbData.aiSettings) {
+                    config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
+                } else {
+                    config.aiSettings = DEFAULT_CONFIG.aiSettings;
+                }
+
+                if (dbData.blueTeamRoles && dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
+                    const missingRoles = DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length);
+                    config.blueTeamRoles = [...config.blueTeamRoles, ...missingRoles];
+                    console.log("⚠️ Merged missing roles from local config:", missingRoles);
+                }
             }
-        } catch (error) { console.error("❌ Config Error:", error); }
+        } catch (error) { 
+            console.error("❌ Config Error:", error); 
+        }
 
         if (this.loadingText && this.loadingText.active) this.loadingText.destroy();
         this.startGame(config);
@@ -82,8 +104,32 @@ export default class BattleScene extends Phaser.Scene {
         const { unitCount, startY, spawnGap } = config.gameSettings;
         const redStats = config.redTeamStats;
         const blueRoles = config.blueTeamRoles;
-        // [NEW] AI 설정 추출
-        const aiConfig = config.aiSettings;
+        const aiConfig = config.aiSettings; // 각 유닛 생성 시 전달
+
+        // [Factory Method] 역할에 맞는 클래스 생성
+        const createUnit = (scene, x, y, texture, team, targetGroup, stats, isLeader) => {
+            // Stats에 AI 설정도 포함해서 넘겨줌 (자식 클래스에서 사용)
+            stats.aiConfig = aiConfig; 
+            
+            const role = stats.role;
+            switch (role) {
+                case 'Shooter': return new Shooter(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                case 'Runner':  return new Runner(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                case 'Tanker':  return new Tanker(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                case 'Dealer':  return new Dealer(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                case 'Normal':  return new Normal(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                case 'Leader':  
+                    // 리더는 보통 Normal 기반이나 Unit 기반 (여기선 Unit)
+                    return new Unit(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                default: 
+                    // 적(RedTeam)의 경우 'NormalDog' 같은 역할명이 올 수 있음 -> Normal로 처리 or Unit
+                    if (role.includes('Dog')) {
+                         // 적 전용 클래스가 필요하면 만들어야 하지만 일단 Normal로 취급
+                         return new Normal(scene, x, y, texture, team, targetGroup, stats, isLeader);
+                    }
+                    return new Unit(scene, x, y, texture, team, targetGroup, stats, isLeader);
+            }
+        };
 
         const leaderIndex = 0;
 
@@ -94,13 +140,14 @@ export default class BattleScene extends Phaser.Scene {
             const isLeader = (i === leaderIndex);
 
             const roleStats = blueRoles[i % blueRoles.length];
-            // [CHANGE] AI Config 전달
-            let blueUnit = new Unit(this, bx, by, 'blueCat', 'blue', this.redTeam, roleStats, aiConfig, isLeader);
+            
+            // 팩토리 메서드 사용하여 생성
+            const blueUnit = createUnit(this, bx, by, 'blueCat', 'blue', this.redTeam, roleStats, isLeader);
             if (isLeader) this.playerUnit = blueUnit;
             this.blueTeam.add(blueUnit);
 
             const currentRedStats = { ...redStats, role: redStats.role || 'NormalDog' };
-            const redUnit = new Unit(this, rx, by, 'redDog', 'red', this.blueTeam, currentRedStats, aiConfig, false);
+            const redUnit = createUnit(this, rx, by, 'redDog', 'red', this.blueTeam, currentRedStats, false);
             this.redTeam.add(redUnit);
         }
 
@@ -108,10 +155,9 @@ export default class BattleScene extends Phaser.Scene {
             if (unit.active) unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
         });
 
-        // [ROLLBACK] 아군끼리도 충돌 (길막 허용)
         this.physics.add.collider(this.blueTeam, this.redTeam, this.handleCombat, null, this);
-        this.physics.add.collider(this.blueTeam, this.blueTeam); // 아군 충돌 복구
-        this.physics.add.collider(this.redTeam, this.redTeam);   // 아군 충돌 복구
+        this.physics.add.collider(this.blueTeam, this.blueTeam);
+        this.physics.add.collider(this.redTeam, this.redTeam);
 
         this.infoText = this.add.text(800, 100, 'Move Leader! Squad will follow.', {
             fontSize: '32px', fill: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 6
@@ -138,10 +184,27 @@ export default class BattleScene extends Phaser.Scene {
         const redCount = this.redTeam.countActive();
 
         if (this.battleStarted) {
+            this.handleRangedAttacks(); 
+
             if (blueCount === 0) this.finishGame("Red Team Wins!", '#ff4444');
             else if (redCount === 0) this.finishGame("Blue Team Wins!", '#4488ff');
             else this.infoText.setText(`Blue: ${blueCount} vs Red: ${redCount}`);
         }
+    }
+
+    handleRangedAttacks() {
+        const allUnits = [...this.blueTeam.getChildren(), ...this.redTeam.getChildren()];
+        allUnits.forEach(unit => {
+            if (unit.active && unit.attackRange > 60) {
+                const target = unit.currentTarget;
+                if (target && target.active) {
+                    const dist = Phaser.Math.Distance.Between(unit.x, unit.y, target.x, target.y);
+                    if (dist <= unit.attackRange) {
+                        this.performAttack(unit, target);
+                    }
+                }
+            }
+        });
     }
 
     checkBattleDistance() {
@@ -173,8 +236,6 @@ export default class BattleScene extends Phaser.Scene {
 
     handleCombat(unit1, unit2) {
         if (this.isGameOver || !this.battleStarted) return;
-        
-        // 같은 팀끼리는 충돌은 하되, 공격은 안 함
         if (unit1.team === unit2.team) return;
 
         this.performAttack(unit1, unit2);
@@ -183,14 +244,31 @@ export default class BattleScene extends Phaser.Scene {
 
     performAttack(attacker, defender) {
         if (!attacker.active || !defender.active) return;
+        
         const now = this.time.now;
         if (now > attacker.lastAttackTime + attacker.attackCooldown) {
             defender.takeDamage(attacker.attackPower);
             attacker.lastAttackTime = now;
-            attacker.triggerAttackVisuals();
+            attacker.triggerAttackVisuals(); 
+            
+            // [VISUAL] 슈터 공격 시 흔들림
+            if (attacker.role === 'Shooter') {
+                if (defender.active) {
+                    this.tweens.add({
+                        targets: defender,
+                        x: '+=3', 
+                        duration: 30,
+                        yoyo: true,
+                        repeat: 3,
+                        ease: 'Sine.easeInOut'
+                    });
+                }
+            }
+            
+            // 넉백
             if (!defender.active || !defender.body) return;
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
-            const knockbackForce = 40;
+            const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
             defender.body.velocity.x += Math.cos(angle) * knockbackForce;
             defender.body.velocity.y += Math.sin(angle) * knockbackForce;
         }
