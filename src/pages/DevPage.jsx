@@ -5,10 +5,10 @@ import { db } from "../firebaseConfig";
 
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
-  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, attackCooldown: 500 },
+  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
   Runner: { hp: 100, attackPower: 12, moveSpeed: 140, attackCooldown: 400 },
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
-  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800 },
+  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
@@ -38,11 +38,17 @@ const DevPage = () => {
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        console.log("Loaded:", data);
-        
         const merged = { ...DEFAULT_CONFIG, ...data };
         if (data.aiSettings) merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
-        if (!data.roleDefinitions) merged.roleDefinitions = DEFAULT_ROLE_DEFS;
+        if (data.roleDefinitions) {
+            Object.keys(DEFAULT_ROLE_DEFS).forEach(role => {
+                if(merged.roleDefinitions[role]) {
+                    merged.roleDefinitions[role] = { ...DEFAULT_ROLE_DEFS[role], ...merged.roleDefinitions[role] };
+                }
+            });
+        } else {
+            merged.roleDefinitions = DEFAULT_ROLE_DEFS;
+        }
 
         const bCount = merged.gameSettings.blueCount || 6;
         const rCount = merged.gameSettings.redCount || 6;
@@ -126,55 +132,43 @@ const DevPage = () => {
   const renderUnitRow = (unit, index, teamType) => {
     return (
         <div style={{ 
+            // [CRITICAL CHANGE] display: flex 유지하되, 부모 컨테이너가 block이면 
+            // div는 기본적으로 width: 100%를 가지므로 세로로 쌓임.
             display: "flex", 
             alignItems: "center", 
             background: teamType === 'blue' ? "#112233" : "#331111", 
             padding: "8px 12px", 
             borderRadius: "4px", 
             borderLeft: `4px solid ${teamType === 'blue' ? '#88ccff' : '#ff8888'}`,
-            marginBottom: "6px"
+            marginBottom: "6px",
+            width: "100%",      // 가로 꽉 채우기
+            boxSizing: "border-box"
         }}>
-            {/* 1. Index */}
-            <span style={{ width: "30px", color: "#666", fontWeight: "bold" }}>#{index+1}</span>
-            
-            {/* 2. Role Selector */}
+            <span style={{ minWidth: "25px", color: "#666", fontWeight: "bold" }}>#{index+1}</span>
             <select 
                 value={unit.role} 
                 onChange={(e) => handleRoleChange(teamType, index, e.target.value)}
                 style={{ 
-                    padding: "5px", 
-                    borderRadius: "4px", 
+                    padding: "5px", borderRadius: "4px", 
                     border: `1px solid ${teamType === 'blue' ? '#446688' : '#884444'}`, 
                     background: teamType === 'blue' ? "#001122" : "#220000", 
-                    color: "white", 
-                    width: "140px", 
-                    marginRight: "20px",
-                    fontWeight: "bold"
+                    color: "white", width: "110px", marginRight: "10px", fontWeight: "bold", fontSize: "0.9em",
+                    flexShrink: 0
                 }}
             >
                 {Object.keys(config.roleDefinitions).map(role => (
                     <option value={role}>{role}</option>
                 ))}
             </select>
-
-            {/* 3. Stats Display (One Long Row) */}
-            <div style={{ display: "flex", gap: "20px", fontSize: "0.95em", color: "#ccc", alignItems: "center", flex: 1, whiteSpace: "nowrap", overflowX: "auto" }}>
-                <span title="Health" style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                    ❤️ <span style={{color: "#fff"}}>{unit.hp}</span>
-                </span>
-                <span title="Attack Power" style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                    ⚔️ <span style={{color: "#ffca28"}}>{unit.attackPower}</span>
-                </span>
-                <span title="Move Speed" style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                    👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span>
-                </span>
-                <span title="Attack Cooldown" style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                    ⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown || 500}ms</span>
-                </span>
-                {/* Optional Stats */}
-                {unit.attackRange && (
-                    <span title="Attack Range" style={{display: "flex", alignItems: "center", gap: "5px", color: "#d1c4e9"}}>
-                        🎯 <span style={{color: "#e040fb"}}>{unit.attackRange}</span>
+            <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
+                <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
+                <span title="Attack Power" style={{whiteSpace: "nowrap"}}>⚔️ <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
+                <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
+                <span title="Attack Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
+                
+                {unit.skillCooldown > 0 && (
+                    <span title="Skill Info" style={{color: "#ff88ff", borderLeft: "1px solid #555", paddingLeft: "10px", whiteSpace: "nowrap"}}>
+                        ✨ CD:{unit.skillCooldown/1000}s R:{unit.skillRange}
                     </span>
                 )}
             </div>
@@ -192,7 +186,7 @@ const DevPage = () => {
 
       <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "20px", "margin-top": "30px" }}>
         
-        {/* --- 1. Global Settings --- */}
+        {/* --- Global & AI Settings --- */}
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>⚙️ Global Settings</h2>
           <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap" }}>
@@ -201,73 +195,50 @@ const DevPage = () => {
           </div>
         </section>
 
-        {/* --- 2. AI Settings --- */}
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>🧠 AI Parameters</h2>
           <div style={{display: "flex", gap: "20px"}}>
-             <div>
-                <h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter AI</h4>
-                <div style={{ display: "flex", gap: "5px" }}>
-                  <label>Kite Dist: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label>
-                </div>
-             </div>
-             <div>
-                <h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner AI</h4>
-                <div style={{ display: "flex", gap: "5px" }}>
-                   <label>Ambush Dist: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label>
-                </div>
-             </div>
+             <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
+             <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
           </div>
         </section>
 
-        {/* --- 3. Class Base Stats Editor --- */}
+        {/* --- Class Base Stats & Skills --- */}
         <section style={{ background: "#222", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #444" }}>
-            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats</h2>
-            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(280px, 1fr))", gap: "15px" }}>
+            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Skills</h2>
+            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(300px, 1fr))", gap: "15px" }}>
                 {Object.keys(config.roleDefinitions).map(role => (
-                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : '#aaa'}` }}>
+                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Leader' ? '#ffd700' : '#aaa'}` }}>
                         <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role}</h4>
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>HP
-                                <input type="number" value={config.roleDefinitions[role].hp} 
-                                    onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))}
-                                    style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
-                            </label>
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>ATK
-                                <input type="number" value={config.roleDefinitions[role].attackPower} 
-                                    onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))}
-                                    style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
-                            </label>
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>Speed
-                                <input type="number" value={config.roleDefinitions[role].moveSpeed} 
-                                    onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))}
-                                    style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
-                            </label>
-                            <label style={{fontSize: "0.8em", color:"#aaffaa"}}>CD(ms)
-                                <input type="number" value={config.roleDefinitions[role].attackCooldown || 500} 
-                                    onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))}
-                                    style={{ width: "100%", background: "#112211", color: "#afa", border: "1px solid #484" }} />
-                            </label>
-
+                            <label style={{fontSize: "0.8em", color:"#ccc"}}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            <label style={{fontSize: "0.8em", color:"#ccc"}}>ATK<input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            <label style={{fontSize: "0.8em", color:"#aaffaa"}}>CD<input type="number" value={config.roleDefinitions[role].attackCooldown || 500} onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} style={{ width: "100%", background: "#112211", color: "#afa", border: "1px solid #484" }} /></label>
+                            
+                            {config.roleDefinitions[role].skillCooldown !== undefined && (
+                                <>
+                                    <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>
+                                    <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.CD<input type="number" value={config.roleDefinitions[role].skillCooldown} onInput={(e) => handleStatChange(role, "skillCooldown", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
+                                    <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Range<input type="number" value={config.roleDefinitions[role].skillRange} onInput={(e) => handleStatChange(role, "skillRange", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
+                                    {config.roleDefinitions[role].skillDuration !== undefined && <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Dur<input type="number" value={config.roleDefinitions[role].skillDuration} onInput={(e) => handleStatChange(role, "skillDuration", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>}
+                                    {config.roleDefinitions[role].skillEffect !== undefined && <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Eff(%)<input type="number" value={config.roleDefinitions[role].skillEffect} onInput={(e) => handleStatChange(role, "skillEffect", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>}
+                                </>
+                            )}
                             {config.roleDefinitions[role].attackRange !== undefined && (
-                                <label style={{fontSize: "0.8em", color:"#d8f", gridColumn: "span 2"}}>Range
-                                    <input type="number" value={config.roleDefinitions[role].attackRange} 
-                                        onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))}
-                                        style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} />
-                                </label>
+                                <label style={{fontSize: "0.8em", color:"#d8f", gridColumn: "span 2", marginTop: "5px"}}>Range<input type="number" value={config.roleDefinitions[role].attackRange} onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
                             )}
                         </div>
                     </div>
                 ))}
             </div>
         </section>
-      
-      <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "20px" }}>
+
         {/* --- 4. Blue Team Composition --- */}
         <section style={{ background: "#223344", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
-            <h2 style={{ color: "#88ccff", margin: 0 }}>🛡️ Blue Team Composition</h2>
-            <label>Unit Count: 
+            <h2 style={{ color: "#88ccff", margin: 0 }}>🛡️ Blue Team</h2>
+            <label>Count: 
                 <input type="number" min="1" max="12" 
                     value={config.gameSettings.blueCount} 
                     onInput={(e) => handleCountChange('blue', parseInt(e.target.value))}
@@ -275,7 +246,8 @@ const DevPage = () => {
                 />
             </label>
           </div>
-          <div>
+          {/* [CRITICAL FIX] display: block으로 변경하여 확실하게 세로 배치 강제 */}
+          <div style={{ display: "block" }}>
             {config.blueTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'blue'))}
           </div>
         </section>
@@ -283,8 +255,8 @@ const DevPage = () => {
         {/* --- 5. Red Team Composition --- */}
         <section style={{ background: "#442222", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
-            <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team Composition</h2>
-            <label>Unit Count: 
+            <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team</h2>
+            <label>Count: 
                 <input type="number" min="1" max="12"
                     value={config.gameSettings.redCount} 
                     onInput={(e) => handleCountChange('red', parseInt(e.target.value))}
@@ -292,11 +264,11 @@ const DevPage = () => {
                 />
             </label>
           </div>
-          <div>
+          {/* [CRITICAL FIX] display: block으로 변경하여 확실하게 세로 배치 강제 */}
+          <div style={{ display: "block" }}>
             {config.redTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'red'))}
           </div>
         </section>
-      </div>
 
       </div>
 

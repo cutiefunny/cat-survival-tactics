@@ -13,8 +13,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
-        this.baseAttackPower = stats.attackPower;
-        this.attackPower = stats.attackPower;
+        
+        // 버프 계산용 기본 공격력
+        this.baseAttackPower = stats.attackPower; 
+        this.attackPower = this.baseAttackPower;
+        
         this.moveSpeed = stats.moveSpeed;
         this.attackRange = stats.attackRange || 50;
         this.aiConfig = stats.aiConfig || {};
@@ -23,9 +26,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
         
-        // [NEW] 스킬 관련 설정
-        this.skillMaxCooldown = 0; // 자식 클래스에서 설정 (ms)
-        this.skillTimer = 0;       // 현재 남은 쿨타임
+        // [CHANGE] Config 스탯에서 스킬 정보 로드
+        this.skillMaxCooldown = stats.skillCooldown || 0; 
+        this.skillRange = stats.skillRange || 0;
+        this.skillDuration = stats.skillDuration || 0;
+        this.skillEffect = stats.skillEffect || 0; 
+
+        this.skillTimer = 0;       
         
         this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
@@ -42,7 +49,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.initVisuals();
         this.hpBar = scene.add.graphics();
 
-        // [NEW] 전투 중 유닛 클릭 시 스킬 발동
         this.on('pointerdown', () => {
             if (this.scene.battleStarted && this.team === 'blue') {
                 this.tryUseSkill();
@@ -50,22 +56,20 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         });
     }
 
-    // [NEW] 스킬 발동 시도
     tryUseSkill() {
         if (this.skillTimer <= 0 && this.skillMaxCooldown > 0) {
-            this.performSkill(); // 자식 클래스에서 구현
+            this.performSkill(); 
             this.skillTimer = this.skillMaxCooldown;
-            // 스킬 사용 시각적 피드백 (흰색 플래시)
             this.setTint(0xffffff);
-            this.scene.time.delayedCall(100, () => this.resetVisuals());
+            // resetVisuals는 자식 클래스에서 필요 시 호출
         } else if (this.skillTimer > 0) {
             console.log(`⏳ Skill Cooldown: ${(this.skillTimer/1000).toFixed(1)}s`);
         }
     }
 
-    // [NEW] 자식 클래스에서 Override 할 메서드
     performSkill() {
         console.log(`${this.role} has no skill implementation.`);
+        this.scene.time.delayedCall(200, () => this.resetVisuals());
     }
 
     initVisuals() {
@@ -86,7 +90,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.setDisplaySize(this.baseSize, this.baseSize);
         if (this.body) this.body.setCircle(50, 0, 0);
         
-        // 색상 복구 (기존 로직 유지)
         if (this.team === 'blue') {
             if (this.isLeader) this.setTint(0xffffaa);
             else if (this.role === 'Shooter') this.setTint(0x22ff22);
@@ -102,7 +105,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
-        // [NEW] 스킬 쿨타임 감소
         if (this.skillTimer > 0) {
             this.skillTimer -= delta;
         }
@@ -160,7 +162,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
             this.updateFlipX();
         } else {
-            this.setVelocity(0, 0);
+            this.followLeader(); // 이전에 추가한 포메이션 팔로우 로직 유지
         }
     }
 
@@ -284,9 +286,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     updateUI() {
         this.hpBar.setPosition(this.x, this.y - (this.baseSize / 2) + 20);
-        
-        // [NEW] 쿨타임 표시바 (옵션)
-        // 만약 필요하면 HP바 아래에 파란색으로 쿨타임 게이지 추가 가능
     }
 
     updateAnimation() {
@@ -373,7 +372,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset.y = this.y - ly;
     }
     
-    // [NEW] Follow Leader Logic (from previous step)
     followLeader() {
         if (!this.scene.playerUnit || !this.scene.playerUnit.active) {
             this.setVelocity(0, 0);
