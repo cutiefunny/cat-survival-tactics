@@ -1,6 +1,7 @@
 import { createSignal, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+// [New] collection, getDocs, query, orderBy, deleteDoc 추가
+import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
 // [설정] 역할별 기본 스탯 정의
@@ -20,7 +21,7 @@ const DEFAULT_CONFIG = {
     common: { thinkTimeMin: 150, thinkTimeVar: 100 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
     dealer: { safeDistance: 150, followDistance: 50 },
-    shooter: { attackRange: 250, kiteDistance: 200 }
+    shooter: { attackRange: 250, kiteDistance: 200 } 
   },
   roleDefinitions: DEFAULT_ROLE_DEFS,
   redTeamRoles: [],
@@ -30,8 +31,12 @@ const DEFAULT_CONFIG = {
 const DevPage = () => {
   const [config, setConfig] = createStore(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
   const [status, setStatus] = createSignal("Loading...");
+  
+  // [New] 피드백 목록 상태
+  const [feedbacks, setFeedbacks] = createSignal([]);
 
   onMount(async () => {
+    // 1. 설정 로드
     try {
       const docRef = doc(db, "settings", "tacticsConfig");
       const docSnap = await getDoc(docRef);
@@ -71,7 +76,33 @@ const DevPage = () => {
       console.error(err);
       setStatus("Error Loading Config ❌");
     }
+
+    // 2. [New] 피드백 로드
+    fetchFeedbacks();
   });
+
+  // [New] 피드백 불러오기 함수
+  const fetchFeedbacks = async () => {
+      try {
+        const q = query(collection(db, "feedbacks"), orderBy("timestamp", "desc"));
+        const snapshot = await getDocs(q);
+        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setFeedbacks(list);
+      } catch (err) {
+          console.error("Error fetching feedbacks:", err);
+      }
+  };
+
+  // [New] 피드백 삭제 함수
+  const handleDeleteFeedback = async (id) => {
+      if(!confirm("Delete this feedback?")) return;
+      try {
+          await deleteDoc(doc(db, "feedbacks", id));
+          setFeedbacks(prev => prev.filter(f => f.id !== id));
+      } catch(err) {
+          console.error("Failed to delete feedback:", err);
+      }
+  };
 
   const syncArrayLength = (currentArray, targetCount, defaultRole, roleDefs) => {
     const newArray = [...currentArray];
@@ -132,8 +163,6 @@ const DevPage = () => {
   const renderUnitRow = (unit, index, teamType) => {
     return (
         <div style={{ 
-            // [CRITICAL CHANGE] display: flex 유지하되, 부모 컨테이너가 block이면 
-            // div는 기본적으로 width: 100%를 가지므로 세로로 쌓임.
             display: "flex", 
             alignItems: "center", 
             background: teamType === 'blue' ? "#112233" : "#331111", 
@@ -141,7 +170,7 @@ const DevPage = () => {
             borderRadius: "4px", 
             borderLeft: `4px solid ${teamType === 'blue' ? '#88ccff' : '#ff8888'}`,
             marginBottom: "6px",
-            width: "100%",      // 가로 꽉 채우기
+            width: "100%",      
             boxSizing: "border-box"
         }}>
             <span style={{ minWidth: "25px", color: "#666", fontWeight: "bold" }}>#{index+1}</span>
@@ -246,7 +275,6 @@ const DevPage = () => {
                 />
             </label>
           </div>
-          {/* [CRITICAL FIX] display: block으로 변경하여 확실하게 세로 배치 강제 */}
           <div style={{ display: "block" }}>
             {config.blueTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'blue'))}
           </div>
@@ -264,10 +292,35 @@ const DevPage = () => {
                 />
             </label>
           </div>
-          {/* [CRITICAL FIX] display: block으로 변경하여 확실하게 세로 배치 강제 */}
           <div style={{ display: "block" }}>
             {config.redTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'red'))}
           </div>
+        </section>
+
+        {/* --- [New] Feedback Viewer --- */}
+        <section style={{ background: "#333", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #666" }}>
+            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <h2 style={{ color: "#00ffcc", margin: 0 }}>📢 User Feedbacks</h2>
+                <button onClick={fetchFeedbacks} style={{padding: "5px 10px", cursor: "pointer"}}>Refresh</button>
+            </div>
+            <div style={{ marginTop: "15px", maxHeight: "300px", overflowY: "auto", background: "#222", padding: "10px" }}>
+                {feedbacks().length === 0 ? <div style={{color: "#888"}}>No feedbacks yet.</div> : (
+                    feedbacks().map(item => (
+                        <div style={{ 
+                            background: "#444", padding: "10px", marginBottom: "8px", borderRadius: "4px",
+                            display: "flex", justifyContent: "space-between", alignItems: "center"
+                        }}>
+                            <div>
+                                <div style={{color: "#fff", fontWeight: "bold"}}>{item.message}</div>
+                                <div style={{color: "#aaa", fontSize: "0.8em"}}>{new Date(item.timestamp).toLocaleString()}</div>
+                            </div>
+                            <button onClick={() => handleDeleteFeedback(item.id)} style={{
+                                background: "#ff4444", color: "white", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer"
+                            }}>Delete</button>
+                        </div>
+                    ))
+                )}
+            </div>
         </section>
 
       </div>

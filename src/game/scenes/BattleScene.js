@@ -9,7 +9,7 @@ import Dealer from '../objects/roles/Dealer';
 import Normal from '../objects/roles/Normal';
 import Leader from '../objects/roles/Leader';
 
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
 // [Map Assets] 맵 데이터와 타일셋 이미지 Import
@@ -106,19 +106,13 @@ export default class BattleScene extends Phaser.Scene {
         // [Map] 맵 생성
         const map = this.make.tilemap({ key: 'stage1' });
         
-        console.log("🗺️ Map Loaded. Available Layers:", map.layers.map(l => l.name));
-        console.log("🗺️ Map Tilesets:", map.tilesets.map(t => t.name));
-
-        // [Map] 타일셋 연결 (로그 기반 이름 매핑)
+        // [Map] 타일셋 연결
         const tilesetGrass = map.addTilesetImage('tileser_nature', 'tiles_grass');
         const tilesetPlant = map.addTilesetImage('tileset_trees', 'tiles_plant');
         
         const tilesets = [];
         if (tilesetGrass) tilesets.push(tilesetGrass);
-        else console.warn("⚠️ Tileset 'tileser_nature' (Grass) load failed!");
-        
         if (tilesetPlant) tilesets.push(tilesetPlant);
-        else console.warn("⚠️ Tileset 'tileset_trees' (Tree) load failed!");
 
         // [Map] 레이어 생성
         const groundLayer = map.createLayer('Ground', tilesets, 0, 0);
@@ -236,20 +230,15 @@ export default class BattleScene extends Phaser.Scene {
             this.redTeam.add(redUnit);
         }
 
-        // [Camera] 카메라 설정 (리더 추적 + 데드존)
+        // [Camera] 카메라 설정
         if(this.playerUnit && this.playerUnit.active) {
             this.blueTeam.getChildren().forEach(unit => {
                 if (unit.active) unit.setFormationOffset(this.playerUnit.x, this.playerUnit.y);
             });
 
-            // 1. 카메라 월드 경계 설정
             this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
-            
-            // 2. 리더 추적 시작
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
 
-            // 3. 데드존 설정 (화면의 30% ~ 70% 영역 안에서는 카메라 이동 X)
-            // 즉, 데드존의 크기는 화면 크기의 40% (0.7 - 0.3 = 0.4)
             const deadzoneW = this.cameras.main.width * 0.4;
             const deadzoneH = this.cameras.main.height * 0.4;
             this.cameras.main.setDeadzone(deadzoneW, deadzoneH);
@@ -480,11 +469,88 @@ export default class BattleScene extends Phaser.Scene {
 
     finishGame(message, color) {
         this.isGameOver = true;
-        this.infoText.setText(message).setStyle({ fontSize: '60px', fill: color });
         this.physics.pause();
-        const restartText = this.add.text(this.cameras.main.centerX, 400, 'Click to Restart', {
-            fontSize: '40px', fill: '#ffffff', backgroundColor: '#000000', padding: { x: 20, y: 10 }
-        }).setOrigin(0.5).setInteractive().setScrollFactor(0); 
-        restartText.on('pointerdown', () => this.scene.restart());
+        
+        if(this.infoText) this.infoText.setVisible(false);
+
+        const cx = this.cameras.main.centerX;
+        const cy = this.cameras.main.centerY;
+
+        // 1. Dimmer
+        this.add.rectangle(cx, cy, this.cameras.main.width, this.cameras.main.height, 0x000000, 0.7)
+            .setScrollFactor(0).setDepth(100);
+
+        // 2. Modal Window
+        this.add.rectangle(cx, cy, 600, 500, 0x222222)
+            .setStrokeStyle(4, 0xffffff)
+            .setScrollFactor(0).setDepth(101);
+
+        // 3. Message
+        this.add.text(cx, cy - 180, message, {
+            fontSize: '50px', fill: color, fontStyle: 'bold'
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(102);
+
+        // 4. Restart Button
+        const restartBtn = this.add.text(cx, cy - 80, 'Restart Game', {
+            fontSize: '32px', fill: '#ffffff', backgroundColor: '#00aa00', padding: { x: 20, y: 15 }
+        }).setOrigin(0.5).setInteractive().setScrollFactor(0).setDepth(102);
+
+        restartBtn.on('pointerdown', () => {
+            if (this.feedbackDOM) this.feedbackDOM.destroy();
+            this.scene.restart();
+        });
+
+        // 5. Feedback UI (Textarea + Button)
+        const div = document.createElement('div');
+        div.style = "display: flex; flex-direction: column; align-items: center; gap: 10px;";
+        div.innerHTML = `
+            <textarea name="feedback" placeholder="Leave your feedback..." 
+                style="font-size: 18px; padding: 10px; width: 400px; height: 120px; 
+                border-radius: 5px; border: none; outline: none; resize: none; font-family: monospace;"></textarea>
+            <button name="submitBtn" 
+                style="font-size: 20px; padding: 10px 20px; background-color: #444444; color: white; border: 1px solid white; cursor: pointer; border-radius: 5px;">
+                Submit Feedback
+            </button>
+        `;
+
+        this.feedbackDOM = this.add.dom(cx, cy + 100, div)
+            .setScrollFactor(0)
+            .setDepth(102);
+
+        // [FIX] 스페이스바 입력 시 Phaser가 가로채지 않도록 이벤트 전파 중단
+        const textarea = div.querySelector('textarea');
+        if(textarea) {
+            textarea.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+            });
+        }
+            
+        this.feedbackDOM.addListener('click');
+        this.feedbackDOM.on('click', async (event) => {
+            if (event.target.name === 'submitBtn') {
+                const input = div.querySelector('textarea[name="feedback"]');
+                if (input && input.value.trim() !== "") {
+                    const feedbackMsg = input.value;
+                    try {
+                        await addDoc(collection(db, "feedbacks"), {
+                            message: feedbackMsg,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        console.log(`[Feedback Saved] ${feedbackMsg}`);
+                        
+                        input.value = '';
+                        input.placeholder = "Saved to DB! Thanks!";
+                        event.target.innerText = "Sent!";
+                        event.target.style.backgroundColor = "#00aa00";
+                        event.target.disabled = true;
+                    } catch (e) {
+                        console.error("Error saving feedback:", e);
+                        event.target.innerText = "Error!";
+                        event.target.style.backgroundColor = "#ff0000";
+                    }
+                }
+            }
+        });
     }
 }
