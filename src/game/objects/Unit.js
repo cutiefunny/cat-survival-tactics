@@ -9,7 +9,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.targetGroup = targetGroup;
         this.isLeader = isLeader;
         
-        // [설정] 기본 스탯 설정 (자식 클래스에서 오버라이딩 가능)
         this.role = stats.role || 'Unknown';
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
         this.maxHp = stats.hp;
@@ -17,29 +16,26 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.attackPower = stats.attackPower;
         this.moveSpeed = stats.moveSpeed;
         this.attackRange = stats.attackRange || 50;
-        this.aiConfig = stats.aiConfig || {}; // AI 개별 설정
+        this.aiConfig = stats.aiConfig || {};
 
         this.formationOffset = { x: 0, y: 0 };
-        this.attackCooldown = 500;
+        this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
         
-        this.thinkTimer = 0; // AI 생각 주기
+        this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
         this.currentTarget = null;
         this._tempVec = new Phaser.Math.Vector2();
-
+        
         scene.add.existing(this);
         scene.physics.add.existing(this);
+        
         this.setCollideWorldBounds(true);
         this.setBounce(0.2);
         this.setDrag(200);
 
-        // [Visual] 초기화
         this.initVisuals();
         this.hpBar = scene.add.graphics();
-        this.roleText = scene.add.text(x, y, this.role, { 
-            fontSize: '11px', fill: '#ffffff', stroke: '#000000', strokeThickness: 2, fontFamily: 'monospace'
-        }).setOrigin(0.5);
     }
 
     initVisuals() {
@@ -65,6 +61,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
+        // [SAFETY] 화면 이탈 방지 (로그 제거됨)
+        this.enforceWorldBounds();
+
         if (this.scene.isGameOver) {
             this.setVelocity(0, 0);
             if (this.anims.isPlaying) this.stop();
@@ -73,23 +72,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         if (this.fleeTimer > 0) this.fleeTimer -= delta;
 
-        // 리더(플레이어)는 키보드 조작
         if (this.isLeader) {
             this.updatePlayerMovement();
-        } 
-        // 나머지는 AI 동작
-        else if (this.scene.battleStarted) {
+        } else if (this.scene.battleStarted) {
             this.updateAI(delta);
-        } 
-        // 대기 상태 (포메이션 유지)
-        else {
+        } else {
             this.updateFormationFollow();
         }
         
         this.updateAnimation();
     }
 
-    // [AI] 자식 클래스에서 오버라이드할 메서드 (기본 동작: 가까운 적 돌진)
+    enforceWorldBounds() {
+        const bounds = this.scene.physics.world.bounds;
+        const padding = this.baseSize / 2; 
+
+        // [CLEAN] 로그 제거 및 좌표 강제 보정만 수행
+        const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
+        const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
+
+        if (this.x !== clampedX || this.y !== clampedY) {
+            this.x = clampedX;
+            this.y = clampedY;
+            this.setVelocity(0, 0); 
+        }
+    }
+
     updateAI(delta) {
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
@@ -107,16 +115,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    // --- 공통 Helper 함수들 (기존 UnitAI.js에서 이동) ---
-
     findNearestEnemy() {
-        let closestDist = Infinity;
+        let closestDistSq = Infinity;
         let closestTarget = null;
         const enemies = this.targetGroup.getChildren();
         for (let enemy of enemies) {
             if (enemy.active) {
                 const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
-                if (distSq < closestDist) { closestDist = distSq; closestTarget = enemy; }
+                if (distSq < closestDistSq) { closestDistSq = distSq; closestTarget = enemy; }
             }
         }
         return closestTarget;
@@ -135,16 +141,15 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     findEnemyEngagingAlly() {
-        // 아군(자신 제외)과 교전 중인 적 찾기
         const myGroup = (this.team === 'blue') ? this.scene.blueTeam : this.scene.redTeam;
         const allies = myGroup.getChildren();
         const enemies = this.targetGroup.getChildren();
-        
+        const engageDistSq = 10000; 
         for (let enemy of enemies) {
             if (!enemy.active) continue;
             for (let ally of allies) {
                 if (!ally.active || ally === this) continue;
-                if (Phaser.Math.Distance.Squared(enemy.x, enemy.y, ally.x, ally.y) < 10000) {
+                if (Phaser.Math.Distance.Squared(enemy.x, enemy.y, ally.x, ally.y) < engageDistSq) {
                     return enemy;
                 }
             }
@@ -153,14 +158,15 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     runTowardsSafety() {
-        // Separation 로직 (적과 아군 피하기)
         let forceX = 0, forceY = 0;
-        
-        // 적 회피
+        const enemyRepelDistSq = 300 * 300; 
+        const allyRepelDistSq = 80 * 80;    
+
         this.targetGroup.getChildren().forEach(enemy => {
             if (!enemy.active) return;
-            const dist = Phaser.Math.Distance.Between(this.x, this.y, enemy.x, enemy.y);
-            if (dist < 300) {
+            const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
+            if (distSq < enemyRepelDistSq) {
+                const dist = Math.sqrt(distSq);
                 const push = (300 - dist) / 300;
                 const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.x, this.y);
                 forceX += Math.cos(angle) * push * 2.0;
@@ -168,12 +174,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
         });
 
-        // 아군 길막 방지
         const myGroup = (this.team === 'blue') ? this.scene.blueTeam : this.scene.redTeam;
         myGroup.getChildren().forEach(ally => {
             if (!ally.active || ally === this) return;
-            const dist = Phaser.Math.Distance.Between(this.x, this.y, ally.x, ally.y);
-            if (dist < 80) {
+            const distSq = Phaser.Math.Distance.Squared(this.x, this.y, ally.x, ally.y);
+            if (distSq < allyRepelDistSq) {
+                const dist = Math.sqrt(distSq);
                 const push = (80 - dist) / 80;
                 const angle = Phaser.Math.Angle.Between(ally.x, ally.y, this.x, this.y);
                 forceX += Math.cos(angle) * push * 3.0;
@@ -196,8 +202,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         else if (this.body.velocity.x > 5) this.setFlipX(isBlue ? true : false);
     }
     
-    // --- 기타 유틸리티 (이동, 애니메이션, UI 등) ---
-
     updatePlayerMovement() {
         this.setVelocity(0);
         const cursors = this.scene.cursors;
@@ -220,7 +224,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!leader || !leader.active) return;
         const tx = leader.x + this.formationOffset.x;
         const ty = leader.y + this.formationOffset.y;
-        if (Phaser.Math.Distance.Between(this.x, this.y, tx, ty) > 5) {
+        
+        if (Phaser.Math.Distance.Squared(this.x, this.y, tx, ty) > 25) {
             this.scene.physics.moveTo(this, tx, ty, this.moveSpeed);
             this.updateFlipX();
         } else {
@@ -230,7 +235,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     updateUI() {
         this.hpBar.setPosition(this.x, this.y - (this.baseSize / 2) + 20);
-        if (this.roleText) this.roleText.setPosition(this.x, this.y + (this.baseSize / 2) + 12);
     }
 
     updateAnimation() {
@@ -247,15 +251,35 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     takeDamage(amount) {
         if (!this.scene.battleStarted) return;
         this.hp -= amount;
-        this.onTakeDamage(); // Hook for AI
-        // (데미지 연출 코드는 생략, 기존과 동일)
+        this.onTakeDamage(); 
+        if (this.team === 'blue') {
+            this.isTakingDamage = true;
+            this.isAttacking = false;
+            this.setTexture('cat_hit');
+            this.resetVisuals();
+            this.scene.tweens.killTweensOf(this);
+            const popSize = this.baseSize * 1.2;
+            this.scene.tweens.add({
+                targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
+                onComplete: () => { if (this.active) this.resetVisuals(); }
+            });
+            this.scene.time.delayedCall(500, () => {
+                if (this.active && this.hp > 0) {
+                    this.isTakingDamage = false;
+                    this.setTexture('blueCat');
+                    this.play('cat_walk');
+                    this.resetVisuals();
+                    if (this.isLeader) this.setTint(0xffffaa);
+                    else if (this.role === 'Shooter') this.setTint(0xff88ff);
+                    else this.clearTint();
+                }
+            });
+        }
         this.redrawHpBar();
         if (this.hp <= 0) this.die();
     }
 
-    onTakeDamage() { 
-        // 자식 클래스에서 구현
-    }
+    onTakeDamage() {}
 
     redrawHpBar() {
         this.hpBar.clear();
@@ -269,12 +293,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     triggerAttackVisuals() {
-        // (기존 Unit.js의 triggerAttackVisuals 내용 유지)
         if (this.team === 'blue' && !this.isTakingDamage) {
             this.isAttacking = true;
             this.setTexture('cat_punch');
             this.resetVisuals();
-            // ...Tween 등 ...
+            this.scene.tweens.killTweensOf(this);
+            const popSize = this.baseSize * 1.2;
+            this.scene.tweens.add({
+                targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
+                onComplete: () => { if (this.active) this.resetVisuals(); }
+            });
             this.scene.time.delayedCall(300, () => {
                 if(this.active) {
                     this.isAttacking = false;
@@ -283,6 +311,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                     this.resetVisuals();
                     if(this.isLeader) this.setTint(0xffffaa);
                     else if(this.role === 'Shooter') this.setTint(0xff88ff);
+                    else this.clearTint();
                 }
             });
         }
@@ -290,7 +319,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     die() {
         this.hpBar.destroy();
-        if(this.roleText) this.roleText.destroy();
         this.destroy();
     }
 

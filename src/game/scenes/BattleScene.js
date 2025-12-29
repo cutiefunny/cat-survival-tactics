@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
-// [Refactoring] 역할별 클래스 Import
-import Unit from '../objects/Unit'; // 기본 클래스 (Leader 및 Fallback용)
+// [Factory] 역할별 클래스 Import
+import Unit from '../objects/Unit'; 
 import Shooter from '../objects/roles/Shooter';
 import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
@@ -11,16 +11,34 @@ import Normal from '../objects/roles/Normal';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
-// [기본값] 설정
+const UnitClasses = {
+    'Shooter': Shooter,
+    'Runner': Runner,
+    'Tanker': Tanker,
+    'Dealer': Dealer,
+    'Normal': Normal,
+    'Leader': Unit,
+    'NormalDog': Normal 
+};
+
 const DEFAULT_CONFIG = {
-    gameSettings: { unitCount: 6, spawnGap: 90, startY: 250 },
+    gameSettings: { 
+        blueCount: 6, 
+        redCount: 6, 
+        spawnGap: 90, 
+        startY: 250 
+    },
     aiSettings: {
         common: { thinkTimeMin: 150, thinkTimeVar: 100 }, 
         runner: { ambushDistance: 60, fleeDuration: 1500 }, 
         dealer: { safeDistance: 150, followDistance: 50 },
         shooter: { attackRange: 250, kiteDistance: 200 } 
     },
+    redTeamRoles: [
+        { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }
+    ],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
+    
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
         { role: 'Runner', hp: 100, attackPower: 12, moveSpeed: 140 },
@@ -47,6 +65,10 @@ export default class BattleScene extends Phaser.Scene {
         this.loadingText = this.add.text(800, 600, 'Loading Tactics Config...', {
             fontSize: '40px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0.5);
+
+        // [CLEAN] 물리 월드 경계만 설정 (로그 및 디버그 그래픽 제거)
+        this.physics.world.setBounds(0, 0, 1600, 1200);
+
         this.fetchConfigAndStart();
     }
 
@@ -56,20 +78,14 @@ export default class BattleScene extends Phaser.Scene {
             const docRef = doc(db, "settings", "tacticsConfig");
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-                console.log("✅ Config Loaded from DB:", docSnap.data());
+                console.log("✅ Config Loaded:", docSnap.data());
                 const dbData = docSnap.data();
                 config = { ...DEFAULT_CONFIG, ...dbData };
 
-                if (dbData.aiSettings) {
-                    config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
-                } else {
-                    config.aiSettings = DEFAULT_CONFIG.aiSettings;
-                }
-
+                if (dbData.aiSettings) config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
                 if (dbData.blueTeamRoles && dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
                     const missingRoles = DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length);
                     config.blueTeamRoles = [...config.blueTeamRoles, ...missingRoles];
-                    console.log("⚠️ Merged missing roles from local config:", missingRoles);
                 }
             }
         } catch (error) { 
@@ -85,12 +101,8 @@ export default class BattleScene extends Phaser.Scene {
         this.battleStarted = false;
         this.checkBattleTimer = 0;
 
-        if (!this.anims.exists('cat_walk')) {
-            this.anims.create({ key: 'cat_walk', frames: this.anims.generateFrameNumbers('blueCat', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
-        }
-        if (!this.anims.exists('dog_walk')) {
-            this.anims.create({ key: 'dog_walk', frames: this.anims.generateFrameNumbers('redDog', { start: 0, end: 1 }), frameRate: 6, repeat: -1 });
-        }
+        if (!this.anims.exists('cat_walk')) this.anims.create({ key: 'cat_walk', frames: this.anims.generateFrameNumbers('blueCat', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
+        if (!this.anims.exists('dog_walk')) this.anims.create({ key: 'dog_walk', frames: this.anims.generateFrameNumbers('redDog', { start: 0, end: 1 }), frameRate: 6, repeat: -1 });
 
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({ up: 'W', left: 'A', down: 'S', right: 'D' });
@@ -101,53 +113,39 @@ export default class BattleScene extends Phaser.Scene {
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
 
-        const { unitCount, startY, spawnGap } = config.gameSettings;
-        const redStats = config.redTeamStats;
-        const blueRoles = config.blueTeamRoles;
-        const aiConfig = config.aiSettings; // 각 유닛 생성 시 전달
+        const { startY, spawnGap } = config.gameSettings;
+        const blueCount = config.gameSettings.blueCount ?? config.gameSettings.unitCount ?? 6;
+        const redCount = config.gameSettings.redCount ?? config.gameSettings.unitCount ?? 6;
 
-        // [Factory Method] 역할에 맞는 클래스 생성
+        const blueRoles = config.blueTeamRoles;
+        const redRoles = config.redTeamRoles || [config.redTeamStats]; 
+        const aiConfig = config.aiSettings;
+
         const createUnit = (scene, x, y, texture, team, targetGroup, stats, isLeader) => {
-            // Stats에 AI 설정도 포함해서 넘겨줌 (자식 클래스에서 사용)
-            stats.aiConfig = aiConfig; 
-            
-            const role = stats.role;
-            switch (role) {
-                case 'Shooter': return new Shooter(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                case 'Runner':  return new Runner(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                case 'Tanker':  return new Tanker(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                case 'Dealer':  return new Dealer(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                case 'Normal':  return new Normal(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                case 'Leader':  
-                    // 리더는 보통 Normal 기반이나 Unit 기반 (여기선 Unit)
-                    return new Unit(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                default: 
-                    // 적(RedTeam)의 경우 'NormalDog' 같은 역할명이 올 수 있음 -> Normal로 처리 or Unit
-                    if (role.includes('Dog')) {
-                         // 적 전용 클래스가 필요하면 만들어야 하지만 일단 Normal로 취급
-                         return new Normal(scene, x, y, texture, team, targetGroup, stats, isLeader);
-                    }
-                    return new Unit(scene, x, y, texture, team, targetGroup, stats, isLeader);
-            }
+            stats.aiConfig = aiConfig;
+            const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
+            return new UnitClass(scene, x, y, texture, team, targetGroup, stats, isLeader);
         };
 
         const leaderIndex = 0;
 
-        for (let i = 0; i < unitCount; i++) {
+        for (let i = 0; i < blueCount; i++) {
             const by = startY + (i * spawnGap);
             const bx = 300;
-            const rx = 1300;
             const isLeader = (i === leaderIndex);
-
             const roleStats = blueRoles[i % blueRoles.length];
             
-            // 팩토리 메서드 사용하여 생성
             const blueUnit = createUnit(this, bx, by, 'blueCat', 'blue', this.redTeam, roleStats, isLeader);
             if (isLeader) this.playerUnit = blueUnit;
             this.blueTeam.add(blueUnit);
+        }
 
-            const currentRedStats = { ...redStats, role: redStats.role || 'NormalDog' };
-            const redUnit = createUnit(this, rx, by, 'redDog', 'red', this.blueTeam, currentRedStats, false);
+        for (let i = 0; i < redCount; i++) {
+            const by = startY + (i * spawnGap);
+            const rx = 1300;
+            const roleStats = redRoles[i % redRoles.length];
+
+            const redUnit = createUnit(this, rx, by, 'redDog', 'red', this.blueTeam, roleStats, false);
             this.redTeam.add(redUnit);
         }
 
@@ -198,8 +196,9 @@ export default class BattleScene extends Phaser.Scene {
             if (unit.active && unit.attackRange > 60) {
                 const target = unit.currentTarget;
                 if (target && target.active) {
-                    const dist = Phaser.Math.Distance.Between(unit.x, unit.y, target.x, target.y);
-                    if (dist <= unit.attackRange) {
+                    const distSq = Phaser.Math.Distance.Squared(unit.x, unit.y, target.x, target.y);
+                    const rangeSq = unit.attackRange * unit.attackRange;
+                    if (distSq <= rangeSq) {
                         this.performAttack(unit, target);
                     }
                 }
@@ -244,28 +243,16 @@ export default class BattleScene extends Phaser.Scene {
 
     performAttack(attacker, defender) {
         if (!attacker.active || !defender.active) return;
-        
         const now = this.time.now;
         if (now > attacker.lastAttackTime + attacker.attackCooldown) {
             defender.takeDamage(attacker.attackPower);
             attacker.lastAttackTime = now;
-            attacker.triggerAttackVisuals(); 
+            attacker.triggerAttackVisuals();
             
-            // [VISUAL] 슈터 공격 시 흔들림
-            if (attacker.role === 'Shooter') {
-                if (defender.active) {
-                    this.tweens.add({
-                        targets: defender,
-                        x: '+=3', 
-                        duration: 30,
-                        yoyo: true,
-                        repeat: 3,
-                        ease: 'Sine.easeInOut'
-                    });
-                }
+            if (attacker.role === 'Shooter' && defender.active) {
+                this.tweens.add({ targets: defender, x: '+=3', duration: 30, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
             }
             
-            // 넉백
             if (!defender.active || !defender.body) return;
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
