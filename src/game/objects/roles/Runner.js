@@ -17,7 +17,7 @@ export default class Runner extends Unit {
 
         this.thinkTimer -= delta;
 
-        // 2. 타겟 선정 (Think Phase)
+        // 2. 타겟 선정
         if (this.thinkTimer <= 0) {
             const { thinkTimeMin, thinkTimeVar } = this.aiConfig.common || { thinkTimeMin: 150, thinkTimeVar: 100 };
             this.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
@@ -25,35 +25,42 @@ export default class Runner extends Unit {
             this.decideNextMove();
         }
 
-        // 3. 이동 실행 (Movement Phase)
+        // 3. 이동 실행
         if (this.currentTarget && this.currentTarget.active) {
-            // [핵심] 암살자 이동 로직: 타겟을 향해 가되, 다른 적은 피해서 돌아감
+            // 암살자 이동 (장애물 회피 + 타겟 추적)
             this.moveIdeallyTowards(this.currentTarget);
             this.updateFlipX(); 
         } else {
-            this.setVelocity(0, 0);
+            // 타겟 없으면 리더 따라다니기 (포메이션 유지)
+            this.followLeader();
         }
     }
 
     decideNextMove() {
-        // [우선순위 1] 적 팀의 'Shooter'를 최우선으로 찾음
+        // [우선순위 1] 적 슈터 탐색
         const enemyShooter = this.findEnemyShooter();
 
         if (enemyShooter) {
-            // 슈터가 있으면 그 녀석의 '뒤쪽(Ambush Point)'을 노림
+            // 슈터의 뒤쪽(암살 포인트) 계산
             const ambushPoint = this.calculateAmbushPoint(enemyShooter);
-            
-            // 아직 도착 못했으면 암살 지점으로, 도착했거나 가까우면 슈터 자체를 타겟
             const distSq = Phaser.Math.Distance.Squared(this.x, this.y, ambushPoint.x, ambushPoint.y);
             
+            // 아직 뒤를 못 잡았으면 암살 포인트로 이동
             if (distSq > 50 * 50) {
-                this.currentTarget = { x: ambushPoint.x, y: ambushPoint.y, active: true, isAmbushPoint: true, actualTarget: enemyShooter };
+                this.currentTarget = { 
+                    x: ambushPoint.x, 
+                    y: ambushPoint.y, 
+                    active: true, 
+                    isAmbushPoint: true, 
+                    actualTarget: enemyShooter // 진짜 목표 저장
+                };
             } else {
+                // 가까워지면 슈터 직접 타겟팅
                 this.currentTarget = enemyShooter;
             }
         } 
         else {
-            // [우선순위 2] 슈터가 없으면 기존 로직 (교전 중인 적 or 가장 가까운 적)
+            // [우선순위 2] 슈터 없으면 교전 중인 적 or 가까운 적
             const engagingEnemy = this.findEnemyEngagingAlly();
             if (engagingEnemy) {
                 this.currentTarget = engagingEnemy;
@@ -63,7 +70,25 @@ export default class Runner extends Unit {
         }
     }
 
-    // [NEW] 적군 슈터 탐색
+    // [핵심 변경] 피격 시 반응 로직
+    onTakeDamage() {
+        const target = this.currentTarget;
+        
+        // 현재 쫓고 있는 대상이 'Shooter'라면(직접 타겟팅 or 암살 경로 이동 중),
+        // 데미지를 입어도 도망가지 않고(return) 계속 돌진합니다.
+        if (target) {
+            // 1. 슈터를 직접 때리러 가는 중
+            if (target.role === 'Shooter') return;
+            
+            // 2. 슈터의 뒤를 잡으러 우회하는 중
+            if (target.isAmbushPoint && target.actualTarget?.role === 'Shooter') return;
+        }
+
+        // 그 외(일반 적 상대)의 경우에는 맞으면 생존을 위해 도망
+        this.fleeTimer = this.aiConfig.runner?.fleeDuration || 1500;
+        this.currentTarget = null;
+    }
+
     findEnemyShooter() {
         const enemies = this.targetGroup.getChildren();
         let closestShooter = null;
@@ -81,47 +106,37 @@ export default class Runner extends Unit {
         return closestShooter;
     }
 
-    // [NEW] 장애물 우회 이동 (Steering Behavior: Seek + Avoid)
     moveIdeallyTowards(target) {
-        // 1. 목표를 향한 기본적인 힘 (Seek)
+        // 목표 방향 벡터
         const angleToTarget = Phaser.Math.Angle.Between(this.x, this.y, target.x, target.y);
         let forceX = Math.cos(angleToTarget);
         let forceY = Math.sin(angleToTarget);
 
-        // 2. 방해물(타겟이 아닌 다른 적들) 회피 힘 추가 (Avoidance)
+        // 장애물 회피 벡터 (슈터가 아닌 다른 적들은 피해서 감)
         const avoidanceForce = this.calculateAvoidanceForce(target.actualTarget || target);
         
-        // 회피 힘을 더함 (가중치 2.5배로 설정하여 회피를 우선시)
+        // 회피 힘 적용
         forceX += avoidanceForce.x * 2.5;
         forceY += avoidanceForce.y * 2.5;
 
-        // 최종 벡터 정규화 및 속도 적용
         const vec = new Phaser.Math.Vector2(forceX, forceY).normalize().scale(this.moveSpeed);
         this.setVelocity(vec.x, vec.y);
     }
 
-    // [NEW] 회피 벡터 계산
     calculateAvoidanceForce(primaryTarget) {
         let pushX = 0;
         let pushY = 0;
-        
-        // 감지 범위 (이 거리 안의 방해물은 피함)
         const detectionRadiusSq = 120 * 120; 
 
         const enemies = this.targetGroup.getChildren();
         for (let enemy of enemies) {
-            // 죽었거나, 내 진짜 목표물이면 피하지 않고 돌진
+            // 죽었거나, 내 진짜 목표물이면 피하지 않음
             if (!enemy.active || enemy === primaryTarget) continue;
 
             const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
-            
-            // 내 경로상의 방해물(탱커 등)이 너무 가까우면
             if (distSq < detectionRadiusSq) {
                 const dist = Math.sqrt(distSq);
-                // 거리가 가까울수록 더 강하게 밀어냄
                 const force = (120 - dist) / 120; 
-                
-                // 적의 반대 방향으로 힘 생성
                 const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.x, this.y);
                 pushX += Math.cos(angle) * force;
                 pushY += Math.sin(angle) * force;
@@ -132,7 +147,6 @@ export default class Runner extends Unit {
 
     calculateAmbushPoint(enemy) {
         let angle;
-        // 적이 이동 중이면 그 뒤쪽, 멈춰있으면 내 위치 기준 뒤쪽
         if (enemy.body && enemy.body.velocity.length() > 10) {
             angle = Math.atan2(enemy.body.velocity.y, enemy.body.velocity.x) + Math.PI;
         } else {
@@ -144,11 +158,5 @@ export default class Runner extends Unit {
             x: enemy.x + Math.cos(angle) * dist,
             y: enemy.y + Math.sin(angle) * dist
         };
-    }
-
-    onTakeDamage() {
-        // 맞으면 길게 도망 (생존)
-        this.fleeTimer = this.aiConfig.runner?.fleeDuration || 1500;
-        this.currentTarget = null;
     }
 }

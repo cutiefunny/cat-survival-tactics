@@ -61,7 +61,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
-        // [SAFETY] 화면 이탈 방지 (로그 제거됨)
+        if (this.scene.isSetupPhase) {
+            this.setVelocity(0, 0);
+            return;
+        }
+
         this.enforceWorldBounds();
 
         if (this.scene.isGameOver) {
@@ -77,6 +81,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         } else if (this.scene.battleStarted) {
             this.updateAI(delta);
         } else {
+            // [LOG] battleStarted가 false인데 여기로 들어오는지 확인
+            // console.log(`[Unit ${this.role}] Waiting for battle start...`);
             this.updateFormationFollow();
         }
         
@@ -322,7 +328,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.destroy();
     }
 
+    followLeader() {
+        if (!this.scene.playerUnit || !this.scene.playerUnit.active) {
+            this.setVelocity(0, 0);
+            return;
+        }
+
+        const targetX = this.scene.playerUnit.x + this.formationOffset.x;
+        const targetY = this.scene.playerUnit.y + this.formationOffset.y;
+        
+        const distSq = Phaser.Math.Distance.Squared(this.x, this.y, targetX, targetY);
+        
+        // [DEBUG LOG] 유닛이 어디로 가려는지 60프레임 중 한 번만 출력 (콘솔 도배 방지)
+        if (Math.random() < 0.01) {
+             console.log(`🏃 [${this.role}] Following Leader. Current:(${this.x.toFixed(0)},${this.y.toFixed(0)}) Target:(${targetX.toFixed(0)},${targetY.toFixed(0)}) Offset:(${this.formationOffset.x.toFixed(0)}, ${this.formationOffset.y.toFixed(0)})`);
+        }
+
+        if (distSq > 100) { 
+            this.scene.physics.moveTo(this, targetX, targetY, this.moveSpeed);
+            this.updateFlipX();
+        } else {
+            this.setVelocity(0, 0);
+        }
+    }
+
     setFormationOffset(lx, ly) {
+        // 현재 위치 - 리더 위치 = 오프셋
         this.formationOffset.x = this.x - lx;
         this.formationOffset.y = this.y - ly;
     }
