@@ -8,16 +8,46 @@ export default class Tanker extends Unit {
     }
 
     performSkill() {
-        console.log("🛡️ Tanker uses TAUNT!");
+        console.log("🛡️ [Tanker] performSkill START");
         
+        // 1. 이미지 로드 확인
+        const textureExists = this.scene.textures.exists('cat_haak');
+        console.log(`   ▶ Texture 'cat_haak' exists? ${textureExists}`);
+        
+        if (!textureExists) {
+            console.error("   🚨 ERROR: 'cat_haak' image is NOT loaded! Check BattleScene.preload()");
+            return;
+        }
+
+        // 2. 상태 변경 및 애니메이션 정지
+        this.isUsingSkill = true; 
+        console.log(`   ▶ isUsingSkill set to: ${this.isUsingSkill}`);
+        
+        this.stop(); // 현재 재생 중인 애니메이션 정지
+        console.log(`   ▶ Animation Stopped. IsPlaying? ${this.anims.isPlaying}`);
+
+        // 3. 텍스처 강제 변경
+        const prevTexture = this.texture.key;
         this.setTexture('cat_haak');
-        this.stop(); 
-        
-        this.scene.time.delayedCall(1000, () => {
-            if(this.active) this.resetVisuals();
+        console.log(`   ▶ Texture Change: ${prevTexture} -> ${this.texture.key}`);
+
+        // 1초 후 복구
+        this.scene.time.delayedCall(300, () => {
+            console.log("🛡️ [Tanker] Skill Effect End. Restoring...");
+            this.isUsingSkill = false;
+            if(this.active) {
+                if (this.team === 'blue') {
+                    this.setTexture('blueCat');
+                    this.play('cat_walk');
+                } else {
+                    this.setTexture('redDog'); 
+                    this.play('dog_walk');
+                }
+                this.resetVisuals();
+            }
         });
 
-        // [CHANGE] 설정값 사용
+        // (이하 기존 도발 로직 동일)
         const tauntRadius = this.skillRange || 200;
         const tauntRadiusSq = tauntRadius * tauntRadius;
         const enemies = this.targetGroup.getChildren();

@@ -22,6 +22,12 @@ const UnitClasses = {
     'NormalDog': Normal 
 };
 
+// [FIX] 안전장치용 기본 스탯 정의 (DB 데이터 누락 대비)
+const ROLE_BASE_STATS = {
+    'Leader': { skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
+    'Tanker': { skillCooldown: 10000, skillRange: 200 }
+};
+
 const DEFAULT_CONFIG = {
     gameSettings: { 
         blueCount: 6, 
@@ -40,11 +46,12 @@ const DEFAULT_CONFIG = {
     ],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     
+    // 기본값 (DB 로드 실패 시 사용)
     blueTeamRoles: [
-        { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
+        { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
         { role: 'Runner', hp: 100, attackPower: 12, moveSpeed: 140 },
         { role: 'Dealer', hp: 90, attackPower: 40, moveSpeed: 70 },
-        { role: 'Tanker', hp: 400, attackPower: 10, moveSpeed: 40 },
+        { role: 'Tanker', hp: 400, attackPower: 10, moveSpeed: 40, skillCooldown: 10000, skillRange: 200 },
         { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 },
         { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250 } 
     ]
@@ -59,9 +66,7 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('blueCat', '/images/cat_walk_3frame_sprite.png', { frameWidth: 100, frameHeight: 100 });
         this.load.image('cat_hit', '/images/cat_hit.png');
         this.load.image('cat_punch', '/images/cat_punch.png');
-        // [NEW] 하악질 이미지 로드
         this.load.image('cat_haak', '/images/cat_haak.png');
-        
         this.load.spritesheet('redDog', '/images/dog_2frame_horizontal.png', { frameWidth: 100, frameHeight: 100 });
     }
 
@@ -97,9 +102,12 @@ export default class BattleScene extends Phaser.Scene {
                 config = { ...DEFAULT_CONFIG, ...dbData };
 
                 if (dbData.aiSettings) config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
-                if (dbData.blueTeamRoles && dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
-                    const missingRoles = DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length);
-                    config.blueTeamRoles = [...config.blueTeamRoles, ...missingRoles];
+                
+                if (dbData.blueTeamRoles) {
+                    if (dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
+                        const missingRoles = DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length);
+                        config.blueTeamRoles = [...dbData.blueTeamRoles, ...missingRoles];
+                    }
                 }
             }
         } catch (error) { 
@@ -153,8 +161,14 @@ export default class BattleScene extends Phaser.Scene {
             const by = startY + (i * spawnGap);
             const bx = 300;
             const isLeader = (i === leaderIndex);
-            const roleStats = blueRoles[i % blueRoles.length];
-            const blueUnit = createUnit(this, bx, by, 'blueCat', 'blue', this.redTeam, roleStats, isLeader);
+            
+            // [FIX] 데이터 병합 로직 강화
+            // DB에서 불러온 스탯(configStats)에 스킬 정보가 없으면, ROLE_BASE_STATS의 기본값을 채워넣음
+            const configStats = blueRoles[i % blueRoles.length] || DEFAULT_CONFIG.blueTeamRoles[i % DEFAULT_CONFIG.blueTeamRoles.length];
+            const baseDefaults = ROLE_BASE_STATS[configStats.role] || {};
+            const finalStats = { ...baseDefaults, ...configStats }; 
+
+            const blueUnit = createUnit(this, bx, by, 'blueCat', 'blue', this.redTeam, finalStats, isLeader);
             if (isLeader) this.playerUnit = blueUnit;
             this.blueTeam.add(blueUnit);
         }
@@ -162,7 +176,7 @@ export default class BattleScene extends Phaser.Scene {
         for (let i = 0; i < redCount; i++) {
             const by = startY + (i * spawnGap);
             const rx = 1300;
-            const roleStats = redRoles[i % redRoles.length];
+            const roleStats = redRoles[i % redRoles.length] || DEFAULT_CONFIG.redTeamRoles[0];
             const redUnit = createUnit(this, rx, by, 'redDog', 'red', this.blueTeam, roleStats, false);
             this.redTeam.add(redUnit);
         }

@@ -14,7 +14,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
         
-        // 버프 계산용 기본 공격력
         this.baseAttackPower = stats.attackPower; 
         this.attackPower = this.baseAttackPower;
         
@@ -26,13 +25,15 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
         
-        // [CHANGE] Config 스탯에서 스킬 정보 로드
+        // 스킬 정보 로드
         this.skillMaxCooldown = stats.skillCooldown || 0; 
         this.skillRange = stats.skillRange || 0;
         this.skillDuration = stats.skillDuration || 0;
         this.skillEffect = stats.skillEffect || 0; 
 
-        this.skillTimer = 0;       
+        this.skillTimer = 0;
+        // [FIX] 스킬 사용 상태 플래그 추가
+        this.isUsingSkill = false;
         
         this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
@@ -61,9 +62,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.performSkill(); 
             this.skillTimer = this.skillMaxCooldown;
             this.setTint(0xffffff);
-            // resetVisuals는 자식 클래스에서 필요 시 호출
-        } else if (this.skillTimer > 0) {
-            console.log(`⏳ Skill Cooldown: ${(this.skillTimer/1000).toFixed(1)}s`);
         }
     }
 
@@ -162,7 +160,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
             this.updateFlipX();
         } else {
-            this.followLeader(); // 이전에 추가한 포메이션 팔로우 로직 유지
+            this.setVelocity(0, 0);
         }
     }
 
@@ -289,7 +287,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateAnimation() {
-        const isBusy = (this.isTakingDamage || this.isAttacking);
+        // [FIX] 스킬 사용 중(this.isUsingSkill)에는 애니메이션 업데이트 방지
+        const isBusy = (this.isTakingDamage || this.isAttacking || this.isUsingSkill);
         if (!isBusy && this.body.velocity.length() > 5) {
             if (!this.anims.isPlaying) {
                 if (this.team === 'blue') this.play('cat_walk', true);
