@@ -1,20 +1,24 @@
 import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
-// [New] 가상 조이스틱 플러그인 Import
 import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
 
 export const getGameConfig = (containerId) => {
+    // [New] 모바일 디바이스 감지
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     return {
         type: Phaser.AUTO,
-        width: 1600,
-        height: 1200,
+        // [New] 모바일이면 화면 크기에 맞춤, 데스크탑이면 고정 해상도
+        width: isMobile ? window.innerWidth : 1600,
+        height: isMobile ? window.innerHeight : 1200,
         parent: containerId,
         backgroundColor: '#3a3a3a',
         dom: {
             createContainer: true
         },
         scale: {
-            mode: Phaser.Scale.FIT,
+            // [Fix] RESIZE: 화면 꽉 채움 (비율 유지, 왜곡 없음) vs FIT: 고정 비율 (레터박스 가능성)
+            mode: isMobile ? Phaser.Scale.RESIZE : Phaser.Scale.FIT,
             autoCenter: Phaser.Scale.CENTER_BOTH,
         },
         pixelArt: true,
@@ -25,7 +29,6 @@ export const getGameConfig = (containerId) => {
                 gravity: { y: 0 }
             }
         },
-        // [New] 플러그인 등록
         plugins: {
             global: [{
                 key: 'rexVirtualJoystick',

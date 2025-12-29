@@ -103,10 +103,7 @@ export default class BattleScene extends Phaser.Scene {
             fontSize: '40px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0.5).setScrollFactor(0);
 
-        // [Map] 맵 생성
         const map = this.make.tilemap({ key: 'stage1' });
-        
-        // [Map] 타일셋 연결
         const tilesetGrass = map.addTilesetImage('tileser_nature', 'tiles_grass');
         const tilesetPlant = map.addTilesetImage('tileset_trees', 'tiles_plant');
         
@@ -114,16 +111,13 @@ export default class BattleScene extends Phaser.Scene {
         if (tilesetGrass) tilesets.push(tilesetGrass);
         if (tilesetPlant) tilesets.push(tilesetPlant);
 
-        // [Map] 레이어 생성
         const groundLayer = map.createLayer('Ground', tilesets, 0, 0);
         const wallLayer = map.createLayer('Walls', tilesets, 0, 0);
         const blockLayer = map.createLayer('Blocks', tilesets, 0, 0);
 
-        // [Map] 충돌 설정
         if (wallLayer) wallLayer.setCollisionByExclusion([-1]);
         if (blockLayer) blockLayer.setCollisionByExclusion([-1]);
 
-        // [Map] 월드 경계 설정
         this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
         this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
@@ -136,8 +130,8 @@ export default class BattleScene extends Phaser.Scene {
                 }
             }
         });
-        
-        // [New] 모바일 체크 및 조이스틱/가로모드 설정
+
+        // [New] 모바일 체크 및 설정
         this.checkMobileAndSetup();
 
         this.fetchConfigAndStart(wallLayer, blockLayer);
@@ -150,18 +144,20 @@ export default class BattleScene extends Phaser.Scene {
         
         if (isMobile) {
             console.log("📱 Mobile Device Detected. Setting up Joystick & Orientation Check.");
+
+            this.cameras.main.setZoom(0.5);
             
             // 1. 가로 모드 강제 (Overlay)
-            this.createOrientationOverlay();
-            this.scale.on('resize', this.checkOrientation, this);
-            this.checkOrientation(); // 초기 체크
+            //this.createOrientationOverlay();
+            this.scale.on('resize', this.handleResize, this);
+            this.checkOrientation();
 
             // 2. 가상 조이스틱 생성 (오른쪽 하단)
             // 플러그인이 로드되었는지 확인
             if (this.plugins.get('rexVirtualJoystick')) {
                 this.joyStick = this.plugins.get('rexVirtualJoystick').add(this, {
-                    x: this.cameras.main.width - 150,
-                    y: this.cameras.main.height - 150,
+                    x: this.cameras.main.width - 50,
+                    y: this.cameras.main.height - 50,
                     radius: 80,
                     base: this.add.circle(0, 0, 80, 0x888888, 0.5).setDepth(100),
                     thumb: this.add.circle(0, 0, 40, 0xcccccc, 0.8).setDepth(101),
@@ -342,7 +338,7 @@ export default class BattleScene extends Phaser.Scene {
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
 
-        this.createFormationUI();
+        //this.createFormationUI();
 
         // [UI] Start Button
         this.startButton = this.add.text(this.cameras.main.centerX, 550, 'CLICK TO START', {
@@ -450,6 +446,11 @@ export default class BattleScene extends Phaser.Scene {
         this.infoText.setVisible(true);
         this.infoText.setText('Move Leader! Squad will follow.');
 
+        // [New] 전투 시작 시 모바일이면 다시 리더 추적 활성화
+        if (this.isMobile && this.playerUnit && this.playerUnit.active) {
+             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+        }
+
         this.startBattle();
     }
 
@@ -550,6 +551,41 @@ export default class BattleScene extends Phaser.Scene {
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
             defender.body.velocity.x += Math.cos(angle) * knockbackForce;
             defender.body.velocity.y += Math.sin(angle) * knockbackForce;
+        }
+    }
+
+    // [New] 화면 리사이즈 핸들러
+    handleResize(gameSize) {
+        const width = gameSize.width;
+        const height = gameSize.height;
+
+        // pc 모드의 50% 크기로 축소
+        if (!this.sys.game.device.os.android && !this.sys.game.device.os.iOS && !this.sys.game.device.os.iPad && !this.sys.game.device.os.iPhone) {
+            this.cameras.main.setZoom(0.5);
+        } else {
+            this.cameras.main.setZoom(1);
+        }
+
+        this.checkOrientation();
+
+        // 1. 조이스틱 재배치
+        if (this.joyStick) {
+            this.joyStick.setPosition(width - 120, height - 120);
+        }
+
+        // 2. 주요 UI 재배치
+        if (this.startButton) this.startButton.setPosition(width / 2, height - 150);
+        if (this.infoText) this.infoText.setPosition(width / 2, 50);
+        if (this.battleText) this.battleText.setPosition(width / 2, height / 2);
+        
+        // 3. 카메라 데드존 업데이트
+        if (this.cameras.main.deadzone) {
+             this.cameras.main.setDeadzone(width * 0.4, height * 0.4);
+        }
+        
+        // 4. 피드백 UI 업데이트
+        if (this.feedbackDOM) {
+             this.feedbackDOM.setPosition(width / 2, height / 2 + 100);
         }
     }
 
