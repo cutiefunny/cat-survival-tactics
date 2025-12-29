@@ -300,14 +300,21 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         else if (this.body.velocity.x > 5) this.setFlipX(isBlue ? true : false);
     }
     
+    // [FIX] 조이스틱 입력 연동
     updatePlayerMovement() {
         this.setVelocity(0);
         const cursors = this.scene.cursors;
+        // 조이스틱 커서 가져오기 (BattleScene에서 생성됨)
+        const joyCursors = this.scene.joystickCursors;
+
         let vx = 0, vy = 0;
-        if (cursors.left.isDown || this.scene.wasd.left.isDown) vx -= 1;
-        if (cursors.right.isDown || this.scene.wasd.right.isDown) vx += 1;
-        if (cursors.up.isDown || this.scene.wasd.up.isDown) vy -= 1;
-        if (cursors.down.isDown || this.scene.wasd.down.isDown) vy += 1;
+        
+        // 키보드(Cursors, WASD) 및 조이스틱 통합 입력 체크
+        // joyCursors가 생성되지 않았을 경우를 대비해 && 연산자 사용
+        if (cursors.left.isDown || this.scene.wasd.left.isDown || (joyCursors && joyCursors.left.isDown)) vx -= 1;
+        if (cursors.right.isDown || this.scene.wasd.right.isDown || (joyCursors && joyCursors.right.isDown)) vx += 1;
+        if (cursors.up.isDown || this.scene.wasd.up.isDown || (joyCursors && joyCursors.up.isDown)) vy -= 1;
+        if (cursors.down.isDown || this.scene.wasd.down.isDown || (joyCursors && joyCursors.down.isDown)) vy += 1;
 
         if (vx !== 0 || vy !== 0) {
             this._tempVec.set(vx, vy).normalize().scale(this.moveSpeed);

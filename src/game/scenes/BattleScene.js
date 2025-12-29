@@ -136,8 +136,92 @@ export default class BattleScene extends Phaser.Scene {
                 }
             }
         });
+        
+        // [New] 모바일 체크 및 조이스틱/가로모드 설정
+        this.checkMobileAndSetup();
 
         this.fetchConfigAndStart(wallLayer, blockLayer);
+    }
+    
+    // [New] 모바일 지원 기능
+    checkMobileAndSetup() {
+        // 간단한 모바일 디바이스 체크
+        const isMobile = this.sys.game.device.os.android || this.sys.game.device.os.iOS || this.sys.game.device.os.iPad || this.sys.game.device.os.iPhone;
+        
+        if (isMobile) {
+            console.log("📱 Mobile Device Detected. Setting up Joystick & Orientation Check.");
+            
+            // 1. 가로 모드 강제 (Overlay)
+            this.createOrientationOverlay();
+            this.scale.on('resize', this.checkOrientation, this);
+            this.checkOrientation(); // 초기 체크
+
+            // 2. 가상 조이스틱 생성 (오른쪽 하단)
+            // 플러그인이 로드되었는지 확인
+            if (this.plugins.get('rexVirtualJoystick')) {
+                this.joyStick = this.plugins.get('rexVirtualJoystick').add(this, {
+                    x: this.cameras.main.width - 150,
+                    y: this.cameras.main.height - 150,
+                    radius: 80,
+                    base: this.add.circle(0, 0, 80, 0x888888, 0.5).setDepth(100),
+                    thumb: this.add.circle(0, 0, 40, 0xcccccc, 0.8).setDepth(101),
+                    dir: '8dir',
+                    forceMin: 16,
+                    enable: true
+                });
+                
+                // 조이스틱을 화면에 고정
+                // 베이스와 썸(Thumb) 객체는 rex 플러그인이 내부적으로 관리하지만,
+                // scene에 추가된 shape이므로 scrollFactor 설정 필요
+                // (rex 플러그인 특성상 base/thumb 객체에 직접 접근하여 설정)
+                this.joyStick.base.setScrollFactor(0);
+                this.joyStick.thumb.setScrollFactor(0);
+                
+                // Unit.js에서 사용할 커서 키 생성
+                this.joystickCursors = this.joyStick.createCursorKeys();
+            }
+        }
+    }
+
+    createOrientationOverlay() {
+        // 가로모드 유도 오버레이 컨테이너
+        this.orientationOverlay = this.add.container(0, 0).setScrollFactor(0).setDepth(9999).setVisible(false);
+        
+        const bg = this.add.rectangle(this.cameras.main.centerX, this.cameras.main.centerY, 
+            this.cameras.main.width, this.cameras.main.height, 0x000000).setOrigin(0.5);
+            
+        const text = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 
+            "Please Rotate Your Device\n↔️ Landscape Only", {
+            fontSize: '40px', color: '#ffffff', align: 'center', fontStyle: 'bold'
+        }).setOrigin(0.5);
+        
+        this.orientationOverlay.add([bg, text]);
+    }
+
+    checkOrientation() {
+        if (!this.orientationOverlay) return;
+        
+        const { width, height } = this.scale;
+        
+        if (height > width) {
+            // 세로 모드 (Portrait) -> 게임 일시 정지 및 오버레이 표시
+            this.orientationOverlay.setVisible(true);
+            // 오버레이 크기 갱신
+            const bg = this.orientationOverlay.list[0];
+            const txt = this.orientationOverlay.list[1];
+            if(bg) bg.setSize(width, height).setPosition(width/2, height/2);
+            if(txt) txt.setPosition(width/2, height/2);
+            
+            this.physics.pause();
+            this.isOrientationBad = true;
+        } else {
+            // 가로 모드 (Landscape) -> 정상화
+            this.orientationOverlay.setVisible(false);
+            if (this.isOrientationBad && !this.isGameOver) {
+                this.physics.resume();
+            }
+            this.isOrientationBad = false;
+        }
     }
 
     async fetchConfigAndStart(wallLayer, blockLayer) {
@@ -370,6 +454,8 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     update(time, delta) {
+        if (this.isOrientationBad) return; // [New] 세로 모드면 업데이트 중지
+
         if (!this.blueTeam || !this.redTeam) return;
         if (this.isGameOver) return;
 
@@ -472,6 +558,11 @@ export default class BattleScene extends Phaser.Scene {
         this.physics.pause();
         
         if(this.infoText) this.infoText.setVisible(false);
+        // [New] 게임 종료 시 조이스틱 제거 (터치 간섭 방지)
+        if (this.joyStick) {
+             this.joyStick.base.setVisible(false);
+             this.joyStick.thumb.setVisible(false);
+        }
 
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
@@ -517,11 +608,14 @@ export default class BattleScene extends Phaser.Scene {
             .setScrollFactor(0)
             .setDepth(102);
 
-        // [FIX] 스페이스바 입력 시 Phaser가 가로채지 않도록 이벤트 전파 중단
         const textarea = div.querySelector('textarea');
         if(textarea) {
             textarea.addEventListener('keydown', (e) => {
                 e.stopPropagation();
+            });
+            // [New] 모바일에서 입력창 클릭 시 포커스 잘 잡히도록 터치 이벤트 처리
+            textarea.addEventListener('touchstart', (e) => {
+                e.target.focus();
             });
         }
             

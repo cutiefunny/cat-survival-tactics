@@ -12,6 +12,7 @@
     "@solidjs/router": "^0.15.4",
     "firebase": "^12.7.0",
     "phaser": "^3.90.0",
+    "phaser3-rex-plugins": "^1.80.17",
     "solid-js": "^1.9.10"
   },
   "devDependencies": {

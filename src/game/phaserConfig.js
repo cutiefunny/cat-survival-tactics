@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
+// [New] 가상 조이스틱 플러그인 Import
+import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
 
 export const getGameConfig = (containerId) => {
     return {
@@ -8,7 +10,6 @@ export const getGameConfig = (containerId) => {
         height: 1200,
         parent: containerId,
         backgroundColor: '#3a3a3a',
-        // [IMPORTANT] DOM 엘리먼트 사용을 위해 필수
         dom: {
             createContainer: true
         },
@@ -23,6 +24,14 @@ export const getGameConfig = (containerId) => {
                 debug: false,
                 gravity: { y: 0 }
             }
+        },
+        // [New] 플러그인 등록
+        plugins: {
+            global: [{
+                key: 'rexVirtualJoystick',
+                plugin: VirtualJoystickPlugin,
+                start: true
+            }]
         },
         scene: [BattleScene]
     };
