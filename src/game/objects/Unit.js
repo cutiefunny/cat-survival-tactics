@@ -181,11 +181,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
-        // [New] 게임 배속 적용 (AI 판단 및 쿨타임 가속을 위해)
-        const adjustedDelta = delta * this.scene.gameSpeed;
+        const adjustedDelta = delta * (this.scene.gameSpeed || 1);
 
         if (this.skillTimer > 0) {
-            this.skillTimer -= adjustedDelta; // [Fixed] adjustedDelta 사용
+            this.skillTimer -= adjustedDelta;
         }
 
         if (this.scene.isSetupPhase) {
@@ -201,32 +200,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             return;
         }
 
-        if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta; // [Fixed] adjustedDelta 사용
+        if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
         if (this.isLeader) {
             this.updatePlayerMovement(); 
             const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
             if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
-                this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
+                this.updateAI(adjustedDelta);
             }
         } else {
             if (!this.scene.battleStarted) {
-                this.updateFormationFollow(adjustedDelta); // [Fixed] adjustedDelta 사용
+                this.updateFormationFollow(adjustedDelta); 
             } else if (this.team === 'blue') {
                 switch (this.scene.squadState) {
                     case 'FORMATION':
-                        this.updateFormationFollow(adjustedDelta); // [Fixed] adjustedDelta 사용
+                        this.updateFormationFollow(adjustedDelta); 
                         break;
                     case 'FLEE':
-                        this.runAway(adjustedDelta); // [Fixed] adjustedDelta 사용
+                        this.runAway(adjustedDelta); 
                         break;
                     case 'FREE':
                     default:
-                        this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
+                        this.updateAI(adjustedDelta); 
                         break;
                 }
             } else {
-                this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
+                this.updateAI(adjustedDelta); 
             }
         }
         
@@ -326,8 +325,19 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         return null;
     }
 
+    // [Modified] 이동 중 공격 시 타겟 바라보도록 수정
     updateFlipX() {
         const isBlue = this.team === 'blue';
+
+        // 1. 공격 중(isAttacking)이라면 무조건 타겟 방향을 바라봄 (이동 방향 무시)
+        if (this.isAttacking && this.currentTarget && this.currentTarget.active) {
+            const diffX = this.currentTarget.x - this.x;
+            if (diffX > 0) this.setFlipX(isBlue ? true : false); // Target is Right
+            else if (diffX < 0) this.setFlipX(isBlue ? false : true); // Target is Left
+            return;
+        }
+
+        // 2. 평소에는 이동 방향에 따라 Flip
         if (this.body.velocity.x < -5) this.setFlipX(isBlue ? false : true);
         else if (this.body.velocity.x > 5) this.setFlipX(isBlue ? true : false);
     }
@@ -354,19 +364,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updateFormationFollow(delta) {
         if (this.isLeader) return; 
 
-        // 1. 타겟 갱신 (공격을 위해)
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
             this.currentTarget = this.findNearestEnemy();
         }
 
-        // 2. 스킬 사용 (자동 전투 활성화 시)
         if (this.team !== 'blue' || this.scene.isAutoBattle) {
             this.tryUseSkill();
         }
 
-        // 3. 이동 로직 (대열 유지)
         if (this.team !== 'blue') { this.setVelocity(0); return; }
         const leader = this.scene.playerUnit;
         if (!leader || !leader.active) return;
