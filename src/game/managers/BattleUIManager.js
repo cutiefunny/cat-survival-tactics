@@ -10,7 +10,8 @@ export default class BattleUIManager {
         this.infoText = null;
         this.battleText = null;
         this.autoBattleBtn = null;
-        this.squadBtn = null; // [New] 분대 행동 버튼
+        this.squadBtn = null; 
+        this.speedBtn = null; // [New] 속도 버튼
         this.feedbackDOM = null;
     }
 
@@ -75,9 +76,8 @@ export default class BattleUIManager {
         this.autoBattleBtn.on('pointerdown', callback);
     }
 
-    // [New] 분대 행동 버튼 생성
     createSquadButton(callback) {
-        const x = 280; // AUTO 버튼 우측
+        const x = 280; 
         const y = this.scene.cameras.main.height - 80;
 
         this.squadBtn = this.scene.add.text(x, y, '전술: 자율', {
@@ -85,6 +85,18 @@ export default class BattleUIManager {
         }).setOrigin(0.5).setScrollFactor(0).setInteractive().setDepth(200);
 
         this.squadBtn.on('pointerdown', callback);
+    }
+
+    // [New] 속도 조절 버튼 생성
+    createSpeedButton(callback) {
+        const x = 460; // Squad 버튼(280) 우측 배치
+        const y = this.scene.cameras.main.height - 80;
+
+        this.speedBtn = this.scene.add.text(x, y, '속도: 1x', {
+            fontSize: '24px', fill: '#ffffff', backgroundColor: '#666666', padding: { x: 10, y: 8 }, fontStyle: 'bold'
+        }).setOrigin(0.5).setScrollFactor(0).setInteractive().setDepth(200);
+
+        this.speedBtn.on('pointerdown', callback);
     }
 
     updateAutoButton(isAuto) {
@@ -99,23 +111,32 @@ export default class BattleUIManager {
         }
     }
 
-    // [New] 분대 버튼 상태 업데이트
     updateSquadButton(state) {
         if (!this.squadBtn) return;
         
         switch (state) {
             case 'FREE':
                 this.squadBtn.setText('전술: 자율');
-                this.squadBtn.setStyle({ backgroundColor: '#4488ff' }); // Blue
+                this.squadBtn.setStyle({ backgroundColor: '#4488ff' }); 
                 break;
             case 'FORMATION':
                 this.squadBtn.setText('전술: 대열');
-                this.squadBtn.setStyle({ backgroundColor: '#aa44ff' }); // Purple
+                this.squadBtn.setStyle({ backgroundColor: '#aa44ff' }); 
                 break;
             case 'FLEE':
                 this.squadBtn.setText('전술: 도망');
-                this.squadBtn.setStyle({ backgroundColor: '#ffaa00' }); // Orange
+                this.squadBtn.setStyle({ backgroundColor: '#ffaa00' }); 
                 break;
+        }
+    }
+
+    // [New] 속도 버튼 텍스트 업데이트
+    updateSpeedButton(speed) {
+        if (this.speedBtn) {
+            this.speedBtn.setText(`속도: ${speed}x`);
+            // 속도가 빠를수록 색상을 더 밝거나 강렬하게 변경 (선택사항)
+            const colors = { 1: '#666666', 2: '#888800', 3: '#cc0000' };
+            this.speedBtn.setStyle({ backgroundColor: colors[speed] || '#666666' });
         }
     }
 
@@ -139,6 +160,7 @@ export default class BattleUIManager {
         if (this.infoText) this.infoText.setVisible(false);
         if (this.autoBattleBtn) this.autoBattleBtn.setVisible(false);
         if (this.squadBtn) this.squadBtn.setVisible(false);
+        if (this.speedBtn) this.speedBtn.setVisible(false); // 버튼 숨김
 
         const cx = this.scene.cameras.main.centerX;
         const cy = this.scene.cameras.main.centerY;
@@ -218,9 +240,10 @@ export default class BattleUIManager {
         if (this.battleText) this.battleText.setPosition(width / 2, height / 2);
         if (this.debugText) this.debugText.setPosition(width - 10, height - 10);
         
-        // [Modified] 버튼 위치 업데이트
+        // [Modified] 버튼 3개 위치 업데이트
         if (this.autoBattleBtn) this.autoBattleBtn.setPosition(100, height - 80);
         if (this.squadBtn) this.squadBtn.setPosition(280, height - 80);
+        if (this.speedBtn) this.speedBtn.setPosition(460, height - 80);
         
         if (this.feedbackDOM) this.feedbackDOM.setPosition(width / 2, height / 2 + 100);
     }

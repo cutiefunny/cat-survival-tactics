@@ -54,7 +54,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.aiConfig = stats.aiConfig || {};
 
         this.formationOffset = { x: 0, y: 0 };
-        // [New] 초기 배치 저장용 변수
         this.savedRelativePos = { x: 0, y: 0 };
 
         this.attackCooldown = stats.attackCooldown || 500;
@@ -94,24 +93,19 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 if (this.scene.battleStarted) {
                     this.scene.selectPlayerUnit(this);
                 } 
-                // [Fixed] 배치 단계(isSetupPhase)에서는 클릭 시 스킬 발동 방지 (드래그와 충돌 방지)
             }
         });
     }
 
-    // 전투 시작 시 현재 위치를 초기 대형으로 저장
     saveFormationPosition(refX, refY) {
         this.savedRelativePos.x = this.x - refX;
         this.savedRelativePos.y = this.y - refY;
-        // 초기 오프셋 바로 적용
         this.formationOffset.x = this.savedRelativePos.x;
         this.formationOffset.y = this.savedRelativePos.y;
     }
 
-    // 리더가 변경되었을 때, 저장된 대형을 유지하도록 오프셋 재계산
     calculateFormationOffset(leaderUnit) {
         if (!leaderUnit || !leaderUnit.active) return;
-        // 내 원래 상대 위치 - 새 리더의 원래 상대 위치 = 새 리더 기준 내 위치
         this.formationOffset.x = this.savedRelativePos.x - leaderUnit.savedRelativePos.x;
         this.formationOffset.y = this.savedRelativePos.y - leaderUnit.savedRelativePos.y;
     }
@@ -187,8 +181,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
+        // [New] 게임 배속 적용 (AI 판단 및 쿨타임 가속을 위해)
+        const adjustedDelta = delta * this.scene.gameSpeed;
+
         if (this.skillTimer > 0) {
-            this.skillTimer -= delta;
+            this.skillTimer -= adjustedDelta; // [Fixed] adjustedDelta 사용
         }
 
         if (this.scene.isSetupPhase) {
@@ -204,34 +201,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             return;
         }
 
-        if (this.fleeTimer > 0) this.fleeTimer -= delta;
+        if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta; // [Fixed] adjustedDelta 사용
 
         if (this.isLeader) {
-            // [Leader]
             this.updatePlayerMovement(); 
             const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
             if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
-                this.updateAI(delta);
+                this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
             }
         } else {
-            // [Followers]
             if (!this.scene.battleStarted) {
-                this.updateFormationFollow(delta); 
+                this.updateFormationFollow(adjustedDelta); // [Fixed] adjustedDelta 사용
             } else if (this.team === 'blue') {
                 switch (this.scene.squadState) {
                     case 'FORMATION':
-                        this.updateFormationFollow(delta); 
+                        this.updateFormationFollow(adjustedDelta); // [Fixed] adjustedDelta 사용
                         break;
                     case 'FLEE':
-                        this.runAway(delta);
+                        this.runAway(adjustedDelta); // [Fixed] adjustedDelta 사용
                         break;
                     case 'FREE':
                     default:
-                        this.updateAI(delta);
+                        this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
                         break;
                 }
             } else {
-                this.updateAI(delta);
+                this.updateAI(adjustedDelta); // [Fixed] adjustedDelta 사용
             }
         }
         

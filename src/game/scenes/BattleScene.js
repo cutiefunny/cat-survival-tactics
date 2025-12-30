@@ -143,6 +143,11 @@ export default class BattleScene extends Phaser.Scene {
         this.checkBattleTimer = 0;
         this.isAutoBattle = false;
         this.squadState = 'FREE'; 
+        
+        // [New] 게임 속도 초기화
+        this.gameSpeed = 1;
+        this.physics.world.timeScale = 1;
+        this.time.timeScale = 1;
 
         // UI Setup
         if (config.showDebugStats) this.uiManager.createDebugStats();
@@ -150,6 +155,8 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createGameMessages();
         this.uiManager.createAutoBattleButton(() => this.toggleAutoBattle());
         this.uiManager.createSquadButton(() => this.toggleSquadState());
+        // [New] 속도 버튼 생성
+        this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
         // Animations
         this.createAnimations();
@@ -161,7 +168,6 @@ export default class BattleScene extends Phaser.Scene {
 
         // Camera
         if(this.playerUnit && this.playerUnit.active) {
-            // 초기 배치 저장 전에는 오프셋 업데이트 하지 않음 (handleStartBattle에서 수행)
             this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
@@ -226,9 +232,8 @@ export default class BattleScene extends Phaser.Scene {
         createAnim('runner_walk_anim', 'runner_walk', 1, 10);
     }
 
-    // [Modified] 전투 시작 시 초기 대형 저장
     handleStartBattle() {
-        this.saveInitialFormation(); // 유저 배치 저장
+        this.saveInitialFormation(); 
         this.isSetupPhase = false;
         this.uiManager.cleanupBeforeBattle();
 
@@ -238,7 +243,6 @@ export default class BattleScene extends Phaser.Scene {
         this.startBattle();
     }
     
-    // [New] 모든 아군 유닛의 현재 위치를 초기 대형으로 기억
     saveInitialFormation() {
         if (!this.playerUnit || !this.playerUnit.active) return;
         const lx = this.playerUnit.x;
@@ -264,11 +268,9 @@ export default class BattleScene extends Phaser.Scene {
         newUnit.resetVisuals(); 
 
         this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
-        // 리더 변경 시 대형 업데이트 (저장된 위치 기반)
         this.updateFormationOffsets();
     }
 
-    // [Modified] 현재 리더 기준으로 오프셋 재계산
     updateFormationOffsets() {
         if (this.playerUnit?.active) {
             this.blueTeam.getChildren().forEach(unit => {
@@ -294,6 +296,20 @@ export default class BattleScene extends Phaser.Scene {
             this.squadState = 'FREE';
         }
         this.uiManager.updateSquadButton(this.squadState);
+    }
+
+    // [New] 게임 속도 토글 로직
+    toggleGameSpeed() {
+        this.gameSpeed++;
+        if (this.gameSpeed > 3) this.gameSpeed = 1;
+        
+        // Phaser Time/Physics Scaling
+        // physics.timeScale은 높을수록 느려짐 (1/N)
+        this.physics.world.timeScale = 1 / this.gameSpeed; 
+        // time.timeScale은 높을수록 빨라짐 (Tweens, TimeEvents 영향)
+        this.time.timeScale = this.gameSpeed;
+        
+        this.uiManager.updateSpeedButton(this.gameSpeed);
     }
 
     startBattle() {
