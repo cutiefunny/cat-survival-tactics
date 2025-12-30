@@ -34,6 +34,8 @@ const ROLE_BASE_STATS = {
 };
 
 const DEFAULT_CONFIG = {
+    // [New] 디버그 스탯 표시 기본값
+    showDebugStats: false,
     gameSettings: { 
         blueCount: 6, 
         redCount: 6, 
@@ -102,6 +104,9 @@ export default class BattleScene extends Phaser.Scene {
         this.loadingText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 'Loading Tactics Config...', {
             fontSize: '40px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0.5).setScrollFactor(0);
+
+        // [New] Debug Text 초기화
+        this.debugText = null;
 
         const map = this.make.tilemap({ key: 'stage1' });
         const tilesetGrass = map.addTilesetImage('tileser_nature', 'tiles_grass');
@@ -253,6 +258,11 @@ export default class BattleScene extends Phaser.Scene {
         this.isSetupPhase = true;
         this.checkBattleTimer = 0;
 
+        // [New] Debug Stats 생성 (설정값이 true일 때)
+        if (config.showDebugStats) {
+            this.createDebugStats();
+        }
+
         // [Anim] 애니메이션 정의
         if (!this.anims.exists('cat_walk')) this.anims.create({ key: 'cat_walk', frames: this.anims.generateFrameNumbers('blueCat', { start: 0, end: 2 }), frameRate: 8, repeat: -1 });
         if (!this.anims.exists('dog_walk')) this.anims.create({ key: 'dog_walk', frames: this.anims.generateFrameNumbers('redDog', { start: 0, end: 1 }), frameRate: 6, repeat: -1 });
@@ -359,6 +369,17 @@ export default class BattleScene extends Phaser.Scene {
         }).setOrigin(0.5).setAlpha(0).setScrollFactor(0); 
     }
 
+    // [New] Debug Stats 생성 함수
+    createDebugStats() {
+        this.debugText = this.add.text(this.cameras.main.width - 10, this.cameras.main.height - 10, '', {
+            font: '14px monospace',
+            fill: '#00ff00',
+            backgroundColor: '#000000aa',
+            padding: { x: 6, y: 4 },
+            align: 'right'
+        }).setOrigin(1, 1).setScrollFactor(0).setDepth(9999);
+    }
+
     createFormationUI() {
         const x = 50;
         const y = 50;
@@ -456,6 +477,17 @@ export default class BattleScene extends Phaser.Scene {
 
     update(time, delta) {
         if (this.isOrientationBad) return; // [New] 세로 모드면 업데이트 중지
+
+        // [New] Debug Stats Update
+        if (this.debugText) {
+             const fps = this.game.loop.actualFps.toFixed(1);
+             let mem = '';
+             // window.performance.memory는 크롬 등 일부 브라우저에서만 지원
+             if (window.performance && window.performance.memory) {
+                 mem = `Mem: ${(window.performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)}MB`;
+             }
+             this.debugText.setText(`FPS: ${fps}\n${mem}`);
+        }
 
         if (!this.blueTeam || !this.redTeam) return;
         if (this.isGameOver) return;
@@ -577,6 +609,11 @@ export default class BattleScene extends Phaser.Scene {
         if (this.startButton) this.startButton.setPosition(width / 2, height - 150);
         if (this.infoText) this.infoText.setPosition(width / 2, 50);
         if (this.battleText) this.battleText.setPosition(width / 2, height / 2);
+        
+        // [New] Debug Stats 위치 재조정
+        if (this.debugText) {
+            this.debugText.setPosition(width - 10, height - 10);
+        }
         
         // 3. 카메라 데드존 업데이트
         if (this.cameras.main.deadzone) {

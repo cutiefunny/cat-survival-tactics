@@ -67,9 +67,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.skillTimer = 0;
         this.isUsingSkill = false;
         
+        // AI Think Timer 초기화 (랜덤성을 두어 프레임 분산 효과 유지)
         this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
         this.currentTarget = null;
+        
+        // [Optimization] 벡터 객체 재사용을 위한 초기화
         this._tempVec = new Phaser.Math.Vector2();
         
         // [Visual Config]
@@ -186,6 +189,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const bounds = this.scene.physics.world.bounds;
         const padding = this.baseSize / 2; 
 
+        // Clamp는 가벼운 연산이므로 매 프레임 실행해도 괜찮으나, 
+        // 물리 엔진이 이미 worldBounds 충돌을 처리하고 있다면 중복일 수 있습니다.
+        // 여기서는 물리 엔진 외에 강제로 위치를 보정하는 역할로 유지합니다.
         const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
         const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
 
@@ -217,6 +223,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         let closestDistSq = Infinity;
         let closestTarget = null;
         const enemies = this.targetGroup.getChildren();
+        // for...of 루프는 성능상 큰 문제는 없으나, 최적화를 위해 일반 for문 고려 가능
+        // 여기서는 가독성을 위해 유지하되, enemies가 많아지면 Spatial Hashing 고려 필요
         for (let enemy of enemies) {
             if (enemy.active) {
                 const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
@@ -243,6 +251,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const allies = myGroup.getChildren();
         const enemies = this.targetGroup.getChildren();
         const engageDistSq = 10000; 
+        
+        // 2중 루프는 O(N*M)이므로 유닛 수가 많으면 성능 저하 원인이 됩니다.
+        // 현재 규모(6vs6)에서는 문제없으나, 유닛이 많아지면 최적화 1순위입니다.
         for (let enemy of enemies) {
             if (!enemy.active) continue;
             for (let ally of allies) {
@@ -285,9 +296,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
         });
 
+        // [Optimization] 새로운 Vector2 객체 생성을 피하고 _tempVec 재사용
         if (Math.abs(forceX) > 0.1 || Math.abs(forceY) > 0.1) {
-            const vec = new Phaser.Math.Vector2(forceX, forceY).normalize().scale(this.moveSpeed * 1.5);
-            this.setVelocity(vec.x, vec.y);
+            // new Phaser.Math.Vector2(...) 대신 set() 사용
+            this._tempVec.set(forceX, forceY).normalize().scale(this.moveSpeed * 1.5);
+            this.setVelocity(this._tempVec.x, this._tempVec.y);
             this.updateFlipX();
         } else {
             this.setVelocity(0, 0);
@@ -317,6 +330,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (cursors.down.isDown || this.scene.wasd.down.isDown || (joyCursors && joyCursors.down.isDown)) vy += 1;
 
         if (vx !== 0 || vy !== 0) {
+            // [Optimization] _tempVec 재사용
             this._tempVec.set(vx, vy).normalize().scale(this.moveSpeed);
             this.setVelocity(this._tempVec.x, this._tempVec.y);
             this.updateFlipX();

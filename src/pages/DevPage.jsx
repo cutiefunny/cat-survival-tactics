@@ -1,6 +1,5 @@
 import { createSignal, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
-// [New] collection, getDocs, query, orderBy, deleteDoc 추가
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -16,6 +15,8 @@ const DEFAULT_ROLE_DEFS = {
 };
 
 const DEFAULT_CONFIG = {
+  // [New] 디버그 스탯 표시 여부 설정 추가
+  showDebugStats: false, 
   gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100 },
@@ -31,8 +32,6 @@ const DEFAULT_CONFIG = {
 const DevPage = () => {
   const [config, setConfig] = createStore(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
   const [status, setStatus] = createSignal("Loading...");
-  
-  // [New] 피드백 목록 상태
   const [feedbacks, setFeedbacks] = createSignal([]);
 
   onMount(async () => {
@@ -77,11 +76,10 @@ const DevPage = () => {
       setStatus("Error Loading Config ❌");
     }
 
-    // 2. [New] 피드백 로드
+    // 2. 피드백 로드
     fetchFeedbacks();
   });
 
-  // [New] 피드백 불러오기 함수
   const fetchFeedbacks = async () => {
       try {
         const q = query(collection(db, "feedbacks"), orderBy("timestamp", "desc"));
@@ -93,7 +91,6 @@ const DevPage = () => {
       }
   };
 
-  // [New] 피드백 삭제 함수
   const handleDeleteFeedback = async (id) => {
       if(!confirm("Delete this feedback?")) return;
       try {
@@ -159,7 +156,6 @@ const DevPage = () => {
     }
   };
 
-  // [UI Helper] 유닛 행 렌더링
   const renderUnitRow = (unit, index, teamType) => {
     return (
         <div style={{ 
@@ -218,9 +214,24 @@ const DevPage = () => {
         {/* --- Global & AI Settings --- */}
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>⚙️ Global Settings</h2>
-          <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap" }}>
-            <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
-            <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {/* [New] Debug Stats Toggle */}
+            <label style={{display: "flex", alignItems: "center", cursor: "pointer", background: "#333", padding: "10px", borderRadius: "5px"}}>
+                <input 
+                    type="checkbox" 
+                    checked={config.showDebugStats} 
+                    onChange={(e) => setConfig("showDebugStats", e.target.checked)} 
+                    style={{marginRight: "10px", transform: "scale(1.2)"}}
+                />
+                <span style={{color: config.showDebugStats ? "#44ff44" : "#888", fontWeight: "bold"}}>
+                    Show Debug Stats (FPS/Mem)
+                </span>
+            </label>
+
+            <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap", marginTop: "10px" }}>
+                <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
+                <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
+            </div>
           </div>
         </section>
 
@@ -232,6 +243,7 @@ const DevPage = () => {
           </div>
         </section>
 
+        {/* ... (이하 기존 코드 동일: Class Base Stats, Blue/Red Team, Feedback 등) ... */}
         {/* --- Class Base Stats & Skills --- */}
         <section style={{ background: "#222", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #444" }}>
             <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Skills</h2>
@@ -297,7 +309,7 @@ const DevPage = () => {
           </div>
         </section>
 
-        {/* --- [New] Feedback Viewer --- */}
+        {/* --- Feedback Viewer --- */}
         <section style={{ background: "#333", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #666" }}>
             <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
                 <h2 style={{ color: "#00ffcc", margin: 0 }}>📢 User Feedbacks</h2>
