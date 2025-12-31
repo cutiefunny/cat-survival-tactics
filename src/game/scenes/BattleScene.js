@@ -137,6 +137,10 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     startGame(config, wallLayer, blockLayer) {
+        // [New] Unit.js에서 참조할 수 있도록 레이어 저장
+        this.wallLayer = wallLayer;
+        this.blockLayer = blockLayer;
+
         this.isGameOver = false;
         this.battleStarted = false;
         this.isSetupPhase = true;
@@ -144,7 +148,6 @@ export default class BattleScene extends Phaser.Scene {
         this.isAutoBattle = false;
         this.squadState = 'FREE'; 
         
-        // [New] 게임 속도 초기화
         this.gameSpeed = 1;
         this.physics.world.timeScale = 1;
         this.time.timeScale = 1;
@@ -155,7 +158,6 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createGameMessages();
         this.uiManager.createAutoBattleButton(() => this.toggleAutoBattle());
         this.uiManager.createSquadButton(() => this.toggleSquadState());
-        // [New] 속도 버튼 생성
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
         // Animations
@@ -208,14 +210,22 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     setupPhysicsColliders(wallLayer, blockLayer) {
+        // [Modified] 충돌 시 유닛의 handleWallCollision 호출
+        const onWallCollision = (unit, tile) => {
+            if (unit && typeof unit.handleWallCollision === 'function') {
+                unit.handleWallCollision(tile);
+            }
+        };
+
         if (wallLayer) {
-            this.physics.add.collider(this.blueTeam, wallLayer);
-            this.physics.add.collider(this.redTeam, wallLayer);
+            this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision);
+            this.physics.add.collider(this.redTeam, wallLayer, onWallCollision);
         }
         if (blockLayer) {
-            this.physics.add.collider(this.blueTeam, blockLayer);
-            this.physics.add.collider(this.redTeam, blockLayer);
+            this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision);
+            this.physics.add.collider(this.redTeam, blockLayer, onWallCollision);
         }
+
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
@@ -298,15 +308,11 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.updateSquadButton(this.squadState);
     }
 
-    // [New] 게임 속도 토글 로직
     toggleGameSpeed() {
         this.gameSpeed++;
         if (this.gameSpeed > 3) this.gameSpeed = 1;
         
-        // Phaser Time/Physics Scaling
-        // physics.timeScale은 높을수록 느려짐 (1/N)
         this.physics.world.timeScale = 1 / this.gameSpeed; 
-        // time.timeScale은 높을수록 빨라짐 (Tweens, TimeEvents 영향)
         this.time.timeScale = this.gameSpeed;
         
         this.uiManager.updateSpeedButton(this.gameSpeed);
