@@ -2,9 +2,10 @@ import Unit from '../Unit';
 import Phaser from 'phaser';
 
 export default class Leader extends Unit {
-    constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {
-        stats.role = 'Leader';
+    constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = true) {
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
+        this.role = 'Leader';
+        // Leader 특화 로직이 있다면 여기에 추가
     }
 
     performSkill() {

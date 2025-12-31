@@ -7,6 +7,7 @@ import Tanker from '../objects/roles/Tanker';
 import Dealer from '../objects/roles/Dealer';
 import Normal from '../objects/roles/Normal';
 import Leader from '../objects/roles/Leader';
+import Healer from '../objects/roles/Healer'; // 힐러 임포트
 
 // [Firebase]
 import { doc, getDoc } from "firebase/firestore";
@@ -24,14 +25,20 @@ import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 
 const UnitClasses = {
     'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
-    'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 'NormalDog': Normal 
+    'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 
+    'Healer': Healer, // 힐러 클래스 등록
+    'NormalDog': Normal 
 };
 
+// [Update] 역할별 기본 스탯 정의 (Dev 페이지가 없을 때 사용하는 기본값)
 const ROLE_BASE_STATS = {
     'Leader': { skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
-    'Tanker': { skillCooldown: 10000, skillRange: 200 }
+    'Tanker': { skillCooldown: 10000, skillRange: 200 },
+    // 힐러는 기본 공격력이 곧 힐량이 되므로 적절히 설정
+    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 0 } 
 };
 
+// [Update] 기본 게임 설정 (DB 연결 실패 시 사용)
 const DEFAULT_CONFIG = {
     showDebugStats: false,
     gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
@@ -45,6 +52,9 @@ const DEFAULT_CONFIG = {
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
+        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 }, // [New] 기본 배치에 힐러 추가
+        { role: 'Tanker', hp: 300, attackPower: 10, moveSpeed: 50 },
+        { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 80 },
         { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 }
     ]
 };
@@ -137,7 +147,7 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     startGame(config, wallLayer, blockLayer) {
-        // [New] Unit.js에서 참조할 수 있도록 레이어 저장
+        // Unit.js에서 참조할 수 있도록 레이어 저장
         this.wallLayer = wallLayer;
         this.blockLayer = blockLayer;
 
@@ -189,28 +199,34 @@ export default class BattleScene extends Phaser.Scene {
         const createUnit = (x, y, tex, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-            const unit = new UnitClass(this, x, y, tex, team, target, stats, isLeader);
+            // 힐러 등 특수 역할의 기본 스탯 병합
+            const baseStats = ROLE_BASE_STATS[stats.role] || {};
+            const finalStats = { ...baseStats, ...stats };
+            
+            const unit = new UnitClass(this, x, y, tex, team, target, finalStats, isLeader);
             unit.setInteractive();
             this.input.setDraggable(unit);
             return unit;
         };
 
         for (let i = 0; i < blueCount; i++) {
-            const stats = { ...ROLE_BASE_STATS[blueRoles[i%blueRoles.length].role] || {}, ...blueRoles[i%blueRoles.length] };
+            const roleConfig = blueRoles[i % blueRoles.length];
+            // [Update] ROLE_BASE_STATS 참조 강화
+            const stats = { ...ROLE_BASE_STATS[roleConfig.role], ...roleConfig };
             const unit = createUnit(300, startY + (i*spawnGap), 'blueCat', 'blue', this.redTeam, stats, i===0);
             if (i===0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
 
         for (let i = 0; i < redCount; i++) {
-            const stats = redRoles[i%redRoles.length];
+            const stats = redRoles[i % redRoles.length];
             const unit = createUnit(1300, startY + (i*spawnGap), 'redDog', 'red', this.blueTeam, stats, false);
             this.redTeam.add(unit);
         }
     }
 
     setupPhysicsColliders(wallLayer, blockLayer) {
-        // [Modified] 충돌 시 유닛의 handleWallCollision 호출
+        // 충돌 시 유닛의 handleWallCollision 호출
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') {
                 unit.handleWallCollision(tile);

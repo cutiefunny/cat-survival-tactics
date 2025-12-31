@@ -10,12 +10,13 @@ const DEFAULT_ROLE_DEFS = {
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
+  // [New] 힐러 스탯 (attackPower=치유량, attackCooldown=치유간격)
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
 };
 
 const DEFAULT_CONFIG = {
-  // [New] 디버그 스탯 표시 여부 설정 추가
   showDebugStats: false, 
   gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
   aiSettings: {
@@ -43,11 +44,17 @@ const DevPage = () => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const merged = { ...DEFAULT_CONFIG, ...data };
+        
+        // AI 설정 병합
         if (data.aiSettings) merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
+        
+        // 역할 정의 병합 (새로운 역할이 추가되었을 경우를 대비)
         if (data.roleDefinitions) {
             Object.keys(DEFAULT_ROLE_DEFS).forEach(role => {
                 if(merged.roleDefinitions[role]) {
                     merged.roleDefinitions[role] = { ...DEFAULT_ROLE_DEFS[role], ...merged.roleDefinitions[role] };
+                } else {
+                    merged.roleDefinitions[role] = DEFAULT_ROLE_DEFS[role];
                 }
             });
         } else {
@@ -187,9 +194,9 @@ const DevPage = () => {
             </select>
             <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
                 <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
-                <span title="Attack Power" style={{whiteSpace: "nowrap"}}>⚔️ <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
+                <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
                 <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
-                <span title="Attack Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
+                <span title="Action Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
                 
                 {unit.skillCooldown > 0 && (
                     <span title="Skill Info" style={{color: "#ff88ff", borderLeft: "1px solid #555", paddingLeft: "10px", whiteSpace: "nowrap"}}>
@@ -215,7 +222,6 @@ const DevPage = () => {
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>⚙️ Global Settings</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {/* [New] Debug Stats Toggle */}
             <label style={{display: "flex", alignItems: "center", cursor: "pointer", background: "#333", padding: "10px", borderRadius: "5px"}}>
                 <input 
                     type="checkbox" 
@@ -243,19 +249,34 @@ const DevPage = () => {
           </div>
         </section>
 
-        {/* ... (이하 기존 코드 동일: Class Base Stats, Blue/Red Team, Feedback 등) ... */}
         {/* --- Class Base Stats & Skills --- */}
         <section style={{ background: "#222", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #444" }}>
             <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Skills</h2>
             <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(300px, 1fr))", gap: "15px" }}>
                 {Object.keys(config.roleDefinitions).map(role => (
-                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Leader' ? '#ffd700' : '#aaa'}` }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role}</h4>
+                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : '#aaa'}` }}>
+                        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : ''}</h4>
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>ATK<input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            
+                            {/* [Custom UI] 힐러일 경우 라벨 변경 */}
+                            <label style={{fontSize: "0.8em", color:"#ccc"}}>
+                                {role === 'Healer' ? 'Heal Amt' : 'ATK'}
+                                <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
+                            </label>
+                            
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
-                            <label style={{fontSize: "0.8em", color:"#aaffaa"}}>CD<input type="number" value={config.roleDefinitions[role].attackCooldown || 500} onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} style={{ width: "100%", background: "#112211", color: "#afa", border: "1px solid #484" }} /></label>
+                            
+                            {/* [Custom UI] 힐러일 경우 Heal CD로 표시 */}
+                            <label style={{fontSize: "0.8em", color:"#aaffaa"}}>
+                                {role === 'Healer' ? 'Heal CD' : 'ATK CD'}
+                                <input 
+                                    type="number" 
+                                    value={config.roleDefinitions[role].attackCooldown || 500} 
+                                    onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} 
+                                    style={{ width: "100%", background: "#112211", color: "#afa", border: "1px solid #484" }} 
+                                />
+                            </label>
                             
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
                                 <>
