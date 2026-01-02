@@ -2,169 +2,112 @@ import Unit from '../Unit';
 import Phaser from 'phaser';
 
 export default class Healer extends Unit {
-    constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = false) {
+    constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
-
-        this.role = 'Healer';
         
-        // 힐러 스탯
-        this.healPower = stats.attackPower || 15; 
-        this.healCooldown = stats.attackCooldown || 2000; 
-        this.healRange = 100;
-        this.healTimer = 0;
-        this.targetAlly = null;
+        // 힐러 특화 스탯 오버라이드 (안전을 위해 조금 뒤에 위치하도록 유도)
+        this.healPower = stats.attackPower || 10; 
+        this.healRange = stats.skillRange || 200;
+        this.safeDistance = 150; // 아군에게 붙을 거리
         
-        // [AI] 안전 거리 설정
-        this.dangerRadius = 200; // 이 거리 안의 적만 신경 씀
-        
-        if (this.team === 'blue' && !this.isLeader) {
-            this.setTint(0x88ff88);
-        }
+        // 쿨타임이 0으로 설정되어 들어오는 경우 기본값 부여
+        if (this.skillMaxCooldown <= 0) this.skillMaxCooldown = 5000;
     }
 
+    // [AI Override] 적이 아닌 '다친 아군'을 찾아 이동
     updateAI(delta) {
         this.thinkTimer -= delta;
-        if (this.healTimer > 0) this.healTimer -= delta;
-
-        // 1. [생존] HP 20% 미만이면 적 반대 방향으로 도망 + 자가회복
-        if (this.hp < this.maxHp * 0.2) {
-            this.runAway(delta);
-            this.trySelfHeal();
-            return;
-        }
-
-        // 2. [탐색] 치료할 아군 찾기
         if (this.thinkTimer <= 0) {
-            this.thinkTimer = 300 + Math.random() * 200;
-            this.targetAlly = this.findInjuredAlly();
+            this.thinkTimer = 150 + Math.random() * 100;
+            // 가장 HP가 낮은 아군을 타겟으로 잡음
+            this.currentTarget = this.findLowestHpAlly();
         }
 
-        // 3. [이동 및 치유]
-        if (this.targetAlly && this.targetAlly.active) {
-            const dist = Phaser.Math.Distance.Between(this.x, this.y, this.targetAlly.x, this.targetAlly.y);
-            
-            // 물리적 벽 충돌 회피 중이면 그 로직 우선 (Unit.js)
-            if (this.isAvoiding) return;
+        // 스킬 쿨타임이 찼다면 아군 치유 시도
+        this.tryUseSkill();
 
-            if (dist <= this.healRange) {
-                // 사거리 안: 멈춰서 힐
-                this.setVelocity(0, 0);
-                this.tryHealAlly(this.targetAlly);
+        if (this.isAvoiding) return;
+
+        if (this.currentTarget && this.currentTarget.active) {
+            // 타겟(아군)과의 거리 계산
+            const dist = Phaser.Math.Distance.Between(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
+            
+            // 너무 가까우면 멈추고, 멀면 따라감 (카이팅 대신 팔로우 로직)
+            if (dist > this.safeDistance) {
+                this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
+                this.updateFlipX();
+            } else if (dist < this.safeDistance * 0.5) {
+                // 너무 가까우면 살짝 뒤로 빠짐 (공간 확보)
+                const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
+                this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 0.5, this.body.velocity);
+                this.updateFlipX();
             } else {
-                // [이동] 상황에 따라 직진할지 우회할지 결정
-                this.moveSafelyTo(this.targetAlly);
+                this.setVelocity(0, 0);
             }
         } else {
-            // 할 일 없으면 대열 복귀
-            this.updateFormationFollow(delta);
-        }
-    }
-
-    // [Improved Logic] 조건부 우회 접근
-    moveSafelyTo(target) {
-        // 1. 기본 목표 벡터 (아군을 향한 직진)
-        const distToAlly = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-        const goalDir = new Phaser.Math.Vector2(target.x - this.x, target.y - this.y).normalize();
-
-        // 2. 위협 요소 계산 (경로를 막고 있는 적만 선별)
-        const repulsion = new Phaser.Math.Vector2(0, 0);
-        const enemies = this.targetGroup.getChildren();
-        let blockingThreats = 0;
-
-        // 아군을 향하는 각도 (Radian -> Degree)
-        const angleToAlly = Phaser.Math.RadToDeg(Phaser.Math.Angle.Between(this.x, this.y, target.x, target.y));
-
-        for (const enemy of enemies) {
-            if (!enemy.active) continue;
-
-            const distToEnemy = Phaser.Math.Distance.Between(this.x, this.y, enemy.x, enemy.y);
-            
-            // [Filter 1] 위험 반경 밖의 적은 무시
-            if (distToEnemy > this.dangerRadius) continue;
-
-            // [Filter 2] 아군보다 멀리 있는 적은 무시 (아군 뒤에 있는 적)
-            if (distToEnemy > distToAlly) continue;
-
-            // [Filter 3] 각도 체크: 내 진행 방향(아군 방향) 전방 90도(+/- 45도) 내에 있는가?
-            const angleToEnemy = Phaser.Math.RadToDeg(Phaser.Math.Angle.Between(this.x, this.y, enemy.x, enemy.y));
-            const angleDiff = Math.abs(Phaser.Math.Angle.ShortestBetween(angleToAlly, angleToEnemy));
-
-            if (angleDiff < 60) { // 전방 120도 부채꼴 안에 적이 있다면 "경로가 막힘"으로 간주
-                // 적으로부터 나를 향하는 벡터 (밀어내는 힘)
-                const pushDir = new Phaser.Math.Vector2(this.x - enemy.x, this.y - enemy.y).normalize();
-                
-                // 가까울수록 더 강하게 밀어냄
-                const weight = (1 - distToEnemy / this.dangerRadius) * 4.0; // 가중치 강화
-                pushDir.scale(weight);
-                
-                repulsion.add(pushDir);
-                blockingThreats++;
+            // 치료할 아군이 없으면 리더나 본대 근처로 복귀
+            if (this.team === 'blue' && this.scene.playerUnit && this.scene.playerUnit.active && this.scene.playerUnit !== this) {
+                const distToLeader = Phaser.Math.Distance.Between(this.x, this.y, this.scene.playerUnit.x, this.scene.playerUnit.y);
+                if (distToLeader > 200) {
+                     this.scene.physics.moveToObject(this, this.scene.playerUnit, this.moveSpeed);
+                     this.updateFlipX();
+                } else {
+                    this.setVelocity(0, 0);
+                }
+            } else {
+                this.setVelocity(0, 0);
             }
         }
-
-        // 3. 벡터 합성
-        if (blockingThreats > 0) {
-            // 길이 막혔을 때: 인력 + 척력 합성 (우회)
-            goalDir.add(repulsion).normalize();
-        } 
-        // else: 길이 뚫려있으면 repulsion(0,0) 이므로 그냥 goalDir(직진) 사용
-
-        // 4. 이동 적용
-        this.setVelocity(goalDir.x * this.moveSpeed, goalDir.y * this.moveSpeed);
-        this.updateFlipX();
     }
 
-    findInjuredAlly() {
-        const myGroup = (this.team === 'blue') ? this.scene.blueTeam : this.scene.redTeam;
-        let lowestPct = 1.0;
-        let target = null;
+    // [Skill Override] 적 공격 대신 아군 광역 힐
+    performSkill() {
+        this.setTint(0x00ff00); // 힐러는 초록색 틴트
+        this.isUsingSkill = true;
+        
+        const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
+        const rangeSq = this.healRange * this.healRange;
+        let healedCount = 0;
 
-        myGroup.getChildren().forEach(ally => {
-            if (ally.active && ally !== this && ally.hp < ally.maxHp) {
-                const pct = ally.hp / ally.maxHp;
-                if (pct < lowestPct) {
-                    lowestPct = pct;
-                    target = ally;
+        allies.forEach(ally => {
+            if (ally.active && Phaser.Math.Distance.Squared(this.x, this.y, ally.x, ally.y) < rangeSq) {
+                // 최대 체력을 넘지 않도록 회복
+                if (ally.hp < ally.maxHp) {
+                    ally.hp = Math.min(ally.maxHp, ally.hp + this.healPower * 2); 
+                    ally.redrawHpBar();
+                    
+                    // 치유 이펙트 (간단한 트윈 애니메이션)
+                    this.scene.tweens.add({
+                        targets: ally,
+                        alpha: 0.5,
+                        yoyo: true,
+                        duration: 100,
+                        repeat: 1
+                    });
+                    healedCount++;
                 }
             }
         });
-        return target;
-    }
 
-    trySelfHeal() {
-        if (this.healTimer <= 0) {
-            this.healTimer = this.healCooldown;
-            this.performHeal(this);
-        }
-    }
-
-    tryHealAlly(target) {
-        if (this.healTimer <= 0) {
-            this.healTimer = this.healCooldown;
-            this.performHeal(target);
-        }
-    }
-
-    performHeal(target) {
-        target.hp = Math.min(target.hp + this.healPower, target.maxHp);
-        target.redrawHpBar();
-
-        const healText = this.scene.add.text(target.x, target.y - 40, `+${this.healPower}`, {
-            font: '16px monospace', fill: '#00ff00', stroke: '#000000', strokeThickness: 3
-        }).setOrigin(0.5).setDepth(200);
-        
+        // 힐 이펙트 (자신 주변에 퍼지는 원)
+        const healCircle = this.scene.add.circle(this.x, this.y, 10, 0x00ff00, 0.5);
         this.scene.tweens.add({
-            targets: healText, y: target.y - 80, alpha: 0, duration: 1000,
-            onComplete: () => healText.destroy()
+            targets: healCircle,
+            radius: this.healRange,
+            alpha: 0,
+            duration: 500,
+            onComplete: () => healCircle.destroy()
         });
 
-        this.setTint(0x00ff00);
-        this.scene.time.delayedCall(200, () => {
-            if(this.active) this.resetVisuals();
+        this.scene.time.delayedCall(500, () => {
+            if(this.active) {
+                this.isUsingSkill = false;
+                this.resetVisuals();
+            }
         });
     }
-    
-    tryUseSkill() {
-        // No offensive skill
-    }
+
+    // 기본 공격 로직(Attack)은 유지하거나, 약한 원거리 공격으로 오버라이드 할 수 있습니다.
+    // 현재는 Unit.js의 기본 근접 공격을 따르지만, 
+    // 필요하다면 여기서 findNearestEnemy()를 호출해 자기 방어 로직을 추가할 수 있습니다.
 }

@@ -1,13 +1,15 @@
 import Phaser from 'phaser';
 
 // [Objects & Roles]
+import Unit from '../objects/Unit'; // [Fix] 기본 Unit 클래스 임포트
 import Shooter from '../objects/roles/Shooter';
 import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
 import Dealer from '../objects/roles/Dealer';
 import Normal from '../objects/roles/Normal';
 import Leader from '../objects/roles/Leader';
-import Healer from '../objects/roles/Healer'; // 힐러 임포트
+import Healer from '../objects/roles/Healer';
+import Raccoon from '../objects/roles/Raccoon';
 
 // [Firebase]
 import { doc, getDoc } from "firebase/firestore";
@@ -18,27 +20,45 @@ import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../systems/CombatManager';
 
-// [Assets]
+// [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 
+// [Assets - Units]
+// 🚨 파일 경로가 실제 프로젝트와 일치하는지 확인해주세요.
+import leaderSheet from '../../assets/units/leader.png';
+import dogSheet from '../../assets/units/dog.png';
+import raccoonSheet from '../../assets/units/raccoon.png';
+import shooterSheet from '../../assets/units/shooter.png';
+import tankerSheet from '../../assets/units/tanker.png';
+import runnerSheet from '../../assets/units/runner.png';
+import healerSheet from '../../assets/units/healer.png';
+
 const UnitClasses = {
-    'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
-    'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 
-    'Healer': Healer, // 힐러 클래스 등록
-    'NormalDog': Normal 
+    'Shooter': Shooter, 
+    'Runner': Runner, 
+    'Tanker': Tanker,
+    'Dealer': Dealer, 
+    'Normal': Normal, 
+    'Leader': Leader, 
+    'Healer': Healer, 
+    'Raccoon': Raccoon,
+    'NormalDog': Unit // [Fix] NormalDog는 기본 Unit 로직과 'dog' 텍스처를 사용
 };
 
-// [Update] 역할별 기본 스탯 정의 (Dev 페이지가 없을 때 사용하는 기본값)
+// [Update] 역할별 기본 스탯 정의
 const ROLE_BASE_STATS = {
-    'Leader': { skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
-    'Tanker': { skillCooldown: 10000, skillRange: 200 },
-    // 힐러는 기본 공격력이 곧 힐량이 되므로 적절히 설정
-    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 0 } 
+    'Leader': { hp: 200, attackPower: 25, moveSpeed: 90, skillCooldown: 30000, skillRange: 300, skillDuration: 10000 },
+    'Tanker': { hp: 300, attackPower: 10, moveSpeed: 50, skillCooldown: 10000, skillRange: 200 },
+    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 5000 },
+    'Raccoon': { hp: 150, attackPower: 20, moveSpeed: 100, skillCooldown: 8000 },
+    'Shooter': { hp: 80, attackPower: 30, moveSpeed: 80 },
+    'Runner': { hp: 120, attackPower: 18, moveSpeed: 120 },
+    'Normal': { hp: 140, attackPower: 15, moveSpeed: 70 },
+    'NormalDog': { hp: 140, attackPower: 15, moveSpeed: 70 }
 };
 
-// [Update] 기본 게임 설정 (DB 연결 실패 시 사용)
 const DEFAULT_CONFIG = {
     showDebugStats: false,
     gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
@@ -52,7 +72,8 @@ const DEFAULT_CONFIG = {
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
-        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 }, // [New] 기본 배치에 힐러 추가
+        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 },
+        { role: 'Raccoon', hp: 150, attackPower: 20, moveSpeed: 100 },
         { role: 'Tanker', hp: 300, attackPower: 10, moveSpeed: 50 },
         { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 80 },
         { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 }
@@ -65,29 +86,17 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     preload() {
-        // [Existing Assets]
-        this.load.spritesheet('blueCat', '/images/cat_walk_3frame_sprite.png', { frameWidth: 100, frameHeight: 100 });
-        this.load.image('cat_hit', '/images/cat_hit.png');
-        this.load.image('cat_punch', '/images/cat_punch.png');
-        this.load.image('cat_haak', '/images/cat_haak.png');
-        this.load.spritesheet('redDog', '/images/dog_2frame_horizontal.png', { frameWidth: 100, frameHeight: 100 });
+        // [Asset Loading] 500x100 or 600x100 spritesheets
+        const sheetConfig = { frameWidth: 100, frameHeight: 100 };
 
-        // [Role Assets]
-        this.load.image('tanker_hit', '/images/tanker_hit.png');
-        this.load.image('shooter_hit', '/images/shooter_hit.png');
-        this.load.image('runner_hit', '/images/runner_hit.png');
-
-        this.load.image('tanker_idle', '/images/tanker_idle.png');
-        this.load.spritesheet('tanker_walk', '/images/tanker_walk.png', { frameWidth: 100, frameHeight: 100 });
-        this.load.image('tanker_haak', '/images/tanker_haak.png');
-        
-        this.load.image('shooter_idle', '/images/shooter_idle.png');
-        this.load.spritesheet('shooter_walk', '/images/shooter_walk.png', { frameWidth: 100, frameHeight: 100 });
-        this.load.image('shooter_shot', '/images/shooter_shot.png');
-
-        this.load.image('runner_idle', '/images/runner_idle.png');
-        this.load.spritesheet('runner_walk', '/images/runner_walk.png', { frameWidth: 100, frameHeight: 100 });
-        this.load.image('runner_attack', '/images/runner_attack.png');
+        // [Fix] 'dog' 키로 dog.png 로드 (이전 코드의 redDog 삭제)
+        this.load.spritesheet('leader', leaderSheet, sheetConfig);
+        this.load.spritesheet('dog', dogSheet, sheetConfig); 
+        this.load.spritesheet('raccoon', raccoonSheet, sheetConfig);
+        this.load.spritesheet('shooter', shooterSheet, sheetConfig);
+        this.load.spritesheet('tanker', tankerSheet, sheetConfig);
+        this.load.spritesheet('runner', runnerSheet, sheetConfig);
+        this.load.spritesheet('healer', healerSheet, sheetConfig);
 
         // [Map]
         this.load.tilemapTiledJSON('stage1', stage1Data);
@@ -128,7 +137,6 @@ export default class BattleScene extends Phaser.Scene {
             const docRef = doc(db, "settings", "tacticsConfig");
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-                console.log("✅ Config Loaded:", docSnap.data());
                 const dbData = docSnap.data();
                 config = { ...DEFAULT_CONFIG, ...dbData };
                 if (dbData.aiSettings) config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
@@ -147,22 +155,19 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     startGame(config, wallLayer, blockLayer) {
-        // Unit.js에서 참조할 수 있도록 레이어 저장
         this.wallLayer = wallLayer;
         this.blockLayer = blockLayer;
-
+        
         this.isGameOver = false;
         this.battleStarted = false;
         this.isSetupPhase = true;
         this.checkBattleTimer = 0;
         this.isAutoBattle = false;
         this.squadState = 'FREE'; 
-        
         this.gameSpeed = 1;
         this.physics.world.timeScale = 1;
         this.time.timeScale = 1;
 
-        // UI Setup
         if (config.showDebugStats) this.uiManager.createDebugStats();
         this.uiManager.createStartButton(() => this.handleStartBattle());
         this.uiManager.createGameMessages();
@@ -170,23 +175,36 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createSquadButton(() => this.toggleSquadState());
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
-        // Animations
-        this.createAnimations();
+        // [Animation] 통합된 애니메이션 생성 함수 호출
+        this.createStandardAnimations();
 
-        // Unit Creation
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
         this.spawnUnits(config);
 
-        // Camera
         if(this.playerUnit && this.playerUnit.active) {
             this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
 
-        // Colliders
         this.setupPhysicsColliders(wallLayer, blockLayer);
+    }
+
+    createStandardAnimations() {
+        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
+        
+        unitTextures.forEach(key => {
+            // [Check] 텍스처가 로드되었는지 확인 후 애니메이션 생성
+            if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
+                this.anims.create({
+                    key: `${key}_walk`,
+                    frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
+                    frameRate: 6,
+                    repeat: -1
+                });
+            }
+        });
     }
 
     spawnUnits(config) {
@@ -196,14 +214,15 @@ export default class BattleScene extends Phaser.Scene {
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
-        const createUnit = (x, y, tex, team, target, stats, isLeader) => {
+        const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-            // 힐러 등 특수 역할의 기본 스탯 병합
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
             
-            const unit = new UnitClass(this, x, y, tex, team, target, finalStats, isLeader);
+            // Texture Key는 Unit.js 내부에서 결정하므로 null을 넘김
+            const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
+            
             unit.setInteractive();
             this.input.setDraggable(unit);
             return unit;
@@ -211,22 +230,20 @@ export default class BattleScene extends Phaser.Scene {
 
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
-            // [Update] ROLE_BASE_STATS 참조 강화
             const stats = { ...ROLE_BASE_STATS[roleConfig.role], ...roleConfig };
-            const unit = createUnit(300, startY + (i*spawnGap), 'blueCat', 'blue', this.redTeam, stats, i===0);
+            const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, stats, i===0);
             if (i===0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
 
         for (let i = 0; i < redCount; i++) {
             const stats = redRoles[i % redRoles.length];
-            const unit = createUnit(1300, startY + (i*spawnGap), 'redDog', 'red', this.blueTeam, stats, false);
+            const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
             this.redTeam.add(unit);
         }
     }
-
+    
     setupPhysicsColliders(wallLayer, blockLayer) {
-        // 충돌 시 유닛의 handleWallCollision 호출
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') {
                 unit.handleWallCollision(tile);
@@ -245,17 +262,6 @@ export default class BattleScene extends Phaser.Scene {
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
-    }
-
-    createAnimations() {
-        const createAnim = (key, texture, end, rate=8) => {
-            if (!this.anims.exists(key)) this.anims.create({ key, frames: this.anims.generateFrameNumbers(texture, { start: 0, end }), frameRate: rate, repeat: -1 });
-        };
-        createAnim('cat_walk', 'blueCat', 2);
-        createAnim('dog_walk', 'redDog', 1, 6);
-        createAnim('tanker_walk_anim', 'tanker_walk', 1, 6);
-        createAnim('shooter_walk_anim', 'shooter_walk', 2);
-        createAnim('runner_walk_anim', 'runner_walk', 1, 10);
     }
 
     handleStartBattle() {

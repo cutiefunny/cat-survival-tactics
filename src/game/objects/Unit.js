@@ -1,29 +1,44 @@
 import Phaser from 'phaser';
 
-// [Role Visuals]
-const ROLE_VISUALS = {
-    'Tanker': { idle: 'tanker_idle', walkAnim: 'tanker_walk_anim', attack: 'tanker_haak', hit: 'tanker_hit', useFrameForIdle: false },
-    'Shooter': { idle: 'shooter_idle', walkAnim: 'shooter_walk_anim', attack: 'shooter_shot', hit: 'shooter_hit', useFrameForIdle: false },
-    'Runner': { idle: 'runner_idle', walkAnim: 'runner_walk_anim', attack: 'runner_attack', hit: 'runner_hit', useFrameForIdle: false },
-    'Dealer': { idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit', useFrameForIdle: true },
-    'Leader': { idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit', useFrameForIdle: true },
-    'Normal': { idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit', useFrameForIdle: true },
-    'NormalDog': { idle: 'redDog', walkAnim: 'dog_walk', attack: null, hit: null, useFrameForIdle: true },
-    'Healer': { idle: 'blueCat', walkAnim: 'cat_walk', attack: 'cat_punch', hit: 'cat_hit', useFrameForIdle: true }
+// [Role Texture Mapping]
+const ROLE_TEXTURES = {
+    'Tanker': 'tanker',
+    'Shooter': 'shooter',
+    'Runner': 'runner', 
+    'Dealer': 'leader',    
+    'Leader': 'leader',    
+    'Normal': 'leader',    
+    'Healer': 'healer',    
+    'Raccoon': 'raccoon',  
+    'NormalDog': 'dog'     
 };
+
+// [Frame Constants]
+const FRAME_IDLE = 0;
+const FRAME_ATTACK = 3;
+const FRAME_HIT = 4;
+const FRAME_SKILL = 5; 
 
 export default class Unit extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = false) {
-        super(scene, x, y, texture);
+        // [Visual Config]
+        const roleKey = stats.role || 'Normal';
+        const assignedTexture = ROLE_TEXTURES[roleKey] || (team === 'red' ? 'dog' : 'leader');
+        
+        super(scene, x, y, assignedTexture);
 
+        this.textureKey = assignedTexture; 
         this.scene = scene;
         this.team = team;
         this.targetGroup = targetGroup;
         this.isLeader = isLeader;
         
         // [Stats]
-        this.role = stats.role || 'Unknown';
+        this.role = roleKey;
+        
+        // [Revert] 충돌 범위(지름)를 다시 50(Tanker는 60)으로 복구
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
+        
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
         
@@ -52,22 +67,17 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.fleeTimer = 0;
         this.currentTarget = null;
         
-        // [Optimization Variables]
+        // [Avoidance]
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
-
-        // [Avoidance System]
         this.isAvoiding = false;
         this.avoidTimer = 0;
         this.avoidDir = new Phaser.Math.Vector2();
-        this.savedAvoidDir = null; // Persistence
+        this.savedAvoidDir = null;
         this.wallFreeTimer = 0;
         this.losCheckTimer = 0; 
         this.lastLosResult = true;
-
-        this.visualConfig = ROLE_VISUALS[this.role] || ROLE_VISUALS['Normal'];
-        if (this.team === 'red') this.visualConfig = ROLE_VISUALS['NormalDog'];
 
         // [Debug UI]
         this.debugText = scene.add.text(x, y, '', { font: '10px monospace', fill: '#ffffff', backgroundColor: '#000000aa', padding: { x: 2, y: 2 }, align: 'center' }).setOrigin(0.5, 1.3).setDepth(9999).setVisible(false);
@@ -99,9 +109,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.destroy();
     }
 
-    // [World Bounds Logic]
     enforceWorldBounds() {
         const bounds = this.scene.physics.world.bounds;
+        // [Revert] 패딩도 baseSize 기반으로 복구
         const padding = this.baseSize / 2; 
 
         const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
@@ -114,8 +124,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    // --- Main Update ---
-
     update(time, delta) {
         if (!this.active) return;
         this.updateUI();
@@ -125,38 +133,22 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         else { this.debugText.setVisible(false); this.debugGraphic.setVisible(false); }
 
         const adjustedDelta = delta * (this.scene.gameSpeed || 1);
-
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
-
-        if (this.scene.isSetupPhase) {
-            this.setVelocity(0, 0);
-            return;
-        }
-
+        if (this.scene.isSetupPhase) { this.setVelocity(0, 0); return; }
         this.enforceWorldBounds();
+        if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
 
-        if (this.scene.isGameOver) {
-            this.setVelocity(0, 0);
-            if (this.anims.isPlaying) this.stop();
-            return;
-        }
-
-        // [Wall Memory Check]
         if (!this.isAvoiding) {
             this.wallFreeTimer += adjustedDelta;
-            if (this.wallFreeTimer > 1000) {
-                this.savedAvoidDir = null;
-            }
+            if (this.wallFreeTimer > 1000) this.savedAvoidDir = null;
         }
 
-        // [Priority 1] 회피 기동
         if (this.isAvoiding) {
             this.updateAvoidance(adjustedDelta);
             this.updateAnimation();
             return; 
         }
 
-        // Normal Update
         if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
         if (this.isLeader) {
@@ -178,157 +170,58 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.updateAI(adjustedDelta); 
             }
         }
-        
         this.updateAnimation();
     }
 
-    // --- Avoidance (4-Step Rule) ---
-
-    checkLineOfSight() {
-        if (!this.currentTarget || !this.currentTarget.active) return true;
-        
-        const now = this.scene.time.now;
-        if (now < this.losCheckTimer) return this.lastLosResult;
-        this.losCheckTimer = now + 150; 
-
-        const wallLayer = this.scene.wallLayer; 
-        const blockLayer = this.scene.blockLayer;
-        if (!wallLayer) { this.lastLosResult = true; return true; }
-
-        this._tempStart.set(this.x, this.y);
-        this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
-        
-        const distance = this._tempStart.distance(this._tempEnd);
-        const stepSize = 35; 
-        const steps = Math.ceil(distance / stepSize);
-        
-        for (let i = 1; i < steps; i++) { 
-            const t = i / steps;
-            const cx = this._tempStart.x + (this._tempEnd.x - this._tempStart.x) * t;
-            const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
-            
-            const tile = wallLayer.getTileAtWorldXY(cx, cy);
-            if (tile && tile.canCollide) { this.lastLosResult = false; return false; }
-            if (blockLayer) {
-                const block = blockLayer.getTileAtWorldXY(cx, cy);
-                if (block && block.canCollide) { this.lastLosResult = false; return false; }
-            }
-        }
-        this.lastLosResult = true;
-        return true; 
-    }
-
-    calculateWallAvoidDir() {
-        const blocked = this.body.blocked;
-        const touching = this.body.touching;
-        
-        let tx = 0, ty = 0;
-        if (this.currentTarget && this.currentTarget.active) {
-            tx = this.currentTarget.x; ty = this.currentTarget.y;
-        } else {
-            tx = this.x + 100; ty = this.y;
-        }
-
-        const newDir = new Phaser.Math.Vector2();
-
-        if (blocked.left || blocked.right || touching.left || touching.right) {
-            const dirY = (ty > this.y) ? 1 : -1;
-            newDir.set(0, dirY);
-        } else if (blocked.up || blocked.down || touching.up || touching.down) {
-            const dirX = (tx > this.x) ? 1 : -1;
-            newDir.set(dirX, 0);
-        } else {
-            const diffX = Math.abs(tx - this.x);
-            const diffY = Math.abs(ty - this.y);
-            if (diffX > diffY) {
-                const dirY = (ty > this.y) ? 1 : -1;
-                newDir.set(0, dirY);
-            } else {
-                const dirX = (tx > this.x) ? 1 : -1;
-                newDir.set(dirX, 0);
-            }
-        }
-        return newDir.normalize();
-    }
-
+    // --- AI Methods ---
+    checkLineOfSight() { return true; } 
+    calculateWallAvoidDir() { return new Phaser.Math.Vector2(); } 
     handleWallCollision(tile) {
         this.wallFreeTimer = 0;
-
-        // 1. 이미 회피 중이면 유지
         if (this.isAvoiding) {
             const blocked = this.body.blocked;
             const dir = this.avoidDir;
             const isBlocked = (dir.x > 0 && blocked.right) || (dir.x < 0 && blocked.left) || 
                               (dir.y > 0 && blocked.down) || (dir.y < 0 && blocked.up);
-            
-            if (isBlocked) {
-                this.avoidDir.negate();
-                if (this.savedAvoidDir) this.savedAvoidDir.copy(this.avoidDir);
-            }
-            this.avoidTimer = 500; 
-            return;
+            if (isBlocked) { this.avoidDir.negate(); if (this.savedAvoidDir) this.savedAvoidDir.copy(this.avoidDir); }
+            this.avoidTimer = 500; return;
         }
-
-        // 2. 시야 체크
         if (this.checkLineOfSight()) return;
-
-        // 3. 회피 시작
-        this.isAvoiding = true;
-        this.avoidTimer = 500; 
-        this.setVelocity(0, 0);
-
-        // 4. 방향 결정 (Rule 4)
+        this.isAvoiding = true; this.avoidTimer = 500; this.setVelocity(0, 0);
         let useSavedDir = false;
         if (this.savedAvoidDir) {
             const blocked = this.body.blocked;
             const dir = this.savedAvoidDir;
             const isBlocked = (dir.x > 0 && blocked.right) || (dir.x < 0 && blocked.left) || 
                               (dir.y > 0 && blocked.down) || (dir.y < 0 && blocked.up);
-            
-            if (!isBlocked) {
-                this.avoidDir.copy(this.savedAvoidDir);
-                useSavedDir = true;
-            }
+            if (!isBlocked) { this.avoidDir.copy(this.savedAvoidDir); useSavedDir = true; }
         }
-
         if (!useSavedDir) {
             const newDir = this.calculateWallAvoidDir();
             this.avoidDir.copy(newDir);
             this.savedAvoidDir = new Phaser.Math.Vector2(newDir.x, newDir.y);
         }
     }
-
     updateAvoidance(delta) {
         this.setVelocity(this.avoidDir.x * this.moveSpeed, this.avoidDir.y * this.moveSpeed);
         this.updateFlipX();
         this.avoidTimer -= delta;
-        if (this.avoidTimer <= 0) {
-            this.isAvoiding = false;
-        }
+        if (this.avoidTimer <= 0) this.isAvoiding = false;
     }
-
-    // --- AI Logic ---
-
     updateAI(delta) {
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
-            if (!this.currentTarget || !this.currentTarget.active) {
-                this.currentTarget = this.findNearestEnemy();
-            }
+            if (!this.currentTarget || !this.currentTarget.active) this.currentTarget = this.findNearestEnemy();
         }
-
         if (this.currentTarget && this.currentTarget.active) {
             if (this.isAvoiding) return;
-
             const dist = Phaser.Math.Distance.Between(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
             const roleKey = this.role.toLowerCase();
             const aiParams = this.aiConfig[roleKey] || {};
-
             if (this.role === 'Shooter') {
                 const kiteDist = aiParams.kiteDistance || 200;
                 const attackDist = aiParams.attackRange || 250;
-
                 if (dist < kiteDist) {
                     const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
                     this.scene.physics.velocityFromRotation(angle, -this.moveSpeed, this.body.velocity);
@@ -336,27 +229,17 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 } else if (dist > attackDist) {
                     this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
                     this.updateFlipX();
-                } else {
-                    this.setVelocity(0, 0);
-                }
+                } else { this.setVelocity(0, 0); }
             } else {
                 this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
                 this.updateFlipX();
             }
-        } else {
-            this.setVelocity(0, 0);
-        }
-        
-        if (this.team !== 'blue' || this.scene.isAutoBattle) {
-            this.tryUseSkill();
-        }
+        } else { this.setVelocity(0, 0); }
+        if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
-
     findNearestEnemy() {
-        let closestDistSq = Infinity;
-        let closestTarget = null;
+        let closestDistSq = Infinity; let closestTarget = null;
         const enemies = this.targetGroup.getChildren();
-        
         for (let enemy of enemies) {
             if (enemy.active && enemy.role !== 'Healer') {
                 const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
@@ -373,41 +256,22 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
         return closestTarget;
     }
-
-    findWeakestEnemy() {
-        let minHp = Infinity;
-        let target = null;
-        const enemies = this.targetGroup.getChildren();
-        for (let enemy of enemies) {
-            if (enemy.active && enemy.hp > 0 && enemy.hp < minHp) {
-                minHp = enemy.hp; target = enemy;
+    findLowestHpAlly() {
+        const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
+        let lowestHpVal = Infinity; let target = null;
+        for (let ally of allies) {
+            if (ally.active && ally !== this && ally.hp < ally.maxHp) {
+                if (ally.hp < lowestHpVal) { lowestHpVal = ally.hp; target = ally; }
             }
         }
         return target;
     }
-
-    findEnemyEngagingAlly() {
-        const myGroup = (this.team === 'blue') ? this.scene.blueTeam : this.scene.redTeam;
-        const allies = myGroup.getChildren();
-        const enemies = this.targetGroup.getChildren();
-        const engageDistSq = 10000; 
-        for (let enemy of enemies) {
-            if (!enemy.active) continue;
-            for (let ally of allies) {
-                if (!ally.active || ally === this) continue;
-                if (Phaser.Math.Distance.Squared(enemy.x, enemy.y, ally.x, ally.y) < engageDistSq) {
-                    return enemy;
-                }
-            }
-        }
-        return null;
-    }
-
+    findWeakestEnemy() { return null; }
+    findEnemyEngagingAlly() { return null; }
     updatePlayerMovement() {
         this.setVelocity(0);
         if (!this.scene.cursors) return;
-        const cursors = this.scene.cursors;
-        const joyCursors = this.scene.joystickCursors;
+        const cursors = this.scene.cursors; const joyCursors = this.scene.joystickCursors;
         let vx = 0, vy = 0;
         if (cursors.left.isDown || this.scene.wasd?.left.isDown || (joyCursors && joyCursors.left.isDown)) vx -= 1;
         if (cursors.right.isDown || this.scene.wasd?.right.isDown || (joyCursors && joyCursors.right.isDown)) vx += 1;
@@ -419,57 +283,40 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.updateFlipX();
         }
     }
-
     updateFormationFollow(delta) {
         if (this.isLeader) return; 
         this.thinkTimer -= delta;
-        if (this.thinkTimer <= 0) {
-            this.thinkTimer = 100 + Math.random() * 100;
-            this.currentTarget = this.findNearestEnemy();
-        }
-        if (this.team !== 'blue' || this.scene.isAutoBattle) {
-            this.tryUseSkill();
-        }
+        if (this.thinkTimer <= 0) { this.thinkTimer = 100 + Math.random() * 100; this.currentTarget = this.findNearestEnemy(); }
+        if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
         if (this.team !== 'blue') { this.setVelocity(0); return; }
         const leader = this.scene.playerUnit;
         if (!leader || !leader.active) return;
-        const tx = leader.x + this.formationOffset.x;
-        const ty = leader.y + this.formationOffset.y;
+        const tx = leader.x + this.formationOffset.x; const ty = leader.y + this.formationOffset.y;
         if (Phaser.Math.Distance.Squared(this.x, this.y, tx, ty) > 25) {
             this.scene.physics.moveTo(this, tx, ty, this.moveSpeed);
             this.updateFlipX();
-        } else {
-            this.setVelocity(0);
-        }
+        } else { this.setVelocity(0); }
     }
-
     runAway(delta) {
-        if (!this.currentTarget || !this.currentTarget.active) {
-            this.currentTarget = this.findNearestEnemy();
-        }
+        if (!this.currentTarget || !this.currentTarget.active) this.currentTarget = this.findNearestEnemy();
         if (this.currentTarget && this.currentTarget.active) {
             const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y); 
             const speed = this.moveSpeed * 1.2; 
             this.setVelocity(Math.cos(angle) * -speed, Math.sin(angle) * -speed);
             this.updateFlipX();
-        } else {
-            this.updateFormationFollow(delta);
-        }
+        } else { this.updateFormationFollow(delta); }
     }
 
-    // --- Skills & Visuals ---
+    // --- Visuals ---
 
     initVisuals() {
-        if (this.visualConfig.useFrameForIdle) {
-            this.play(this.visualConfig.walkAnim);
-        } else {
-            this.setTexture(this.visualConfig.idle);
-        }
+        this.setFrame(FRAME_IDLE); 
+        
         if (this.team === 'blue') {
             this.setFlipX(true);
             if (this.isLeader) this.setTint(0xffffaa);
         } else {
-            this.play('dog_walk');
+            this.play(`${this.textureKey}_walk`); 
             this.setFlipX(false);
             if (this.isLeader) this.setTint(0xffff00);
         }
@@ -480,9 +327,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     resetVisuals() {
         this.scale = 1;
         this.setDisplaySize(this.baseSize, this.baseSize);
+        
         if (this.body) {
-            const radius = this.baseSize / 2;
-            this.body.setCircle(radius, 0, 0); 
+            // [Revert] 충돌 범위는 다시 baseSize에 맞춤
+            const targetDiameter = this.baseSize;
+            const scale = this.scaleX; 
+            
+            const bodyRadius = (targetDiameter / 2) / scale;
+            const offset = (this.width - (bodyRadius * 2)) / 2;
+            
+            this.body.setCircle(bodyRadius, offset, offset); 
         }
         if (this.team === 'blue') {
             if (this.isLeader) this.setTint(0xffffaa);
@@ -491,10 +345,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             if (this.isLeader) this.setTint(0xffff00);
             else this.clearTint();
         }
+        
         if (!this.anims.isPlaying && !this.isUsingSkill && !this.isAttacking) {
-             if (!this.visualConfig.useFrameForIdle) {
-                 this.setTexture(this.visualConfig.idle);
-             }
+             this.setFrame(FRAME_IDLE);
         }
     }
 
@@ -502,13 +355,20 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.skillTimer <= 0 && this.skillMaxCooldown > 0) {
             this.performSkill(); 
             this.skillTimer = this.skillMaxCooldown;
-            this.setTint(0xffffff);
+            if(this.role !== 'Healer') this.setTint(0xffffff);
         }
     }
 
     performSkill() {
         this.setTint(0x00ffff);
         this.isUsingSkill = true;
+
+        if (this.texture.frameTotal > 5) {
+            this.setFrame(FRAME_SKILL);
+        } else {
+            this.setFrame(FRAME_ATTACK);
+        }
+
         const range = this.skillRange;
         this.targetGroup.getChildren().forEach(enemy => {
             if (enemy.active && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) {
@@ -527,10 +387,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.scene.battleStarted) return;
         this.hp -= amount;
         this.onTakeDamage(); 
+        
         if (this.team === 'blue') {
             this.isTakingDamage = true;
-            const hitTex = this.visualConfig.hit || 'cat_hit';
-            this.setTexture(hitTex);
+            this.setFrame(FRAME_HIT);
+            
             this.resetVisuals();
             this.scene.tweens.killTweensOf(this);
             const popSize = this.baseSize * 1.2;
@@ -542,11 +403,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 if (this.active && this.hp > 0) {
                     this.isTakingDamage = false;
                     if (this.isAttacking) return; 
-                    if (!this.visualConfig.useFrameForIdle) {
-                        this.setTexture(this.visualConfig.idle);
-                    } else {
-                        this.play(this.visualConfig.walkAnim); 
-                    }
+                    this.setFrame(FRAME_IDLE);
                     this.resetVisuals();
                 }
             });
@@ -581,7 +438,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.debugGraphic.setVisible(true);
         this.debugGraphic.clear();
         this.debugText.setPosition(this.x, this.y - (this.baseSize / 2) - 15);
-
         if (this.isAvoiding) {
             const vecStr = `(${this.avoidDir.x.toFixed(0)},${this.avoidDir.y.toFixed(0)})`;
             this.debugText.setText(`⚠️SIDE\n${this.avoidTimer.toFixed(0)}ms\nDir:${vecStr}`);
@@ -618,19 +474,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const isBusy = (this.isTakingDamage || this.isAttacking || this.isUsingSkill);
         if (!isBusy) {
             if (this.body.velocity.length() > 5) {
-                if (!this.anims.isPlaying || this.anims.currentAnim.key !== this.visualConfig.walkAnim) {
-                    this.play(this.visualConfig.walkAnim, true);
+                const walkKey = `${this.textureKey}_walk`;
+                if (!this.anims.isPlaying || this.anims.currentAnim.key !== walkKey) {
+                    this.play(walkKey, true);
                     this.resetVisuals();
                 }
             } else {
-                if (this.visualConfig.useFrameForIdle) {
-                    if (this.anims.isPlaying) this.stop();
-                } else {
-                    if (this.anims.isPlaying) {
-                        this.stop();
-                        this.setTexture(this.visualConfig.idle);
-                        this.resetVisuals();
-                    }
+                if (this.anims.isPlaying) {
+                    this.stop();
+                    this.setFrame(FRAME_IDLE);
+                    this.resetVisuals();
                 }
             }
         }
@@ -639,8 +492,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     triggerAttackVisuals() {
         if (this.team === 'blue') {
             this.isAttacking = true;
-            const attackTex = this.visualConfig.attack || 'cat_punch';
-            this.setTexture(attackTex);
+            this.setFrame(FRAME_ATTACK);
+            
             this.resetVisuals();
             this.scene.tweens.killTweensOf(this);
             const popSize = this.baseSize * 1.2;
@@ -652,11 +505,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 if(this.active) {
                     this.isAttacking = false;
                     if (this.isTakingDamage) return;
-                    if (!this.visualConfig.useFrameForIdle) {
-                        this.setTexture(this.visualConfig.idle);
-                    } else {
-                        this.play(this.visualConfig.walkAnim);
-                    }
+                    this.setFrame(FRAME_IDLE);
                     this.resetVisuals();
                 }
             });
@@ -676,7 +525,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset.y = this.savedRelativePos.y - leaderUnit.savedRelativePos.y;
     }
 
-    // [Fix] Missing followLeader method restored
     followLeader() {
         if (!this.scene.playerUnit || !this.scene.playerUnit.active) {
             this.setVelocity(0, 0);

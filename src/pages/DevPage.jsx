@@ -12,6 +12,8 @@ const DEFAULT_ROLE_DEFS = {
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
   // [New] 힐러 스탯 (attackPower=치유량, attackCooldown=치유간격)
   Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000 },
+  // [New] 라쿤 스탯 (빠른 공속/이속, 저돌적)
+  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, attackCooldown: 400, skillCooldown: 8000 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
 };
@@ -254,8 +256,8 @@ const DevPage = () => {
             <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Skills</h2>
             <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(300px, 1fr))", gap: "15px" }}>
                 {Object.keys(config.roleDefinitions).map(role => (
-                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : '#aaa'}` }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : ''}</h4>
+                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : role === 'Raccoon' ? '#ff8844' : '#aaa'}` }}>
+                        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
                             
