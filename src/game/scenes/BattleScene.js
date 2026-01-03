@@ -22,8 +22,13 @@ import CombatManager from '../systems/CombatManager';
 
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
+import level1Data from '../../assets/maps/level1.json';
+
+// [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
+import tilesetCity1Img from '../../assets/tilesets/City_20.png';
+import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
 
 // [Assets - Units]
 import leaderSheet from '../../assets/units/leader.png';
@@ -60,7 +65,7 @@ const ROLE_BASE_STATS = {
 
 const DEFAULT_CONFIG = {
     showDebugStats: false,
-    gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
+    gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'stage1' },
     aiSettings: {
         common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 }, 
         runner: { ambushDistance: 60, fleeDuration: 1500 }, 
@@ -71,7 +76,7 @@ const DEFAULT_CONFIG = {
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
-        { role: 'Healer', hp: 100, attackPower: 45, moveSpeed: 110 }, // 기본값 명시
+        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 },
         { role: 'Raccoon', hp: 150, attackPower: 20, moveSpeed: 100 },
         { role: 'Tanker', hp: 300, attackPower: 10, moveSpeed: 50 },
         { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 80 },
@@ -95,9 +100,15 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
+        // [Map] Maps Load
         this.load.tilemapTiledJSON('stage1', stage1Data);
+        this.load.tilemapTiledJSON('level1', level1Data);
+        
+        // [Image] Tilesets Load
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
+        this.load.image('tiles_city', tilesetCity1Img);
+        this.load.image('tiles_city2', tilesetCity2Img);
     }
 
     create() {
@@ -106,28 +117,13 @@ export default class BattleScene extends Phaser.Scene {
         this.combatManager = new CombatManager(this);
 
         this.uiManager.createLoadingText();
-
-        const map = this.make.tilemap({ key: 'stage1' });
-        const tilesets = [
-            map.addTilesetImage('tileser_nature', 'tiles_grass'),
-            map.addTilesetImage('tileset_trees', 'tiles_plant')
-        ].filter(t => t);
-
-        const groundLayer = map.createLayer('Ground', tilesets, 0, 0);
-        const wallLayer = map.createLayer('Walls', tilesets, 0, 0);
-        const blockLayer = map.createLayer('Blocks', tilesets, 0, 0);
-
-        if (wallLayer) wallLayer.setCollisionByExclusion([-1]);
-        if (blockLayer) blockLayer.setCollisionByExclusion([-1]);
-        this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
-        this.fetchConfigAndStart(wallLayer, blockLayer);
+        this.fetchConfigAndStart();
     }
 
-    async fetchConfigAndStart(wallLayer, blockLayer) {
+    async fetchConfigAndStart() {
         let config = DEFAULT_CONFIG;
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
@@ -142,7 +138,6 @@ export default class BattleScene extends Phaser.Scene {
                      }
                 }
                 if (dbData.blueTeamRoles) {
-                     // DB에서 불러온 역할 설정이 있다면 병합
                      if (dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
                          config.blueTeamRoles = [...dbData.blueTeamRoles, ...DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length)];
                      }
@@ -153,13 +148,56 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.uiManager.destroyLoadingText();
-        this.startGame(config, wallLayer, blockLayer);
+        
+        const selectedMap = config.gameSettings.mapSelection || 'stage1';
+        console.log(`🗺️ Starting Game with Map: ${selectedMap}`);
+        
+        this.startGame(config, selectedMap);
     }
 
-    startGame(config, wallLayer, blockLayer) {
-        this.wallLayer = wallLayer;
-        this.blockLayer = blockLayer;
+    startGame(config, mapKey) {
+        const keyToUse = this.cache.tilemap.exists(mapKey) ? mapKey : 'stage1';
+        const map = this.make.tilemap({ key: keyToUse });
         
+        const tilesets = [];
+
+        if (keyToUse === 'stage1') {
+            const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
+            const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
+            if (t1) tilesets.push(t1);
+            if (t2) tilesets.push(t2);
+        } else if (keyToUse === 'level1') {
+            const t1 = map.addTilesetImage('City_20', 'tiles_city');
+            const t2 = map.addTilesetImage('City_20_2', 'tiles_city2');
+            
+            if (t1) tilesets.push(t1);
+            if (t2) tilesets.push(t2);
+
+            if (tilesets.length === 0) {
+                console.log("🔍 Auto-detecting level1 tilesets...");
+                map.tilesets.forEach(ts => {
+                    const imgKey = ts.name.includes('2') ? 'tiles_city2' : 'tiles_city';
+                    const t = map.addTilesetImage(ts.name, imgKey);
+                    if (t) tilesets.push(t);
+                });
+            }
+        }
+
+        const validTilesets = tilesets.filter(t => t);
+        
+        const groundLayer = map.createLayer('Ground', validTilesets, 0, 0);
+        this.wallLayer = map.createLayer('Walls', validTilesets, 0, 0);
+        this.blockLayer = map.createLayer('Blocks', validTilesets, 0, 0);
+
+        if (this.wallLayer) this.wallLayer.setCollisionByExclusion([-1]);
+        if (this.blockLayer) this.blockLayer.setCollisionByExclusion([-1]);
+        
+        this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+
+        this.mapWidth = map.widthInPixels;
+        this.mapHeight = map.heightInPixels;
+        this.updateCameraBounds(this.scale.width, this.scale.height);
+
         this.isGameOver = false;
         this.battleStarted = false;
         this.isSetupPhase = true;
@@ -177,20 +215,33 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createSquadButton(() => this.toggleSquadState());
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
-        // [Animation] 애니메이션 생성
         this.createStandardAnimations();
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
-        this.spawnUnits(config);
+        
+        // [Modified] spawnUnits에 지도 객체를 전달하여 오브젝트 레이어 접근 가능하게 함
+        this.spawnUnits(config, map);
 
         if(this.playerUnit && this.playerUnit.active) {
-            this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
 
-        this.setupPhysicsColliders(wallLayer, blockLayer);
+        this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
+    }
+
+    updateCameraBounds(screenWidth, screenHeight) {
+        if (!this.mapWidth || !this.mapHeight) return;
+
+        const paddingX = Math.max(0, (screenWidth - this.mapWidth) / 2);
+        const paddingY = Math.max(0, (screenHeight - this.mapHeight) / 2);
+
+        this.cameras.main.setBounds(-paddingX, -paddingY, this.mapWidth + 2 * paddingX, this.mapHeight + 2 * paddingY);
+
+        if (paddingX > 0 || paddingY > 0) {
+            this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
+        }
     }
 
     createStandardAnimations() {
@@ -198,9 +249,7 @@ export default class BattleScene extends Phaser.Scene {
         
         unitTextures.forEach(key => {
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
-                // Healer는 3fps, 나머지는 6fps
                 const frameRate = (key === 'healer') ? 3 : 6;
-                
                 this.anims.create({
                     key: `${key}_walk`,
                     frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
@@ -211,25 +260,19 @@ export default class BattleScene extends Phaser.Scene {
         });
     }
 
-    spawnUnits(config) {
+    // [Modified] map 인자 추가 및 오브젝트 레이어 기반 스폰 로직 추가
+    spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
         const blueCount = config.gameSettings.blueCount ?? 6;
-        const redCount = config.gameSettings.redCount ?? 6;
+        const redCount = config.gameSettings.redCount ?? 6; // 기본값 (오브젝트 레이어 없을 때 사용)
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-            
-            // [Check] Config 값 우선 적용
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
-
-            // [Debug] 힐러 스탯 적용 확인
-            if (stats.role === 'Healer') {
-                console.log(`[BattleScene] Creating Healer with CD: ${finalStats.skillCooldown}, Heal: ${finalStats.attackPower}`);
-            }
             
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             
@@ -237,21 +280,41 @@ export default class BattleScene extends Phaser.Scene {
             this.input.setDraggable(unit);
             return unit;
         };
-        
-        // ... (이하 blueCount, redCount 루프 동일)
+
+        // --- Blue Team Spawn (기본 로직 유지) ---
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
-            // 여기서 roleConfig에 있는 skillCooldown이 병합됩니다.
             const stats = { ...ROLE_BASE_STATS[roleConfig.role], ...roleConfig };
+            // 아군 스폰 위치: (300, startY + gap)
             const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, stats, i===0);
             if (i===0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
 
-        for (let i = 0; i < redCount; i++) {
-            const stats = redRoles[i % redRoles.length];
-            const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
-            this.redTeam.add(unit);
+        // --- Red Team Spawn (오브젝트 레이어 'Dogs' 확인) ---
+        const dogLayer = map.getObjectLayer('Dogs');
+        
+        if (dogLayer && dogLayer.objects.length > 0) {
+            console.log(`🐺 Spawning ${dogLayer.objects.length} dogs from 'Dogs' layer`);
+            
+            dogLayer.objects.forEach((obj, index) => {
+                // 역할 순환 할당
+                const stats = redRoles[index % redRoles.length];
+                
+                // Tiled 좌표계 보정 (Origin이 Top-Left인 경우와 Bottom-Left인 경우 주의, 보통 Point는 그대로 사용)
+                // 만약 Tiled에서 Insert Tile로 넣었다면 y좌표 보정이 필요할 수 있으나, Point 객체라면 그대로 사용
+                const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
+                this.redTeam.add(unit);
+            });
+        } else {
+            // [Fallback] 'Dogs' 레이어가 없으면 기존 로직대로 줄지어 스폰
+            console.log("⚠️ No 'Dogs' layer found. Using default spawn logic.");
+            for (let i = 0; i < redCount; i++) {
+                const stats = redRoles[i % redRoles.length];
+                // 적군 스폰 위치: (1300, startY + gap)
+                const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
+                this.redTeam.add(unit);
+            }
         }
     }
     
@@ -396,9 +459,12 @@ export default class BattleScene extends Phaser.Scene {
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
+        
         if (this.cameras.main.deadzone) {
              this.cameras.main.setDeadzone(gameSize.width * 0.4, gameSize.height * 0.4);
         }
+
+        this.updateCameraBounds(gameSize.width, gameSize.height);
     }
 
     finishGame(message, color) {
