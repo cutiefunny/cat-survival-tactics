@@ -5,12 +5,10 @@ export default class CombatManager {
         this.scene = scene;
     }
 
-    // 두 유닛 그룹 간의 충돌 핸들러 설정
     setupColliders(group1, group2) {
         this.scene.physics.add.collider(group1, group2, this.handleCombat, null, this);
     }
 
-    // 전투 시작 거리 체크 (600px 이내면 전투 시작)
     checkBattleDistance(blueTeam, redTeam) {
         const thresholdSq = 600 * 600;
         let closestDistSq = Infinity;
@@ -23,7 +21,7 @@ export default class CombatManager {
                     const dSq = Phaser.Math.Distance.Squared(blueUnits[b].x, blueUnits[b].y, redUnits[r].x, redUnits[r].y);
                     if (dSq < closestDistSq) closestDistSq = dSq;
                     if (closestDistSq < thresholdSq) {
-                        return true; // 전투 시작 조건 충족
+                        return true; 
                     }
                 }
             }
@@ -31,22 +29,23 @@ export default class CombatManager {
         return false;
     }
 
-    handleRangedAttacks(allUnits) {
-        allUnits.forEach(unit => {
-            // [Fix] 도망 중인 유닛은 원거리 공격 타겟팅 및 실행 금지
-            if (unit.isLowHpFleeing) return;
-
-            if (unit.active && unit.attackRange > 60) {
-                const target = unit.currentTarget;
-                if (target && target.active) {
-                    const distSq = Phaser.Math.Distance.Squared(unit.x, unit.y, target.x, target.y);
-                    const rangeSq = unit.attackRange * unit.attackRange;
-                    if (distSq <= rangeSq) {
-                        this.performAttack(unit, target);
+    // [Optimization] 새로운 배열을 만들지 않고 그룹을 직접 순회
+    handleRangedAttacks(groups) {
+        for (const group of groups) {
+            const units = group.getChildren(); // 참조만 가져옴
+            for (const unit of units) {
+                if (unit.active && unit.attackRange > 60 && !unit.isLowHpFleeing) {
+                    const target = unit.currentTarget;
+                    if (target && target.active) {
+                        const distSq = Phaser.Math.Distance.Squared(unit.x, unit.y, target.x, target.y);
+                        const rangeSq = unit.attackRange * unit.attackRange;
+                        if (distSq <= rangeSq) {
+                            this.performAttack(unit, target);
+                        }
                     }
                 }
             }
-        });
+        }
     }
 
     handleCombat(unit1, unit2) {
@@ -60,7 +59,6 @@ export default class CombatManager {
     performAttack(attacker, defender) {
         if (!attacker.active || !defender.active) return;
         
-        // [Fix] 도망(Flee) 상태인 유닛은 절대 공격하지 않음
         if (attacker.isLowHpFleeing) return;
 
         const now = this.scene.time.now;
@@ -70,12 +68,10 @@ export default class CombatManager {
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            // Shooter 특수 효과 (타격감)
             if (attacker.role === 'Shooter' && defender.active) {
                 this.scene.tweens.add({ targets: defender, x: '+=3', duration: 30, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
             }
             
-            // 넉백 처리
             if (!defender.active || !defender.body) return;
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 

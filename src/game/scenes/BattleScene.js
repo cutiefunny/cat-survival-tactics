@@ -377,7 +377,8 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         if (this.battleStarted) {
-            this.combatManager.handleRangedAttacks([...this.blueTeam.getChildren(), ...this.redTeam.getChildren()]);
+            // [Optimization] 배열 스프레드 연산자([...a, ...b]) 제거. 그룹 배열 자체를 넘김.
+            this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
 
             const blueCount = this.blueTeam.countActive();
             const redCount = this.redTeam.countActive();
