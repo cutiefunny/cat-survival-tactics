@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 // [Objects & Roles]
-import Unit from '../objects/Unit'; // [Fix] 기본 Unit 클래스 임포트
+import Unit from '../objects/Unit';
 import Shooter from '../objects/roles/Shooter';
 import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
@@ -26,9 +26,8 @@ import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 
 // [Assets - Units]
-// 🚨 파일 경로가 실제 프로젝트와 일치하는지 확인해주세요.
 import leaderSheet from '../../assets/units/leader.png';
-import dogSheet from '../../assets/units/dog.png';
+import dogSheet from '../../assets/units/dog.png'; 
 import raccoonSheet from '../../assets/units/raccoon.png';
 import shooterSheet from '../../assets/units/shooter.png';
 import tankerSheet from '../../assets/units/tanker.png';
@@ -44,7 +43,7 @@ const UnitClasses = {
     'Leader': Leader, 
     'Healer': Healer, 
     'Raccoon': Raccoon,
-    'NormalDog': Unit // [Fix] NormalDog는 기본 Unit 로직과 'dog' 텍스처를 사용
+    'NormalDog': Unit 
 };
 
 // [Update] 역할별 기본 스탯 정의
@@ -86,10 +85,8 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     preload() {
-        // [Asset Loading] 500x100 or 600x100 spritesheets
         const sheetConfig = { frameWidth: 100, frameHeight: 100 };
 
-        // [Fix] 'dog' 키로 dog.png 로드 (이전 코드의 redDog 삭제)
         this.load.spritesheet('leader', leaderSheet, sheetConfig);
         this.load.spritesheet('dog', dogSheet, sheetConfig); 
         this.load.spritesheet('raccoon', raccoonSheet, sheetConfig);
@@ -98,13 +95,24 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
-        // [Map]
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
     }
 
     create() {
+        // [🔍 DIAGNOSTIC LOG] dog 텍스처의 실제 크기 확인
+        const dogTex = this.textures.get('dog');
+        const img = dogTex.getSourceImage();
+        console.log(`🖼️ [Texture Check] 'dog' image size: ${img.width}x${img.height}`);
+        
+        if (img.width !== 500) {
+            console.error("🚨 [ERROR] 'dog.png' is NOT 500px wide! It seems to be the old file.");
+            console.warn("👉 Please verify 'src/assets/units/dog.png' is the correct 5-frame strip.");
+        } else {
+            console.log("✅ [Success] 'dog.png' is correctly loaded as 500x100.");
+        }
+
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
@@ -175,7 +183,6 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createSquadButton(() => this.toggleSquadState());
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
-        // [Animation] 통합된 애니메이션 생성 함수 호출
         this.createStandardAnimations();
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
@@ -195,14 +202,17 @@ export default class BattleScene extends Phaser.Scene {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
         
         unitTextures.forEach(key => {
-            // [Check] 텍스처가 로드되었는지 확인 후 애니메이션 생성
-            if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
-                this.anims.create({
-                    key: `${key}_walk`,
-                    frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
-                    frameRate: 6,
-                    repeat: -1
-                });
+            if (this.textures.exists(key)) {
+                if (!this.anims.exists(`${key}_walk`)) {
+                    this.anims.create({
+                        key: `${key}_walk`,
+                        frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
+                        frameRate: 6,
+                        repeat: -1
+                    });
+                }
+            } else {
+                console.warn(`⚠️ [Anim] Texture '${key}' missing! Cannot create walk animation.`);
             }
         });
     }
@@ -220,7 +230,6 @@ export default class BattleScene extends Phaser.Scene {
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
             
-            // Texture Key는 Unit.js 내부에서 결정하므로 null을 넘김
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             
             unit.setInteractive();

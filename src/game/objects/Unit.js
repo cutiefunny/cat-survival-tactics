@@ -35,8 +35,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         
         // [Stats]
         this.role = roleKey;
-        
-        // [Revert] 충돌 범위(지름)를 다시 50(Tanker는 60)으로 복구
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
         
         this.maxHp = stats.hp;
@@ -67,15 +65,21 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.fleeTimer = 0;
         this.currentTarget = null;
         
-        // [Avoidance]
+        // [Optimization]
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
+
+        // [Avoidance System]
         this.isAvoiding = false;
         this.avoidTimer = 0;
         this.avoidDir = new Phaser.Math.Vector2();
-        this.savedAvoidDir = null;
+        
+        // [Persistence]
+        this.savedAvoidDir = null; 
         this.wallFreeTimer = 0;
+
+        // [LOS Optimization]
         this.losCheckTimer = 0; 
         this.lastLosResult = true;
 
@@ -111,7 +115,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     enforceWorldBounds() {
         const bounds = this.scene.physics.world.bounds;
-        // [Revert] 패딩도 baseSize 기반으로 복구
         const padding = this.baseSize / 2; 
 
         const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
@@ -138,11 +141,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
 
+        // [Wall Memory Reset]
         if (!this.isAvoiding) {
             this.wallFreeTimer += adjustedDelta;
             if (this.wallFreeTimer > 1000) this.savedAvoidDir = null;
         }
 
+        // [Priority: Step 2 & 4] 회피 기동
         if (this.isAvoiding) {
             this.updateAvoidance(adjustedDelta);
             this.updateAnimation();
@@ -173,41 +178,157 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
-    // --- AI Methods ---
-    checkLineOfSight() { return true; } 
-    calculateWallAvoidDir() { return new Phaser.Math.Vector2(); } 
+    // --- Avoidance & AI Logic (Restored) ---
+
+    checkLineOfSight() {
+        if (!this.currentTarget || !this.currentTarget.active) return true;
+        
+        const now = this.scene.time.now;
+        if (now < this.losCheckTimer) {
+            return this.lastLosResult;
+        }
+        this.losCheckTimer = now + 150; 
+
+        const wallLayer = this.scene.wallLayer; 
+        const blockLayer = this.scene.blockLayer;
+
+        if (!wallLayer) {
+            this.lastLosResult = true;
+            return true;
+        }
+
+        this._tempStart.set(this.x, this.y);
+        this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
+        
+        const distance = this._tempStart.distance(this._tempEnd);
+        const stepSize = 35; 
+        const steps = Math.ceil(distance / stepSize);
+        
+        for (let i = 1; i < steps; i++) { 
+            const t = i / steps;
+            const cx = this._tempStart.x + (this._tempEnd.x - this._tempStart.x) * t;
+            const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
+            
+            const tile = wallLayer.getTileAtWorldXY(cx, cy);
+            if (tile && tile.canCollide) {
+                this.lastLosResult = false;
+                return false; 
+            }
+            
+            if (blockLayer) {
+                const block = blockLayer.getTileAtWorldXY(cx, cy);
+                if (block && block.canCollide) {
+                    this.lastLosResult = false;
+                    return false;
+                }
+            }
+        }
+        
+        this.lastLosResult = true;
+        return true; 
+    }
+
+    calculateWallAvoidDir() {
+        const blocked = this.body.blocked;
+        const touching = this.body.touching; 
+        
+        let tx = 0, ty = 0;
+        if (this.currentTarget && this.currentTarget.active) {
+            tx = this.currentTarget.x;
+            ty = this.currentTarget.y;
+        } else {
+            tx = this.x + 100; 
+            ty = this.y;
+        }
+
+        const newDir = new Phaser.Math.Vector2();
+
+        // 1. 수직 벽 충돌
+        if (blocked.left || blocked.right || touching.left || touching.right) {
+            const dirY = (ty > this.y) ? 1 : -1;
+            newDir.set(0, dirY);
+        }
+        // 2. 수평 벽 충돌
+        else if (blocked.up || blocked.down || touching.up || touching.down) {
+            const dirX = (tx > this.x) ? 1 : -1;
+            newDir.set(dirX, 0);
+        }
+        // 3. 모호한 경우
+        else {
+            const diffX = Math.abs(tx - this.x);
+            const diffY = Math.abs(ty - this.y);
+            
+            if (diffX > diffY) {
+                const dirY = (ty > this.y) ? 1 : -1;
+                newDir.set(0, dirY);
+            } else {
+                const dirX = (tx > this.x) ? 1 : -1;
+                newDir.set(dirX, 0);
+            }
+        }
+        
+        return newDir.normalize();
+    }
+
     handleWallCollision(tile) {
         this.wallFreeTimer = 0;
+
+        // 1. 이미 회피 중
         if (this.isAvoiding) {
             const blocked = this.body.blocked;
             const dir = this.avoidDir;
+            
             const isBlocked = (dir.x > 0 && blocked.right) || (dir.x < 0 && blocked.left) || 
                               (dir.y > 0 && blocked.down) || (dir.y < 0 && blocked.up);
-            if (isBlocked) { this.avoidDir.negate(); if (this.savedAvoidDir) this.savedAvoidDir.copy(this.avoidDir); }
-            this.avoidTimer = 500; return;
+            
+            if (isBlocked) {
+                this.avoidDir.negate();
+                if (this.savedAvoidDir) this.savedAvoidDir.copy(this.avoidDir);
+            }
+
+            this.avoidTimer = 500; 
+            return;
         }
-        if (this.checkLineOfSight()) return;
-        this.isAvoiding = true; this.avoidTimer = 500; this.setVelocity(0, 0);
+
+        // 2. 시야 체크
+        if (this.checkLineOfSight()) {
+            return;
+        }
+
+        // 3. 회피 시작
+        this.isAvoiding = true;
+        this.avoidTimer = 500; 
+        this.setVelocity(0, 0);
+
+        // 4. 방향 결정
         let useSavedDir = false;
         if (this.savedAvoidDir) {
             const blocked = this.body.blocked;
             const dir = this.savedAvoidDir;
             const isBlocked = (dir.x > 0 && blocked.right) || (dir.x < 0 && blocked.left) || 
                               (dir.y > 0 && blocked.down) || (dir.y < 0 && blocked.up);
-            if (!isBlocked) { this.avoidDir.copy(this.savedAvoidDir); useSavedDir = true; }
+            
+            if (!isBlocked) {
+                this.avoidDir.copy(this.savedAvoidDir);
+                useSavedDir = true;
+            }
         }
+
+        // 5. 새 경로 계산
         if (!useSavedDir) {
             const newDir = this.calculateWallAvoidDir();
             this.avoidDir.copy(newDir);
             this.savedAvoidDir = new Phaser.Math.Vector2(newDir.x, newDir.y);
         }
     }
+
     updateAvoidance(delta) {
         this.setVelocity(this.avoidDir.x * this.moveSpeed, this.avoidDir.y * this.moveSpeed);
         this.updateFlipX();
         this.avoidTimer -= delta;
         if (this.avoidTimer <= 0) this.isAvoiding = false;
     }
+
     updateAI(delta) {
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
@@ -237,6 +358,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         } else { this.setVelocity(0, 0); }
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
+    
     findNearestEnemy() {
         let closestDistSq = Infinity; let closestTarget = null;
         const enemies = this.targetGroup.getChildren();
@@ -268,6 +390,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
     findWeakestEnemy() { return null; }
     findEnemyEngagingAlly() { return null; }
+    
     updatePlayerMovement() {
         this.setVelocity(0);
         if (!this.scene.cursors) return;
@@ -283,6 +406,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.updateFlipX();
         }
     }
+    
     updateFormationFollow(delta) {
         if (this.isLeader) return; 
         this.thinkTimer -= delta;
@@ -297,6 +421,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.updateFlipX();
         } else { this.setVelocity(0); }
     }
+    
     runAway(delta) {
         if (!this.currentTarget || !this.currentTarget.active) this.currentTarget = this.findNearestEnemy();
         if (this.currentTarget && this.currentTarget.active) {
@@ -310,16 +435,19 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     // --- Visuals ---
 
     initVisuals() {
-        this.setFrame(FRAME_IDLE); 
+        this.setFrame(FRAME_IDLE);
         
+        // [Flip Logic] 모든 스프라이트가 원본이 '왼쪽'을 본다고 가정하고 초기 방향 설정
         if (this.team === 'blue') {
+            // 블루팀(왼쪽 진영) -> 오른쪽을 봐야 함 -> flipX = true (반전)
             this.setFlipX(true);
             if (this.isLeader) this.setTint(0xffffaa);
         } else {
-            this.play(`${this.textureKey}_walk`); 
+            // 레드팀(오른쪽 진영) -> 왼쪽을 봐야 함 -> flipX = false (원본)
             this.setFlipX(false);
             if (this.isLeader) this.setTint(0xffff00);
         }
+        
         this.resetVisuals();
         this.redrawHpBar();
     }
@@ -329,7 +457,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.setDisplaySize(this.baseSize, this.baseSize);
         
         if (this.body) {
-            // [Revert] 충돌 범위는 다시 baseSize에 맞춤
             const targetDiameter = this.baseSize;
             const scale = this.scaleX; 
             
@@ -388,26 +515,25 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.hp -= amount;
         this.onTakeDamage(); 
         
-        if (this.team === 'blue') {
-            this.isTakingDamage = true;
-            this.setFrame(FRAME_HIT);
-            
-            this.resetVisuals();
-            this.scene.tweens.killTweensOf(this);
-            const popSize = this.baseSize * 1.2;
-            this.scene.tweens.add({
-                targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
-                onComplete: () => { if (this.active) this.resetVisuals(); }
-            });
-            this.scene.time.delayedCall(500, () => {
-                if (this.active && this.hp > 0) {
-                    this.isTakingDamage = false;
-                    if (this.isAttacking) return; 
-                    this.setFrame(FRAME_IDLE);
-                    this.resetVisuals();
-                }
-            });
-        }
+        this.isTakingDamage = true;
+        this.setFrame(FRAME_HIT);
+        
+        this.resetVisuals();
+        this.scene.tweens.killTweensOf(this);
+        const popSize = this.baseSize * 1.2;
+        this.scene.tweens.add({
+            targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
+            onComplete: () => { if (this.active) this.resetVisuals(); }
+        });
+        this.scene.time.delayedCall(500, () => {
+            if (this.active && this.hp > 0) {
+                this.isTakingDamage = false;
+                if (this.isAttacking) return; 
+                this.setFrame(FRAME_IDLE);
+                this.resetVisuals();
+            }
+        });
+        
         this.redrawHpBar();
         if (this.hp <= 0) this.die();
     }
@@ -459,15 +585,27 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateFlipX() {
-        const isBlue = this.team === 'blue';
+        // [Flip Logic] 모든 스프라이트가 원본이 '왼쪽'을 본다고 가정
+        
+        // 1. 타겟 고정 (우선순위)
         if (this.isAttacking && this.currentTarget && this.currentTarget.active) {
             const diffX = this.currentTarget.x - this.x;
-            if (diffX > 0) this.setFlipX(isBlue ? true : false); 
-            else if (diffX < 0) this.setFlipX(isBlue ? false : true); 
+            if (diffX > 0) {
+                this.setFlipX(true); // 타겟이 오른쪽 -> 오른쪽 봄 (반전)
+            } else if (diffX < 0) {
+                this.setFlipX(false); // 타겟이 왼쪽 -> 왼쪽 봄 (원본)
+            }
             return;
         }
-        if (this.body.velocity.x < -5) this.setFlipX(isBlue ? false : true);
-        else if (this.body.velocity.x > 5) this.setFlipX(isBlue ? true : false);
+
+        // 2. 이동 방향에 따른 Flip 처리
+        if (this.body.velocity.x < -5) {
+            // 왼쪽으로 이동 중 -> 왼쪽을 봐야 함 -> flipX = false
+            this.setFlipX(false);
+        } else if (this.body.velocity.x > 5) {
+            // 오른쪽으로 이동 중 -> 오른쪽을 봐야 함 -> flipX = true
+            this.setFlipX(true);
+        }
     }
 
     updateAnimation() {
@@ -475,9 +613,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!isBusy) {
             if (this.body.velocity.length() > 5) {
                 const walkKey = `${this.textureKey}_walk`;
-                if (!this.anims.isPlaying || this.anims.currentAnim.key !== walkKey) {
-                    this.play(walkKey, true);
-                    this.resetVisuals();
+                // [Anim Check] 애니메이션 존재 여부 확인 후 재생
+                if (this.scene.anims.exists(walkKey)) {
+                    if (!this.anims.isPlaying || this.anims.currentAnim.key !== walkKey) {
+                        this.play(walkKey, true);
+                    }
                 }
             } else {
                 if (this.anims.isPlaying) {
@@ -490,26 +630,24 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     triggerAttackVisuals() {
-        if (this.team === 'blue') {
-            this.isAttacking = true;
-            this.setFrame(FRAME_ATTACK);
-            
-            this.resetVisuals();
-            this.scene.tweens.killTweensOf(this);
-            const popSize = this.baseSize * 1.2;
-            this.scene.tweens.add({
-                targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
-                onComplete: () => { if (this.active) this.resetVisuals(); }
-            });
-            this.scene.time.delayedCall(300, () => {
-                if(this.active) {
-                    this.isAttacking = false;
-                    if (this.isTakingDamage) return;
-                    this.setFrame(FRAME_IDLE);
-                    this.resetVisuals();
-                }
-            });
-        }
+        this.isAttacking = true;
+        this.setFrame(FRAME_ATTACK);
+        
+        this.resetVisuals();
+        this.scene.tweens.killTweensOf(this);
+        const popSize = this.baseSize * 1.2;
+        this.scene.tweens.add({
+            targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
+            onComplete: () => { if (this.active) this.resetVisuals(); }
+        });
+        this.scene.time.delayedCall(300, () => {
+            if(this.active) {
+                this.isAttacking = false;
+                if (this.isTakingDamage) return;
+                this.setFrame(FRAME_IDLE);
+                this.resetVisuals();
+            }
+        });
     }
 
     saveFormationPosition(refX, refY) {
