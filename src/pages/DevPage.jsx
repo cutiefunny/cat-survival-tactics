@@ -10,9 +10,7 @@ const DEFAULT_ROLE_DEFS = {
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
-  // [New] 힐러 스탯 (attackPower=치유량, attackCooldown=치유간격)
   Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000 },
-  // [New] 라쿤 스탯 (빠른 공속/이속, 저돌적)
   Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, attackCooldown: 400, skillCooldown: 8000 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
@@ -22,7 +20,8 @@ const DEFAULT_CONFIG = {
   showDebugStats: false, 
   gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
   aiSettings: {
-    common: { thinkTimeMin: 150, thinkTimeVar: 100 },
+    // [New] fleeHpThreshold: 도망 기준 HP 비율, hpRegenRate: 초당 회복율
+    common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
     dealer: { safeDistance: 150, followDistance: 50 },
     shooter: { attackRange: 250, kiteDistance: 200 } 
@@ -48,9 +47,15 @@ const DevPage = () => {
         const merged = { ...DEFAULT_CONFIG, ...data };
         
         // AI 설정 병합
-        if (data.aiSettings) merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
+        if (data.aiSettings) {
+             merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
+             // common 내부 병합
+             if (data.aiSettings.common) {
+                 merged.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...data.aiSettings.common };
+             }
+        }
         
-        // 역할 정의 병합 (새로운 역할이 추가되었을 경우를 대비)
+        // 역할 정의 병합
         if (data.roleDefinitions) {
             Object.keys(DEFAULT_ROLE_DEFS).forEach(role => {
                 if(merged.roleDefinitions[role]) {
@@ -245,9 +250,34 @@ const DevPage = () => {
 
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>🧠 AI Parameters</h2>
-          <div style={{display: "flex", gap: "20px"}}>
-             <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
-             <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
+          <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
+             {/* [New] Common AI Settings (Flee & Regen) */}
+             <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
+                 <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
+                 <div style={{display: "flex", gap: "15px", flexWrap: "wrap"}}>
+                     <label title="HP % to trigger fleeing">
+                         Flee HP% <br/>
+                         <input type="number" step="0.05" min="0" max="1" 
+                             value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} 
+                             onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} 
+                             style={{ width: "60px", marginTop: "5px" }} 
+                         />
+                     </label>
+                     <label title="HP % regenerated per second when idle">
+                         Idle Regen/s <br/>
+                         <input type="number" step="0.005" min="0" max="0.5" 
+                             value={config.aiSettings.common?.hpRegenRate ?? 0.01} 
+                             onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} 
+                             style={{ width: "60px", marginTop: "5px" }} 
+                         />
+                     </label>
+                 </div>
+             </div>
+
+             <div style={{display: "flex", gap: "20px"}}>
+                <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
+                <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
+             </div>
           </div>
         </section>
 
@@ -261,7 +291,6 @@ const DevPage = () => {
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
                             
-                            {/* [Custom UI] 힐러일 경우 라벨 변경 */}
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>
                                 {role === 'Healer' ? 'Heal Amt' : 'ATK'}
                                 <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
@@ -269,7 +298,6 @@ const DevPage = () => {
                             
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
                             
-                            {/* [Custom UI] 힐러일 경우 Heal CD로 표시 */}
                             <label style={{fontSize: "0.8em", color:"#aaffaa"}}>
                                 {role === 'Healer' ? 'Heal CD' : 'ATK CD'}
                                 <input 

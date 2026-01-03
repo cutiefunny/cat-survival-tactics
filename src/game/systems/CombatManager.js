@@ -33,6 +33,9 @@ export default class CombatManager {
 
     handleRangedAttacks(allUnits) {
         allUnits.forEach(unit => {
+            // [Fix] 도망 중인 유닛은 원거리 공격 타겟팅 및 실행 금지
+            if (unit.isLowHpFleeing) return;
+
             if (unit.active && unit.attackRange > 60) {
                 const target = unit.currentTarget;
                 if (target && target.active) {
@@ -56,6 +59,10 @@ export default class CombatManager {
 
     performAttack(attacker, defender) {
         if (!attacker.active || !defender.active) return;
+        
+        // [Fix] 도망(Flee) 상태인 유닛은 절대 공격하지 않음
+        if (attacker.isLowHpFleeing) return;
+
         const now = this.scene.time.now;
         
         if (now > attacker.lastAttackTime + attacker.attackCooldown) {

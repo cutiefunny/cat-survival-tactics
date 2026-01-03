@@ -60,10 +60,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.skillTimer = 0;
         this.isUsingSkill = false;
         
-        // [AI]
+        // [AI State]
         this.thinkTimer = Math.random() * 200; 
         this.fleeTimer = 0;
         this.currentTarget = null;
+        this.isLowHpFleeing = false; 
         
         // [Optimization]
         this._tempVec = new Phaser.Math.Vector2();
@@ -84,7 +85,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.lastLosResult = true;
 
         // [Debug UI]
-        this.debugText = scene.add.text(x, y, '', { font: '10px monospace', fill: '#ffffff', backgroundColor: '#000000aa', padding: { x: 2, y: 2 }, align: 'center' }).setOrigin(0.5, 1.3).setDepth(9999).setVisible(false);
+        this.debugText = scene.add.text(x, y, '', { font: '10px monospace', fill: '#ffffff', stroke: '#000000', strokeThickness: 2, align: 'center' }).setOrigin(0.5, 1.3).setDepth(9999).setVisible(false);
         this.debugGraphic = scene.add.graphics().setDepth(9999).setVisible(false);
 
         // [Physics Init]
@@ -137,6 +138,19 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         const adjustedDelta = delta * (this.scene.gameSpeed || 1);
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
+        
+        // [Regen Logic] 자연 회복 로직 (Idle 상태 & HP < 50%)
+        if (this.body.velocity.lengthSq() < 10 && !this.isTakingDamage && !this.isAttacking) {
+            const regenCap = this.maxHp * 0.5; // 최대 50%까지만 회복
+            if (this.hp < regenCap) {
+                const regenRate = this.aiConfig.common?.hpRegenRate ?? 0.01;
+                const regenAmount = (this.maxHp * regenRate) * (adjustedDelta / 1000);
+                
+                this.hp = Math.min(this.hp + regenAmount, regenCap);
+                this.redrawHpBar();
+            }
+        }
+
         if (this.scene.isSetupPhase) { this.setVelocity(0, 0); return; }
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
@@ -166,10 +180,15 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             if (!this.scene.battleStarted) {
                 this.updateFormationFollow(adjustedDelta); 
             } else if (this.team === 'blue') {
-                switch (this.scene.squadState) {
-                    case 'FORMATION': this.updateFormationFollow(adjustedDelta); break;
-                    case 'FLEE': this.runAway(adjustedDelta); break;
-                    case 'FREE': default: this.updateAI(adjustedDelta); break;
+                // [Check] HP 부족으로 인한 강제 도망 상태 체크 (리더가 아닐 때)
+                if (this.isLowHpFleeing) {
+                    this.updateAI(adjustedDelta); 
+                } else {
+                    switch (this.scene.squadState) {
+                        case 'FORMATION': this.updateFormationFollow(adjustedDelta); break;
+                        case 'FLEE': this.runAway(adjustedDelta); break;
+                        case 'FREE': default: this.updateAI(adjustedDelta); break;
+                    }
                 }
             } else {
                 this.updateAI(adjustedDelta); 
@@ -178,7 +197,19 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
-    // --- Avoidance & AI Logic (Restored) ---
+    // --- Avoidance & AI Logic ---
+
+    // [New] 어그로 체크 함수 (나를 노리는 적이 있는가?)
+    isTargeted() {
+        if (!this.targetGroup) return false;
+        const enemies = this.targetGroup.getChildren();
+        for (const enemy of enemies) {
+            if (enemy.active && enemy.currentTarget === this) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     checkLineOfSight() {
         if (!this.currentTarget || !this.currentTarget.active) return true;
@@ -243,18 +274,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         const newDir = new Phaser.Math.Vector2();
 
-        // 1. 수직 벽 충돌
         if (blocked.left || blocked.right || touching.left || touching.right) {
             const dirY = (ty > this.y) ? 1 : -1;
             newDir.set(0, dirY);
-        }
-        // 2. 수평 벽 충돌
-        else if (blocked.up || blocked.down || touching.up || touching.down) {
+        } else if (blocked.up || blocked.down || touching.up || touching.down) {
             const dirX = (tx > this.x) ? 1 : -1;
             newDir.set(dirX, 0);
-        }
-        // 3. 모호한 경우
-        else {
+        } else {
             const diffX = Math.abs(tx - this.x);
             const diffY = Math.abs(ty - this.y);
             
@@ -273,7 +299,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     handleWallCollision(tile) {
         this.wallFreeTimer = 0;
 
-        // 1. 이미 회피 중
         if (this.isAvoiding) {
             const blocked = this.body.blocked;
             const dir = this.avoidDir;
@@ -290,17 +315,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             return;
         }
 
-        // 2. 시야 체크
         if (this.checkLineOfSight()) {
             return;
         }
 
-        // 3. 회피 시작
         this.isAvoiding = true;
         this.avoidTimer = 500; 
         this.setVelocity(0, 0);
 
-        // 4. 방향 결정
         let useSavedDir = false;
         if (this.savedAvoidDir) {
             const blocked = this.body.blocked;
@@ -314,7 +336,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
         }
 
-        // 5. 새 경로 계산
         if (!useSavedDir) {
             const newDir = this.calculateWallAvoidDir();
             this.avoidDir.copy(newDir);
@@ -330,6 +351,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateAI(delta) {
+        // [AI Config]
+        const fleeThreshold = this.aiConfig.common?.fleeHpThreshold ?? 0.2;
+        const hpRatio = this.hp / this.maxHp;
+        
+        // [Log] 상태 변화 감지 및 콘솔 출력
+        if (!this.isLowHpFleeing && hpRatio <= fleeThreshold) {
+            this.isLowHpFleeing = true;
+            console.log(`[Unit ${this.role}-${this.team}] 🚨 HP Low (${(hpRatio*100).toFixed(0)}%)! Enter FLEE Mode`);
+            this.setTint(0xff5555); 
+        } else if (this.isLowHpFleeing && hpRatio >= 0.5) {
+            this.isLowHpFleeing = false;
+            console.log(`[Unit ${this.role}-${this.team}] 💚 HP Recovered (${(hpRatio*100).toFixed(0)}%)! Return to COMBAT`);
+            this.resetVisuals(); 
+        }
+
+        // [Fix] 도망 모드 로직 개선: 어그로가 있으면 도망, 없으면 제자리 회복
+        if (this.isLowHpFleeing) {
+            if (this.isTargeted()) {
+                this.runAway(delta);
+            } else {
+                this.setVelocity(0, 0); // 제자리 멈춤 -> Idle -> Regen
+                this.updateFlipX(); 
+            }
+            return; 
+        }
+
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
@@ -356,6 +403,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.updateFlipX();
             }
         } else { this.setVelocity(0, 0); }
+        
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
     
@@ -411,7 +459,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.isLeader) return; 
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) { this.thinkTimer = 100 + Math.random() * 100; this.currentTarget = this.findNearestEnemy(); }
-        if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
+        
+        if (!this.isLowHpFleeing) {
+            if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
+        }
+
         if (this.team !== 'blue') { this.setVelocity(0); return; }
         const leader = this.scene.playerUnit;
         if (!leader || !leader.active) return;
@@ -427,9 +479,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.currentTarget && this.currentTarget.active) {
             const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y); 
             const speed = this.moveSpeed * 1.2; 
-            this.setVelocity(Math.cos(angle) * -speed, Math.sin(angle) * -speed);
+            
+            // [Check] 적과 멀어지는 방향 (양수 speed)
+            this.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
             this.updateFlipX();
-        } else { this.updateFormationFollow(delta); }
+        } else { 
+            this.updateFormationFollow(delta); 
+        }
     }
 
     // --- Visuals ---
@@ -437,14 +493,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     initVisuals() {
         this.setFrame(FRAME_IDLE);
         
-        // [Flip Logic] 모든 스프라이트가 원본이 '왼쪽'을 본다고 가정하고 초기 방향 설정
+        // [Flip Logic] 모든 스프라이트가 원본이 '왼쪽'을 본다고 가정
         if (this.team === 'blue') {
-            // 블루팀(왼쪽 진영) -> 오른쪽을 봐야 함 -> flipX = true (반전)
-            this.setFlipX(true);
+            this.setFlipX(true); // 오른쪽 봄 (반전)
             if (this.isLeader) this.setTint(0xffffaa);
         } else {
-            // 레드팀(오른쪽 진영) -> 왼쪽을 봐야 함 -> flipX = false (원본)
-            this.setFlipX(false);
+            this.setFlipX(false); // 왼쪽 봄 (원본)
             if (this.isLeader) this.setTint(0xffff00);
         }
         
@@ -473,6 +527,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             else this.clearTint();
         }
         
+        if (this.isLowHpFleeing) this.setTint(0xff5555); // 도망 중이면 틴트 유지
+
         if (!this.anims.isPlaying && !this.isUsingSkill && !this.isAttacking) {
              this.setFrame(FRAME_IDLE);
         }
@@ -563,24 +619,44 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.debugText.setVisible(true);
         this.debugGraphic.setVisible(true);
         this.debugGraphic.clear();
-        this.debugText.setPosition(this.x, this.y - (this.baseSize / 2) - 15);
+        this.debugText.setPosition(this.x, this.y - (this.baseSize / 2) - 30);
+
+        let statusStr = "COMBAT";
+        let color = "#ffffff";
+        let hpColor = "#ffffff";
+
         if (this.isAvoiding) {
-            const vecStr = `(${this.avoidDir.x.toFixed(0)},${this.avoidDir.y.toFixed(0)})`;
-            this.debugText.setText(`⚠️SIDE\n${this.avoidTimer.toFixed(0)}ms\nDir:${vecStr}`);
-            this.debugText.setColor('#ffaa00'); 
-            this.debugGraphic.lineStyle(2, 0xffaa00, 1);
+            statusStr = "⚠️AVOID";
+            color = "#ffff00"; 
+        } else if (this.isLowHpFleeing) {
+            statusStr = "😱FLEE";
+            color = "#ff0000"; 
+        } else if (this.body.velocity.lengthSq() < 10 && this.hp < this.maxHp * 0.5) {
+            statusStr = "♻️REGEN";
+            color = "#00ff00"; 
+        } else {
+            statusStr = "⚔️COMBAT";
+            color = "#ffffff";
+        }
+
+        const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
+        if (hpPct < 20) hpColor = "#ff0000";
+        else if (hpPct < 50) hpColor = "#ffff00";
+
+        this.debugText.setText(`${statusStr}\nHP:${hpPct}%`);
+        this.debugText.setColor(color);
+        
+        if (this.currentTarget && this.currentTarget.active) {
+            this.debugGraphic.lineStyle(1, 0xff0000, 0.5);
+            this.debugGraphic.lineBetween(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
+        }
+        
+        if (this.isAvoiding) {
+            this.debugGraphic.lineStyle(2, 0xffff00, 1);
             this.debugGraphic.beginPath();
             this.debugGraphic.moveTo(this.x, this.y);
             this.debugGraphic.lineTo(this.x + this.avoidDir.x * 50, this.y + this.avoidDir.y * 50);
             this.debugGraphic.strokePath();
-        } else {
-            const spd = this.body.velocity.length().toFixed(0);
-            this.debugText.setText(`MOVE\nSpd:${spd}`);
-            this.debugText.setColor('#33ff33'); 
-            if (this.currentTarget && this.currentTarget.active) {
-                this.debugGraphic.lineStyle(1, 0x00ff00, 0.5);
-                this.debugGraphic.lineBetween(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
-            }
         }
     }
 
@@ -600,10 +676,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         // 2. 이동 방향에 따른 Flip 처리
         if (this.body.velocity.x < -5) {
-            // 왼쪽으로 이동 중 -> 왼쪽을 봐야 함 -> flipX = false
             this.setFlipX(false);
         } else if (this.body.velocity.x > 5) {
-            // 오른쪽으로 이동 중 -> 오른쪽을 봐야 함 -> flipX = true
             this.setFlipX(true);
         }
     }
