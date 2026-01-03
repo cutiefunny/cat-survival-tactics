@@ -10,7 +10,8 @@ const DEFAULT_ROLE_DEFS = {
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
-  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000 },
+  // [Modified] Healer: skillCooldown, skillRange, aggroStackLimit 추가
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10 },
   Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, attackCooldown: 400, skillCooldown: 8000 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
@@ -201,14 +202,29 @@ const DevPage = () => {
             </select>
             <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
                 <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
+                
                 <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
+                
                 <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
+                
                 <span title="Action Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
                 
                 {unit.skillCooldown > 0 && (
                     <span title="Skill Info" style={{color: "#ff88ff", borderLeft: "1px solid #555", paddingLeft: "10px", whiteSpace: "nowrap"}}>
                         ✨ CD:{unit.skillCooldown/1000}s R:{unit.skillRange}
                     </span>
+                )}
+
+                {/* [New] Healer 전용 Aggro Stack 입력 필드 */}
+                {unit.role === 'Healer' && (
+                     <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
+                        😡Stack <input 
+                            type="number" 
+                            value={unit.aggroStackLimit || 10} 
+                            onInput={(e) => handleStatChange(unit.role, "aggroStackLimit", parseInt(e.target.value))} 
+                            style={{ width: "40px", background: "#220000", color: "#faa", border: "1px solid #844", marginLeft: "2px" }} 
+                        />
+                     </span>
                 )}
             </div>
         </div>
@@ -298,8 +314,9 @@ const DevPage = () => {
                             
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
                             
+                            {/* [Modified] 라벨 수정 (Healer는 Unused) */}
                             <label style={{fontSize: "0.8em", color:"#aaffaa"}}>
-                                {role === 'Healer' ? 'Heal CD' : 'ATK CD'}
+                                {role === 'Healer' ? 'Motion CD (N/A)' : 'ATK CD'}
                                 <input 
                                     type="number" 
                                     value={config.roleDefinitions[role].attackCooldown || 500} 
@@ -308,6 +325,7 @@ const DevPage = () => {
                                 />
                             </label>
                             
+                            {/* [Modified] Healer도 skillCooldown이 정의되어 있으므로 S.CD 렌더링됨 */}
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
                                 <>
                                     <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>
@@ -317,6 +335,15 @@ const DevPage = () => {
                                     {config.roleDefinitions[role].skillEffect !== undefined && <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Eff(%)<input type="number" value={config.roleDefinitions[role].skillEffect} onInput={(e) => handleStatChange(role, "skillEffect", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>}
                                 </>
                             )}
+                            
+                            {/* [New] Healer 전용 Aggro Stack 입력 필드 */}
+                            {config.roleDefinitions[role].aggroStackLimit !== undefined && (
+                                <label style={{fontSize: "0.8em", color:"#ffaaaa"}}>
+                                    Aggro Stack
+                                    <input type="number" value={config.roleDefinitions[role].aggroStackLimit} onInput={(e) => handleStatChange(role, "aggroStackLimit", parseInt(e.target.value))} style={{ width: "100%", background: "#220000", color: "#faa", border: "1px solid #844" }} />
+                                </label>
+                            )}
+
                             {config.roleDefinitions[role].attackRange !== undefined && (
                                 <label style={{fontSize: "0.8em", color:"#d8f", gridColumn: "span 2", marginTop: "5px"}}>Range<input type="number" value={config.roleDefinitions[role].attackRange} onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
                             )}

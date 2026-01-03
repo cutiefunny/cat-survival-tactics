@@ -36,6 +36,20 @@ export default class Runner extends Unit {
         }
     }
 
+    // [New] 누락되었던 메서드 추가
+    runTowardsSafety() {
+        const nearestEnemy = this.findNearestEnemy();
+        if (nearestEnemy) {
+            // 가장 가까운 적의 반대 방향으로 도망 (속도 1.3배)
+            const angle = Phaser.Math.Angle.Between(nearestEnemy.x, nearestEnemy.y, this.x, this.y);
+            this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 1.3, this.body.velocity);
+            this.updateFlipX();
+        } else {
+            // 주변에 적이 없으면 리더에게 복귀
+            this.followLeader();
+        }
+    }
+
     decideNextMove() {
         // [우선순위 1] 적 슈터 탐색
         const enemyShooter = this.findEnemyShooter();

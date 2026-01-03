@@ -3,111 +3,176 @@ import Phaser from 'phaser';
 
 export default class Healer extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {
+        stats.role = 'Healer';
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
         
-        // 힐러 특화 스탯 오버라이드 (안전을 위해 조금 뒤에 위치하도록 유도)
-        this.healPower = stats.attackPower || 10; 
-        this.healRange = stats.skillRange || 200;
-        this.safeDistance = 150; // 아군에게 붙을 거리
+        // [New] 설정값에서 스택 한계치 가져오기 (기본값 10)
+        this.aggroStackLimit = stats.aggroStackLimit || 10;
+        this.healStack = 0;
         
-        // 쿨타임이 0으로 설정되어 들어오는 경우 기본값 부여
-        if (this.skillMaxCooldown <= 0) this.skillMaxCooldown = 5000;
+        console.log(`💚 [Healer] Spawned! Heal CD: ${this.skillMaxCooldown}ms, Aggro Limit: ${this.aggroStackLimit}`);
     }
 
-    // [AI Override] 적이 아닌 '다친 아군'을 찾아 이동
     updateAI(delta) {
         this.thinkTimer -= delta;
-        if (this.thinkTimer <= 0) {
-            this.thinkTimer = 150 + Math.random() * 100;
-            // 가장 HP가 낮은 아군을 타겟으로 잡음
-            this.currentTarget = this.findLowestHpAlly();
+
+        if (this.hp / this.maxHp <= 0.2) {
+            this.currentTarget = this; 
+        } else {
+            const weakAlly = this.findLowestHpAlly();
+            this.currentTarget = weakAlly ? weakAlly : null;
         }
 
-        // 스킬 쿨타임이 찼다면 아군 치유 시도
-        this.tryUseSkill();
-
-        if (this.isAvoiding) return;
-
-        if (this.currentTarget && this.currentTarget.active) {
-            // 타겟(아군)과의 거리 계산
-            const dist = Phaser.Math.Distance.Between(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
+        if (this.currentTarget) {
+            const target = this.currentTarget;
+            const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
             
-            // 너무 가까우면 멈추고, 멀면 따라감 (카이팅 대신 팔로우 로직)
-            if (dist > this.safeDistance) {
-                this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
-                this.updateFlipX();
-            } else if (dist < this.safeDistance * 0.5) {
-                // 너무 가까우면 살짝 뒤로 빠짐 (공간 확보)
-                const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
-                this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 0.5, this.body.velocity);
-                this.updateFlipX();
-            } else {
-                this.setVelocity(0, 0);
-            }
-        } else {
-            // 치료할 아군이 없으면 리더나 본대 근처로 복귀
-            if (this.team === 'blue' && this.scene.playerUnit && this.scene.playerUnit.active && this.scene.playerUnit !== this) {
-                const distToLeader = Phaser.Math.Distance.Between(this.x, this.y, this.scene.playerUnit.x, this.scene.playerUnit.y);
-                if (distToLeader > 200) {
-                     this.scene.physics.moveToObject(this, this.scene.playerUnit, this.moveSpeed);
-                     this.updateFlipX();
-                } else {
+            const stopDist = 150; 
+            const moveDist = 200; 
+            const isMoving = this.body.velocity.lengthSq() > 10;
+
+            if (isMoving) {
+                if (dist <= stopDist) {
                     this.setVelocity(0, 0);
+                    this.updateFlipX(); 
+                    this.tryUseSkill();
+                } else {
+                    this.scene.physics.moveToObject(this, target, this.moveSpeed);
+                    this.updateFlipX();
                 }
             } else {
-                this.setVelocity(0, 0);
+                if (dist > moveDist) {
+                    this.scene.physics.moveToObject(this, target, this.moveSpeed);
+                    this.updateFlipX();
+                } else {
+                    this.tryUseSkill(); 
+                }
             }
+        } else {
+            this.followLeader();
         }
     }
 
-    // [Skill Override] 적 공격 대신 아군 광역 힐
+    updateFlipX() {
+        if (this.body.velocity.x < -20) {
+            this.setFlipX(false);
+        } else if (this.body.velocity.x > 20) {
+            this.setFlipX(true);
+        }
+    }
+
+    updateDebugVisuals() {
+        if (!this.debugText || !this.debugGraphic) return;
+
+        this.debugText.setVisible(true);
+        this.debugGraphic.setVisible(true);
+        this.debugGraphic.clear();
+        this.debugText.setPosition(this.x, this.y - (this.baseSize / 2) - 50);
+
+        const cooldownSec = Math.max(0, this.skillTimer / 1000).toFixed(1);
+        const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
+
+        // [Visual] 설정된 Limit로 표시 (Stack: 5/15)
+        this.debugText.setText(`HP:${hpPct}%\nCD:${cooldownSec}s\nStack:${this.healStack}/${this.aggroStackLimit}`);
+        this.debugText.setColor(this.healStack >= (this.aggroStackLimit - 1) ? '#ff4444' : '#00ff00');
+
+        if (this.currentTarget && this.currentTarget.active) {
+            this.debugGraphic.lineStyle(1, 0x00ff00, 0.5);
+            this.debugGraphic.lineBetween(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
+        }
+    }
+
     performSkill() {
-        this.setTint(0x00ff00); // 힐러는 초록색 틴트
+        const target = this.currentTarget;
+        if (!target || !target.active || target.hp >= target.maxHp) {
+            return;
+        }
+
         this.isUsingSkill = true;
+        this.stop(); 
+        if (this.texture.frameTotal > 3) {
+            this.setFrame(3); 
+        }
         
-        const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
-        const rangeSq = this.healRange * this.healRange;
-        let healedCount = 0;
+        const healAmount = this.attackPower; 
+        
+        target.hp = Math.min(target.hp + healAmount, target.maxHp);
+        target.redrawHpBar();
 
-        allies.forEach(ally => {
-            if (ally.active && Phaser.Math.Distance.Squared(this.x, this.y, ally.x, ally.y) < rangeSq) {
-                // 최대 체력을 넘지 않도록 회복
-                if (ally.hp < ally.maxHp) {
-                    ally.hp = Math.min(ally.maxHp, ally.hp + this.healPower * 2); 
-                    ally.redrawHpBar();
-                    
-                    // 치유 이펙트 (간단한 트윈 애니메이션)
-                    this.scene.tweens.add({
-                        targets: ally,
-                        alpha: 0.5,
-                        yoyo: true,
-                        duration: 100,
-                        repeat: 1
-                    });
-                    healedCount++;
-                }
-            }
-        });
+        // 힐 성공 시 스택 증가
+        this.healStack++;
+        
+        // [Modified] 설정된 aggroStackLimit 도달 시 어그로 발동
+        if (this.healStack >= this.aggroStackLimit) {
+            this.triggerAggro();
+            this.healStack = 0; 
+        }
 
-        // 힐 이펙트 (자신 주변에 퍼지는 원)
-        const healCircle = this.scene.add.circle(this.x, this.y, 10, 0x00ff00, 0.5);
-        this.scene.tweens.add({
-            targets: healCircle,
-            radius: this.healRange,
-            alpha: 0,
-            duration: 500,
-            onComplete: () => healCircle.destroy()
-        });
+        console.log(`💚 [Healer] Healed. Stack: ${this.healStack}/${this.aggroStackLimit}`);
+
+        this.showHealEffect(target, healAmount);
 
         this.scene.time.delayedCall(500, () => {
-            if(this.active) {
+            if (this.active) {
                 this.isUsingSkill = false;
                 this.resetVisuals();
             }
         });
     }
 
-    // 기본 공격 로직(Attack)은 유지하거나, 약한 원거리 공격으로 오버라이드 할 수 있습니다.
-    // 현재는 Unit.js의 기본 근접 공격을 따르지만, 
-    // 필요하다면 여기서 findNearestEnemy()를 호출해 자기 방어 로직을 추가할 수 있습니다.
+    triggerAggro() {
+        console.log("⚠️ [Healer] Aggro Overflow! Pulling enemies...");
+        
+        const text = this.scene.add.text(this.x, this.y - 60, "⚠️AGGRO!", {
+            fontSize: '18px', fontStyle: 'bold', color: '#ffaaaa', stroke: '#000000', strokeThickness: 4
+        }).setOrigin(0.5);
+        
+        this.scene.tweens.add({
+            targets: text, y: text.y - 40, alpha: 0, duration: 1500,
+            onComplete: () => text.destroy()
+        });
+
+        const enemies = this.targetGroup.getChildren();
+        enemies.forEach(enemy => {
+            if (enemy.active) {
+                // [Modified] 탱커의 도발(isProvoked) 상태여도 무시하고 어그로를 가져옴 (덮어쓰기)
+                // 탱커가 나중에 다시 스킬을 쓰면 그때 다시 탱커에게 돌아감 (Last Action Wins)
+                
+                enemy.currentTarget = this;
+                
+                // 도발 상태였다면 해제 (선택 사항: 힐러가 뺏으면 도발 풀림)
+                if (enemy.isProvoked) {
+                    enemy.isProvoked = false;
+                }
+                
+                const icon = this.scene.add.text(enemy.x, enemy.y - 40, "!", { 
+                    fontSize: '24px', color: '#ff0000', fontStyle: 'bold' 
+                }).setOrigin(0.5);
+                this.scene.tweens.add({
+                    targets: icon, y: icon.y - 20, alpha: 0, duration: 800,
+                    onComplete: () => icon.destroy()
+                });
+            }
+        });
+    }
+
+    showHealEffect(target, amount) {
+        const text = this.scene.add.text(target.x, target.y - 40, `+${amount}`, {
+            fontSize: '24px', fontStyle: 'bold', color: '#00ff00', stroke: '#000000', strokeThickness: 3
+        }).setOrigin(0.5);
+
+        const heart = this.scene.add.text(target.x, target.y - 60, "💚", { fontSize: '20px' }).setOrigin(0.5);
+
+        this.scene.tweens.add({
+            targets: [text, heart], y: '-=30', alpha: 0, duration: 1000, ease: 'Power1',
+            onComplete: () => { text.destroy(); heart.destroy(); }
+        });
+
+        target.setTint(0x00ff00);
+        this.scene.time.delayedCall(200, () => {
+            if (target.active) target.clearTint();
+        });
+    }
+    
+    findNearestEnemy() { return null; }
 }

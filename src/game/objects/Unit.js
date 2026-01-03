@@ -84,7 +84,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.lastLosResult = true;
 
         // [Debug UI - Lazy Init]
-        // 생성자에서는 만들지 않고 null로 초기화하여 메모리 절약
         this.debugText = null;
         this.debugGraphic = null;
         this.debugUpdateTimer = 0;
@@ -110,18 +109,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     die() {
-        this.destroyDebugObjects(); // 죽을 때 디버그 객체 정리
+        this.destroyDebugObjects(); 
         if (this.hpBar) this.hpBar.destroy();
         this.destroy();
     }
 
-    // [New] 디버그 객체 생성 (필요할 때만 호출)
     createDebugObjects() {
         this.debugText = this.scene.add.text(this.x, this.y, '', { font: '10px monospace', fill: '#ffffff', stroke: '#000000', strokeThickness: 2, align: 'center' }).setOrigin(0.5, 1.3).setDepth(9999);
         this.debugGraphic = this.scene.add.graphics().setDepth(9999);
     }
 
-    // [New] 디버그 객체 파괴 (메모리 회수)
     destroyDebugObjects() {
         if (this.debugText) {
             this.debugText.destroy();
@@ -151,21 +148,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
-        // [Optimization] 디버그 모드 체크 및 Lazy Loading
         const isDebugMode = this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText);
         
         if (isDebugMode) {
-            // 켜져 있는데 객체가 없으면 생성
             if (!this.debugText) this.createDebugObjects();
-            
-            // 업데이트 빈도 제한 (200ms)
             this.debugUpdateTimer += delta;
             if (this.debugUpdateTimer > 200) {
                 this.updateDebugVisuals();
                 this.debugUpdateTimer = 0;
             }
         } else {
-            // 꺼져 있는데 객체가 있으면 파괴
             if (this.debugText) this.destroyDebugObjects();
         }
 
@@ -535,6 +527,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.scale = 1;
         this.setDisplaySize(this.baseSize, this.baseSize);
         
+        // [Fixed] 투명도(Alpha) 초기화 추가
+        // 힐러의 이펙트나 다른 트윈에 의해 alpha가 0이 된 상태로 고정되는 것을 방지합니다.
+        this.setAlpha(1);
+
         if (this.body) {
             const targetDiameter = this.baseSize;
             const scale = this.scaleX; 

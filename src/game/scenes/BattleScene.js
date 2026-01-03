@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 // [Objects & Roles]
-import Unit from '../objects/Unit'; // [Fix] 기본 Unit 클래스 임포트
+import Unit from '../objects/Unit'; 
 import Shooter from '../objects/roles/Shooter';
 import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
@@ -26,7 +26,6 @@ import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 
 // [Assets - Units]
-// 🚨 파일 경로가 실제 프로젝트와 일치하는지 확인해주세요.
 import leaderSheet from '../../assets/units/leader.png';
 import dogSheet from '../../assets/units/dog.png';
 import raccoonSheet from '../../assets/units/raccoon.png';
@@ -44,14 +43,14 @@ const UnitClasses = {
     'Leader': Leader, 
     'Healer': Healer, 
     'Raccoon': Raccoon,
-    'NormalDog': Unit // [Fix] NormalDog는 기본 Unit 로직과 'dog' 텍스처를 사용
+    'NormalDog': Unit 
 };
 
 // [Update] 역할별 기본 스탯 정의
 const ROLE_BASE_STATS = {
     'Leader': { hp: 200, attackPower: 25, moveSpeed: 90, skillCooldown: 30000, skillRange: 300, skillDuration: 10000 },
     'Tanker': { hp: 300, attackPower: 10, moveSpeed: 50, skillCooldown: 10000, skillRange: 200 },
-    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 5000 },
+    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 3000, aggroStackLimit: 10 },
     'Raccoon': { hp: 150, attackPower: 20, moveSpeed: 100, skillCooldown: 8000 },
     'Shooter': { hp: 80, attackPower: 30, moveSpeed: 80 },
     'Runner': { hp: 120, attackPower: 18, moveSpeed: 120 },
@@ -63,7 +62,6 @@ const DEFAULT_CONFIG = {
     showDebugStats: false,
     gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
     aiSettings: {
-        // [Update] 기본값 명시 (도망 20%, 초당 회복 1%)
         common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 }, 
         runner: { ambushDistance: 60, fleeDuration: 1500 }, 
         dealer: { safeDistance: 150, followDistance: 50 },
@@ -73,7 +71,7 @@ const DEFAULT_CONFIG = {
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
         { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
-        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 },
+        { role: 'Healer', hp: 100, attackPower: 45, moveSpeed: 110 }, // 기본값 명시
         { role: 'Raccoon', hp: 150, attackPower: 20, moveSpeed: 100 },
         { role: 'Tanker', hp: 300, attackPower: 10, moveSpeed: 50 },
         { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 80 },
@@ -87,10 +85,8 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     preload() {
-        // [Asset Loading] 500x100 or 600x100 spritesheets
         const sheetConfig = { frameWidth: 100, frameHeight: 100 };
 
-        // [Fix] 'dog' 키로 dog.png 로드 (이전 코드의 redDog 삭제)
         this.load.spritesheet('leader', leaderSheet, sheetConfig);
         this.load.spritesheet('dog', dogSheet, sheetConfig); 
         this.load.spritesheet('raccoon', raccoonSheet, sheetConfig);
@@ -99,7 +95,6 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
-        // [Map]
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
@@ -142,12 +137,12 @@ export default class BattleScene extends Phaser.Scene {
                 config = { ...DEFAULT_CONFIG, ...dbData };
                 if (dbData.aiSettings) {
                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
-                     // common 병합 추가
                      if (dbData.aiSettings.common) {
                          config.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...dbData.aiSettings.common };
                      }
                 }
                 if (dbData.blueTeamRoles) {
+                     // DB에서 불러온 역할 설정이 있다면 병합
                      if (dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
                          config.blueTeamRoles = [...dbData.blueTeamRoles, ...DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length)];
                      }
@@ -182,7 +177,7 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createSquadButton(() => this.toggleSquadState());
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
-        // [Animation] 통합된 애니메이션 생성 함수 호출
+        // [Animation] 애니메이션 생성
         this.createStandardAnimations();
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
@@ -202,12 +197,14 @@ export default class BattleScene extends Phaser.Scene {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
         
         unitTextures.forEach(key => {
-            // [Check] 텍스처가 로드되었는지 확인 후 애니메이션 생성
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
+                // Healer는 3fps, 나머지는 6fps
+                const frameRate = (key === 'healer') ? 3 : 6;
+                
                 this.anims.create({
                     key: `${key}_walk`,
                     frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
-                    frameRate: 6,
+                    frameRate: frameRate,
                     repeat: -1
                 });
             }
@@ -224,19 +221,27 @@ export default class BattleScene extends Phaser.Scene {
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
+            
+            // [Check] Config 값 우선 적용
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
+
+            // [Debug] 힐러 스탯 적용 확인
+            if (stats.role === 'Healer') {
+                console.log(`[BattleScene] Creating Healer with CD: ${finalStats.skillCooldown}, Heal: ${finalStats.attackPower}`);
+            }
             
-            // Texture Key는 Unit.js 내부에서 결정하므로 null을 넘김
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             
             unit.setInteractive();
             this.input.setDraggable(unit);
             return unit;
         };
-
+        
+        // ... (이하 blueCount, redCount 루프 동일)
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
+            // 여기서 roleConfig에 있는 skillCooldown이 병합됩니다.
             const stats = { ...ROLE_BASE_STATS[roleConfig.role], ...roleConfig };
             const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, stats, i===0);
             if (i===0) this.playerUnit = unit;
@@ -377,7 +382,6 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         if (this.battleStarted) {
-            // [Optimization] 배열 스프레드 연산자([...a, ...b]) 제거. 그룹 배열 자체를 넘김.
             this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
 
             const blueCount = this.blueTeam.countActive();
