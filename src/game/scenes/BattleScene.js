@@ -98,9 +98,8 @@ export default class BattleScene extends Phaser.Scene {
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
         
-        // [New] 배치 제한 구역 초기화
         this.placementZone = null;
-        this.zoneGraphics = null; // 구역 시각화용 그래픽 객체
+        this.zoneGraphics = null; 
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -134,10 +133,8 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.uiManager.destroyLoadingText();
-        
         const selectedMap = config.gameSettings.mapSelection || 'stage1';
         console.log(`🗺️ Starting Game with Map: ${selectedMap}`);
-        
         this.startGame(config, selectedMap);
     }
 
@@ -253,11 +250,18 @@ export default class BattleScene extends Phaser.Scene {
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
+        // [Fixed] 유저가 수정한 createUnit (사거리 오염 방지 적용)
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
-            const finalStats = { ...baseStats, ...stats };
+            
+            // [Safety] Config에서 잘못된 attackRange가 넘어와도 기본 스탯을 우선시하도록 안전장치 마련
+            const safeStats = { ...stats };
+            if (baseStats.attackRange) {
+                safeStats.attackRange = baseStats.attackRange;
+            }
+            const finalStats = { ...baseStats, ...safeStats };
             
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             
@@ -266,21 +270,18 @@ export default class BattleScene extends Phaser.Scene {
             return unit;
         };
 
-        // --- Blue Team Spawn (Random in 'Cats' Layer) ---
         const catsLayer = map.getObjectLayer('Cats');
         let spawnZone = null;
 
         if (catsLayer && catsLayer.objects.length > 0) {
             const obj = catsLayer.objects[0];
-            // Phaser Rectangle로 변환 (배치 제한을 위해 Scene에 저장)
             spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
             this.placementZone = spawnZone; 
             
-            // [NEW] 배치 구역 시각화 (투명 녹색)
             this.zoneGraphics = this.add.graphics();
-            this.zoneGraphics.fillStyle(0x00ff00, 0.2); // 녹색, 투명도 0.2
+            this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
             this.zoneGraphics.fillRectShape(spawnZone);
-            this.zoneGraphics.setDepth(0); // 바닥에 깔리도록 depth 설정
+            this.zoneGraphics.setDepth(0); 
 
             console.log(`🐱 Blue Team Spawn Zone: x=${obj.x}, y=${obj.y}, w=${obj.width}, h=${obj.height}`);
         } else {
@@ -292,11 +293,9 @@ export default class BattleScene extends Phaser.Scene {
             
             let spawnX, spawnY;
             if (spawnZone) {
-                // 구역 내 랜덤 스폰
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
                 spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
             } else {
-                // 기존 스폰 (Fallback)
                 spawnX = 300;
                 spawnY = startY + (i * spawnGap);
             }
@@ -306,7 +305,6 @@ export default class BattleScene extends Phaser.Scene {
             this.blueTeam.add(unit);
         }
 
-        // --- Red Team Spawn (오브젝트 레이어 'Dogs' 확인) ---
         const dogLayer = map.getObjectLayer('Dogs');
         
         if (dogLayer && dogLayer.objects.length > 0) {
@@ -351,15 +349,11 @@ export default class BattleScene extends Phaser.Scene {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
         
-        // [NEW] 전투 시작 시 배치 구역 표시 제거
         if (this.zoneGraphics) {
             this.zoneGraphics.destroy();
             this.zoneGraphics = null;
         }
 
-        // 배치 제한 해제 (선택사항, 필요 없다면 유지해도 됨)
-        // this.placementZone = null; 
-        
         this.uiManager.cleanupBeforeBattle();
 
         if (this.isMobile && this.playerUnit?.active) {
@@ -385,19 +379,38 @@ export default class BattleScene extends Phaser.Scene {
 
         if (this.playerUnit) {
             this.playerUnit.isLeader = false;
-            this.playerUnit.resetVisuals(); 
+            // [Fix] 기존 리더가 사망 중이 아닐 때만 비주얼 복구 (사망 모션 방해 금지)
+            if (this.playerUnit.active && !this.playerUnit.isDying) {
+                this.playerUnit.resetVisuals();
+            }
         }
 
         this.playerUnit = newUnit;
         newUnit.isLeader = true;
-        newUnit.resetVisuals(); 
+        // [Safety] 새 리더가 된 유닛도 상태가 온전할 때만 리셋
+        if (newUnit.active && !newUnit.isDying) {
+            newUnit.resetVisuals();
+        }
 
         this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
         this.updateFormationOffsets();
     }
+    
+    // [New] 다음 유닛으로 통제권 이동
+    transferControlToNextUnit() {
+        // 살아있고(Active) && 사망 중이 아닌(!isDying) 유닛 탐색
+        const nextLeader = this.blueTeam.getChildren().find(unit => 
+            unit.active && !unit.isDying && unit !== this.playerUnit
+        );
+        
+        if (nextLeader) {
+            // console.log(`👑 Leadership transferred to ${nextLeader.role}`);
+            this.selectPlayerUnit(nextLeader);
+        }
+    }
 
     updateFormationOffsets() {
-        if (this.playerUnit?.active) {
+        if (this.playerUnit?.active && !this.playerUnit.isDying) {
             this.blueTeam.getChildren().forEach(unit => {
                 if (unit.active) unit.calculateFormationOffset(this.playerUnit);
             });
@@ -444,7 +457,8 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.updateDebugStats(this.game.loop);
         
-        if (this.battleStarted && this.playerUnit && this.playerUnit.active) {
+        // 스킬 사용: 리더가 살아있을 때만 가능
+        if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { 
                 this.playerUnit.tryUseSkill();
             }
@@ -463,6 +477,11 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         if (this.battleStarted) {
+            // [New] 리더 상태 체크: 사망 또는 비활성 시 통제권 이전
+            if (!this.playerUnit || !this.playerUnit.active || this.playerUnit.isDying) {
+                this.transferControlToNextUnit();
+            }
+
             this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
 
             const blueCount = this.blueTeam.countActive();

@@ -3,18 +3,17 @@ import Phaser from 'phaser';
 
 export default class Leader extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = true) {
+        // [Fixed] stats를 그대로 부모에게 전달하여 UnitData나 Config 설정을 따르도록 수정
+        // 이전처럼 생성자 내부에서 this.attackRange를 강제로 덮어쓰지 않습니다.
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
-        this.role = 'Leader';
         
-        // [FIX] 외부 설정이나 Config에서 잘못된 사거리가 넘어오더라도
-        // Leader는 무조건 근접 공격(50)을 하도록 강제 설정
-        this.attackRange = 50; 
+        // this.role = 'Leader'; // 부모 클래스에서 stats.role로 이미 설정되므로 중복 제거
     }
 
     performSkill() {
         console.log("🚩 Leader uses INSPIRE!");
         
-        // [CHANGE] 설정값 사용
+        // [Check] this.skillRange 역시 Unit 생성자에서 stats.skillRange로 초기화된 값을 사용
         const buffRadius = this.skillRange || 300; 
         const buffDuration = this.skillDuration || 10000;
         
@@ -41,7 +40,7 @@ export default class Leader extends Unit {
     }
 
     applyBuff(unit, duration) {
-        // [CHANGE] 설정값 사용 (Effect는 % 단위 정수)
+        // [Check] 스킬 효과값 사용
         const effectPercent = (this.skillEffect || 10) / 100;
         const bonusDamage = Math.floor(unit.baseAttackPower * effectPercent);
         
