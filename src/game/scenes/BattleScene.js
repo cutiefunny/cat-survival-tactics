@@ -11,7 +11,8 @@ import Leader from '../objects/roles/Leader';
 import Healer from '../objects/roles/Healer';
 import Raccoon from '../objects/roles/Raccoon';
 
-// [Firebase]
+// [Data & Config]
+import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; // [Refactor]
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
@@ -51,27 +52,12 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
-// [Update] 역할별 기본 스탯 정의
-const ROLE_BASE_STATS = {
-    'Leader': { hp: 200, attackPower: 25, moveSpeed: 90, skillCooldown: 30000, skillRange: 300, skillDuration: 10000 },
-    'Tanker': { hp: 300, attackPower: 10, moveSpeed: 50, skillCooldown: 10000, skillRange: 200 },
-    'Healer': { hp: 100, attackPower: 15, moveSpeed: 110, skillCooldown: 3000, aggroStackLimit: 10 },
-    'Raccoon': { hp: 150, attackPower: 20, moveSpeed: 100, skillCooldown: 8000 },
-    'Shooter': { hp: 80, attackPower: 30, moveSpeed: 80 },
-    'Runner': { hp: 120, attackPower: 18, moveSpeed: 120 },
-    'Normal': { hp: 140, attackPower: 15, moveSpeed: 70 },
-    'NormalDog': { hp: 140, attackPower: 15, moveSpeed: 70 }
-};
+// [Refactor] ROLE_BASE_STATS 제거 (UnitData에서 가져옴)
 
 const DEFAULT_CONFIG = {
     showDebugStats: false,
     gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'stage1' },
-    aiSettings: {
-        common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 }, 
-        runner: { ambushDistance: 60, fleeDuration: 1500 }, 
-        dealer: { safeDistance: 150, followDistance: 50 },
-        shooter: { attackRange: 250, kiteDistance: 200 } 
-    },
+    aiSettings: DEFAULT_AI_SETTINGS, // [Refactor]
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
@@ -100,11 +86,9 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
-        // [Map] Maps Load
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.tilemapTiledJSON('level1', level1Data);
         
-        // [Image] Tilesets Load
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
         this.load.image('tiles_city', tilesetCity1Img);
@@ -220,7 +204,6 @@ export default class BattleScene extends Phaser.Scene {
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
         
-        // [Modified] spawnUnits에 지도 객체를 전달하여 오브젝트 레이어 접근 가능하게 함
         this.spawnUnits(config, map);
 
         if(this.playerUnit && this.playerUnit.active) {
@@ -260,17 +243,19 @@ export default class BattleScene extends Phaser.Scene {
         });
     }
 
-    // [Modified] map 인자 추가 및 오브젝트 레이어 기반 스폰 로직 추가
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
         const blueCount = config.gameSettings.blueCount ?? 6;
-        const redCount = config.gameSettings.redCount ?? 6; // 기본값 (오브젝트 레이어 없을 때 사용)
+        const redCount = config.gameSettings.redCount ?? 6;
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
+        // [Refactor] 유닛 생성 헬퍼 함수
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
+            
+            // 중앙 데이터(ROLE_BASE_STATS)와 전달된 stats 병합
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
             
@@ -281,12 +266,10 @@ export default class BattleScene extends Phaser.Scene {
             return unit;
         };
 
-        // --- Blue Team Spawn (기본 로직 유지) ---
+        // --- Blue Team Spawn ---
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
-            const stats = { ...ROLE_BASE_STATS[roleConfig.role], ...roleConfig };
-            // 아군 스폰 위치: (300, startY + gap)
-            const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, stats, i===0);
+            const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, roleConfig, i===0);
             if (i===0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
@@ -298,20 +281,15 @@ export default class BattleScene extends Phaser.Scene {
             console.log(`🐺 Spawning ${dogLayer.objects.length} dogs from 'Dogs' layer`);
             
             dogLayer.objects.forEach((obj, index) => {
-                // 역할 순환 할당
                 const stats = redRoles[index % redRoles.length];
-                
-                // Tiled 좌표계 보정 (Origin이 Top-Left인 경우와 Bottom-Left인 경우 주의, 보통 Point는 그대로 사용)
-                // 만약 Tiled에서 Insert Tile로 넣었다면 y좌표 보정이 필요할 수 있으나, Point 객체라면 그대로 사용
                 const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
                 this.redTeam.add(unit);
             });
         } else {
-            // [Fallback] 'Dogs' 레이어가 없으면 기존 로직대로 줄지어 스폰
+            // [Fallback]
             console.log("⚠️ No 'Dogs' layer found. Using default spawn logic.");
             for (let i = 0; i < redCount; i++) {
                 const stats = redRoles[i % redRoles.length];
-                // 적군 스폰 위치: (1300, startY + gap)
                 const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
                 this.redTeam.add(unit);
             }

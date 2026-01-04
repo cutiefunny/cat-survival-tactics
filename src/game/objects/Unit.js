@@ -1,46 +1,34 @@
 import Phaser from 'phaser';
-
-// [Role Texture Mapping]
-const ROLE_TEXTURES = {
-    'Tanker': 'tanker',
-    'Shooter': 'shooter',
-    'Runner': 'runner', 
-    'Dealer': 'leader',    
-    'Leader': 'leader',    
-    'Normal': 'leader',    
-    'Healer': 'healer',    
-    'Raccoon': 'raccoon',  
-    'NormalDog': 'dog'     
-};
+import { ROLE_TEXTURES } from '../data/UnitData'; // [Refactor] 중앙 데이터 사용
 
 // [Frame Constants]
 const FRAME_IDLE = 0;
 const FRAME_ATTACK = 3;
 const FRAME_HIT = 4;
-const FRAME_SKILL = 5; 
+const FRAME_SKILL = 5;
 
 export default class Unit extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = false) {
         // [Visual Config]
         const roleKey = stats.role || 'Normal';
         const assignedTexture = ROLE_TEXTURES[roleKey] || (team === 'red' ? 'dog' : 'leader');
-        
+
         super(scene, x, y, assignedTexture);
 
-        this.textureKey = assignedTexture; 
+        this.textureKey = assignedTexture;
         this.scene = scene;
         this.team = team;
         this.targetGroup = targetGroup;
         this.isLeader = isLeader;
-        
+
         // [Stats]
         this.role = roleKey;
         this.baseSize = (this.role === 'Tanker') ? 60 : 50;
-        
+
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
-        
-        this.baseAttackPower = stats.attackPower; 
+
+        this.baseAttackPower = stats.attackPower;
         this.attackPower = this.baseAttackPower;
         this.moveSpeed = stats.moveSpeed;
         this.attackRange = stats.attackRange || 50;
@@ -52,20 +40,24 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         // [Combat]
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
-        
-        this.skillMaxCooldown = stats.skillCooldown || 0; 
+
+        this.skillMaxCooldown = stats.skillCooldown || 0;
         this.skillRange = stats.skillRange || 0;
         this.skillDuration = stats.skillDuration || 0;
-        this.skillEffect = stats.skillEffect || 0; 
+        this.skillEffect = stats.skillEffect || 0;
         this.skillTimer = 0;
         this.isUsingSkill = false;
-        
+
         // [AI State]
-        this.thinkTimer = Math.random() * 200; 
+        this.thinkTimer = Math.random() * 200;
         this.fleeTimer = 0;
         this.currentTarget = null;
-        this.isLowHpFleeing = false; 
+        this.isLowHpFleeing = false;
         
+        // [Optimization] 상태 플래그 대신 상태 상수를 쓰면 좋지만, 일단 기존 로직 유지하되 Boolean 정리
+        this.isAttacking = false;
+        this.isTakingDamage = false;
+
         // [Optimization] 벡터 재사용 (GC 방지)
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
@@ -76,11 +68,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.isAvoiding = false;
         this.avoidTimer = 0;
         this.avoidDir = new Phaser.Math.Vector2();
-        this.savedAvoidDir = null; 
+        this.savedAvoidDir = null;
         this.wallFreeTimer = 0;
 
         // [LOS Optimization]
-        this.losCheckTimer = 0; 
+        this.losCheckTimer = 0;
         this.lastLosResult = true;
 
         // [Debug UI - Lazy Init]
@@ -104,12 +96,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.on('pointerdown', () => {
             if (this.team === 'blue' && this.scene.battleStarted) {
                 this.scene.selectPlayerUnit(this);
-            } 
+            }
         });
     }
 
     die() {
-        this.destroyDebugObjects(); 
+        this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
         this.destroy();
     }
@@ -131,8 +123,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     enforceWorldBounds() {
+        // [Optimization] 경계 체크가 매 프레임 필요하지 않다면 빈도 조절 가능하나, 물리 엔진 안정성을 위해 유지
         const bounds = this.scene.physics.world.bounds;
-        const padding = this.baseSize / 2; 
+        const padding = this.baseSize / 2;
 
         const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
         const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
@@ -140,7 +133,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.x !== clampedX || this.y !== clampedY) {
             this.x = clampedX;
             this.y = clampedY;
-            this.setVelocity(0, 0); 
+            this.setVelocity(0, 0);
         }
     }
 
@@ -148,103 +141,115 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!this.active) return;
         this.updateUI();
 
-        const isDebugMode = this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText);
-        
-        if (isDebugMode) {
-            if (!this.debugText) this.createDebugObjects();
-            this.debugUpdateTimer += delta;
-            if (this.debugUpdateTimer > 200) {
-                this.updateDebugVisuals();
-                this.debugUpdateTimer = 0;
-            }
-        } else {
-            if (this.debugText) this.destroyDebugObjects();
+        // [Refactor] 디버그 로직 분리 및 조건문 단순화
+        if (this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText)) {
+            this.handleDebugUpdates(delta);
+        } else if (this.debugText) {
+            this.destroyDebugObjects();
         }
 
         const adjustedDelta = delta * (this.scene.gameSpeed || 1);
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
-        
-        // [Regen Logic]
-        if (this.body.velocity.lengthSq() < 10 && !this.isTakingDamage && !this.isAttacking) {
-            const regenCap = this.maxHp * 0.5; 
-            if (this.hp < regenCap) {
-                const regenRate = this.aiConfig.common?.hpRegenRate ?? 0.01;
-                const regenAmount = (this.maxHp * regenRate) * (adjustedDelta / 1000);
-                
-                this.hp = Math.min(this.hp + regenAmount, regenCap);
-                
-                if (Math.abs(this.hp - (this.lastDrawnHpPct * this.maxHp)) > 1) {
-                    this.redrawHpBar();
-                }
-            }
+
+        // [Regen Logic] - 조건부 실행으로 최적화
+        if (this.hp < this.maxHp * 0.5 && this.body.velocity.lengthSq() < 10 && !this.isTakingDamage && !this.isAttacking) {
+            this.handleRegen(adjustedDelta);
         }
 
         if (this.scene.isSetupPhase) { this.setVelocity(0, 0); return; }
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
 
-        if (!this.isAvoiding) {
-            this.wallFreeTimer += adjustedDelta;
-            if (this.wallFreeTimer > 1000) this.savedAvoidDir = null;
-        }
-
+        // [AI & Movement Logic]
         if (this.isAvoiding) {
             this.updateAvoidance(adjustedDelta);
             this.updateAnimation();
-            return; 
+            return;
         }
+
+        this.wallFreeTimer += adjustedDelta;
+        if (this.wallFreeTimer > 1000) this.savedAvoidDir = null;
 
         if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
+        // Player / AI 분기
         if (this.isLeader) {
-            this.updatePlayerMovement(); 
-            const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
-            if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
-                this.updateAI(adjustedDelta);
+            this.updatePlayerLogic(adjustedDelta);
+        } else {
+            this.updateNpcLogic(adjustedDelta);
+        }
+        
+        this.updateAnimation();
+    }
+
+    handleDebugUpdates(delta) {
+        if (!this.debugText) this.createDebugObjects();
+        this.debugUpdateTimer += delta;
+        if (this.debugUpdateTimer > 200) {
+            this.updateDebugVisuals();
+            this.debugUpdateTimer = 0;
+        }
+    }
+
+    handleRegen(delta) {
+        const regenCap = this.maxHp * 0.5;
+        const regenRate = this.aiConfig.common?.hpRegenRate ?? 0.01;
+        const regenAmount = (this.maxHp * regenRate) * (delta / 1000);
+
+        this.hp = Math.min(this.hp + regenAmount, regenCap);
+
+        // 시각적 업데이트 최소화
+        if (Math.abs(this.hp - (this.lastDrawnHpPct * this.maxHp)) > 1) {
+            this.redrawHpBar();
+        }
+    }
+
+    updatePlayerLogic(delta) {
+        this.updatePlayerMovement();
+        const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
+        if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
+            this.updateAI(delta);
+        }
+    }
+
+    updateNpcLogic(delta) {
+        if (!this.scene.battleStarted) {
+            this.updateFormationFollow(delta);
+            return;
+        }
+
+        if (this.team === 'blue') {
+            if (this.isLowHpFleeing) {
+                this.updateAI(delta);
+            } else {
+                switch (this.scene.squadState) {
+                    case 'FORMATION': this.updateFormationFollow(delta); break;
+                    case 'FLEE': this.runAway(delta); break;
+                    case 'FREE': default: this.updateAI(delta); break;
+                }
             }
         } else {
-            if (!this.scene.battleStarted) {
-                this.updateFormationFollow(adjustedDelta); 
-            } else if (this.team === 'blue') {
-                if (this.isLowHpFleeing) {
-                    this.updateAI(adjustedDelta); 
-                } else {
-                    switch (this.scene.squadState) {
-                        case 'FORMATION': this.updateFormationFollow(adjustedDelta); break;
-                        case 'FLEE': this.runAway(adjustedDelta); break;
-                        case 'FREE': default: this.updateAI(adjustedDelta); break;
-                    }
-                }
-            } else {
-                this.updateAI(adjustedDelta); 
-            }
+            this.updateAI(delta);
         }
-        this.updateAnimation();
     }
 
     // --- AI Methods (Optimized) ---
 
     isTargeted() {
         if (!this.targetGroup) return false;
-        const enemies = this.targetGroup.getChildren(); 
-        for (const enemy of enemies) {
-            if (enemy.active && enemy.currentTarget === this) {
-                return true;
-            }
-        }
-        return false;
+        // [Optimization] some 메소드 사용하여 빠른 반환
+        return this.targetGroup.getChildren().some(enemy => enemy.active && enemy.currentTarget === this);
     }
 
     checkLineOfSight() {
         if (!this.currentTarget || !this.currentTarget.active) return true;
-        
-        const now = this.scene.time.now;
-        if (now < this.losCheckTimer) {
-            return this.lastLosResult;
-        }
-        this.losCheckTimer = now + 150; 
 
-        const wallLayer = this.scene.wallLayer; 
+        const now = this.scene.time.now;
+        if (now < this.losCheckTimer) return this.lastLosResult;
+        
+        this.losCheckTimer = now + 150;
+
+        const wallLayer = this.scene.wallLayer;
         const blockLayer = this.scene.blockLayer;
 
         if (!wallLayer) {
@@ -254,35 +259,29 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this._tempStart.set(this.x, this.y);
         this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
-        
+
         const distance = this._tempStart.distance(this._tempEnd);
-        const stepSize = 35; 
+        const stepSize = 35;
         const steps = Math.ceil(distance / stepSize);
-        
-        for (let i = 1; i < steps; i++) { 
+
+        for (let i = 1; i < steps; i++) {
             const t = i / steps;
             const cx = this._tempStart.x + (this._tempEnd.x - this._tempStart.x) * t;
             const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
-            
-            const tile = wallLayer.getTileAtWorldXY(cx, cy);
-            if (tile && tile.canCollide) {
-                this.lastLosResult = false;
-                return false; 
+
+            if (wallLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
+                this.lastLosResult = false; return false;
             }
-            
-            if (blockLayer) {
-                const block = blockLayer.getTileAtWorldXY(cx, cy);
-                if (block && block.canCollide) {
-                    this.lastLosResult = false;
-                    return false;
-                }
+            if (blockLayer && blockLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
+                this.lastLosResult = false; return false;
             }
         }
-        
+
         this.lastLosResult = true;
-        return true; 
+        return true;
     }
 
+    // ... calculateWallAvoidDir, handleWallCollision, updateAvoidance 는 기존 로직 유지 ...
     calculateWallAvoidDir() {
         const blocked = this.body.blocked;
         const touching = this.body.touching; 
@@ -375,6 +374,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateAI(delta) {
+        // ... (HP Flee Check 로직 유지) ...
         const fleeThreshold = this.aiConfig.common?.fleeHpThreshold ?? 0.2;
         const hpRatio = this.hp / this.maxHp;
         
@@ -387,64 +387,87 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
 
         if (this.isLowHpFleeing) {
-            if (this.isTargeted()) {
-                this.runAway(delta);
-            } else {
-                this.setVelocity(0, 0); 
-                this.updateFlipX(); 
-            }
-            return; 
+            if (this.isTargeted()) this.runAway(delta);
+            else { this.setVelocity(0, 0); this.updateFlipX(); }
+            return;
         }
 
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
-            if (!this.currentTarget || !this.currentTarget.active) this.currentTarget = this.findNearestEnemy();
+            // 타겟이 죽거나 없으면 재탐색
+            if (!this.currentTarget || !this.currentTarget.active) {
+                this.currentTarget = this.findNearestEnemy();
+            }
         }
+
         if (this.currentTarget && this.currentTarget.active) {
             if (this.isAvoiding) return;
-            const dist = Phaser.Math.Distance.Between(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
+            
+            // [Optimization] 제곱 거리 비교 사용 (sqrt 연산 제거)
+            const distSq = Phaser.Math.Distance.Squared(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
             const roleKey = this.role.toLowerCase();
             const aiParams = this.aiConfig[roleKey] || {};
+
             if (this.role === 'Shooter') {
                 const kiteDist = aiParams.kiteDistance || 200;
                 const attackDist = aiParams.attackRange || 250;
-                if (dist < kiteDist) {
+                
+                if (distSq < kiteDist * kiteDist) { // 거리 비교도 제곱으로
                     const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
-                    this.scene.physics.velocityFromRotation(angle, -this.moveSpeed, this.body.velocity);
+                    this.scene.physics.velocityFromRotation(angle, this.moveSpeed, this.body.velocity); // Backwards is same as forward away
                     this.updateFlipX();
-                } else if (dist > attackDist) {
+                } else if (distSq > attackDist * attackDist) {
                     this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
                     this.updateFlipX();
-                } else { this.setVelocity(0, 0); }
+                } else {
+                    this.setVelocity(0, 0);
+                }
             } else {
                 this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
                 this.updateFlipX();
             }
-        } else { this.setVelocity(0, 0); }
-        
+        } else {
+            this.setVelocity(0, 0);
+        }
+
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
-    
+
+    // [Refactor & Optimize] 단일 루프 탐색으로 변경 O(2N) -> O(N)
     findNearestEnemy() {
-        let closestDistSq = Infinity; let closestTarget = null;
         const enemies = this.targetGroup.getChildren();
-        for (let enemy of enemies) {
-            if (enemy.active && enemy.role !== 'Healer') {
-                const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
-                if (distSq < closestDistSq) { closestDistSq = distSq; closestTarget = enemy; }
-            }
-        }
-        if (!closestTarget) {
-            for (let enemy of enemies) {
-                if (enemy.active) {
-                    const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
-                    if (distSq < closestDistSq) { closestDistSq = distSq; closestTarget = enemy; }
+        
+        let closestDistSq = Infinity;
+        let closestTarget = null;
+        let closestHealerDistSq = Infinity;
+        let closestHealer = null;
+
+        const myX = this.x;
+        const myY = this.y;
+
+        for (const enemy of enemies) {
+            if (!enemy.active) continue;
+
+            const distSq = (myX - enemy.x) ** 2 + (myY - enemy.y) ** 2;
+
+            if (enemy.role === 'Healer') {
+                if (distSq < closestHealerDistSq) {
+                    closestHealerDistSq = distSq;
+                    closestHealer = enemy;
+                }
+            } else {
+                if (distSq < closestDistSq) {
+                    closestDistSq = distSq;
+                    closestTarget = enemy;
                 }
             }
         }
-        return closestTarget;
+
+        // 힐러가 아닌 가장 가까운 적 우선, 없으면 힐러 반환
+        return closestTarget || closestHealer;
     }
+
     findLowestHpAlly() {
         const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
         let lowestHpVal = Infinity; let target = null;
@@ -455,6 +478,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
         return target;
     }
+    
+    // ... 나머지 updatePlayerMovement, updateFormationFollow, runAway, Visuals 등은 기존 유지 ...
     findWeakestEnemy() { return null; }
     findEnemyEngagingAlly() { return null; }
     
@@ -527,8 +552,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.scale = 1;
         this.setDisplaySize(this.baseSize, this.baseSize);
         
-        // [Fixed] 투명도(Alpha) 초기화 추가
-        // 힐러의 이펙트나 다른 트윈에 의해 alpha가 0이 된 상태로 고정되는 것을 방지합니다.
         this.setAlpha(1);
 
         if (this.body) {
@@ -622,7 +645,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.hpBar.clear();
         if (this.hp <= 0) return;
         
-        // [Optimization] 마지막으로 그린 값 저장 (Update에서 비교용)
         this.lastDrawnHpPct = this.hp / this.maxHp;
 
         const w = 32;
