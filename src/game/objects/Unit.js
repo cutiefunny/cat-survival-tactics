@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
-import { ROLE_TEXTURES } from '../data/UnitData'; // [Refactor] 중앙 데이터 사용
+import { ROLE_TEXTURES } from '../data/UnitData'; 
 
 // [Frame Constants]
 const FRAME_IDLE = 0;
 const FRAME_ATTACK = 3;
-const FRAME_HIT = 4;
+const FRAME_HIT = 4; // 피격 모션 프레임
 const FRAME_SKILL = 5;
 
 export default class Unit extends Phaser.Physics.Arcade.Sprite {
@@ -48,17 +48,18 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.skillTimer = 0;
         this.isUsingSkill = false;
 
+        // [Status Flags]
+        this.isDying = false; // 사망 애니메이션 진행 중 여부
+        this.isAttacking = false;
+        this.isTakingDamage = false;
+
         // [AI State]
         this.thinkTimer = Math.random() * 200;
         this.fleeTimer = 0;
         this.currentTarget = null;
         this.isLowHpFleeing = false;
-        
-        // [Optimization] 상태 플래그 대신 상태 상수를 쓰면 좋지만, 일단 기존 로직 유지하되 Boolean 정리
-        this.isAttacking = false;
-        this.isTakingDamage = false;
 
-        // [Optimization] 벡터 재사용 (GC 방지)
+        // [Optimization] 벡터 재사용
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
@@ -75,7 +76,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.losCheckTimer = 0;
         this.lastLosResult = true;
 
-        // [Debug UI - Lazy Init]
+        // [Debug UI]
         this.debugText = null;
         this.debugGraphic = null;
         this.debugUpdateTimer = 0;
@@ -100,10 +101,38 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         });
     }
 
+    // [Fix] 사망 애니메이션: 피격 모션 고정 및 회전
     die() {
+        if (this.isDying) return; // 중복 호출 방지
+        this.isDying = true;
+
         this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
-        this.destroy();
+
+        // 1. 물리 바디 비활성화 (밀림/충돌 방지)
+        if (this.body) {
+            this.setVelocity(0, 0);
+            this.body.checkCollision.none = true;
+            this.body.enable = false; 
+        }
+
+        // 2. 애니메이션 정지 및 피격 모션 고정 (가장 중요)
+        this.scene.tweens.killTweensOf(this); // 기존 효과(피격 팝업 등) 제거
+        if (this.anims.isPlaying) this.stop(); // 걷기 애니메이션 강제 정지
+        this.setFrame(FRAME_HIT); // 피격 프레임으로 강제 설정
+        this.clearTint(); // 빨간색 틴트 제거
+
+        // 3. 사망 연출: 0.5초 동안 90도 회전
+        this.scene.tweens.add({
+            targets: this,
+            angle: 90,       // 90도 회전 (눕기)
+            // alpha: 0,     // 투명해지지 않고 그대로 쓰러지는 모습을 보여주기 위해 주석 처리 (원하시면 주석 해제)
+            duration: 500,   
+            ease: 'Power1',
+            onComplete: () => {
+                this.destroy(); // 애니메이션이 끝난 후 제거
+            }
+        });
     }
 
     createDebugObjects() {
@@ -123,7 +152,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     enforceWorldBounds() {
-        // [Optimization] 경계 체크가 매 프레임 필요하지 않다면 빈도 조절 가능하나, 물리 엔진 안정성을 위해 유지
         const bounds = this.scene.physics.world.bounds;
         const padding = this.baseSize / 2;
 
@@ -138,10 +166,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     update(time, delta) {
-        if (!this.active) return;
+        // [Important] 사망 중(isDying)이면 그 어떤 업데이트 로직도 실행하지 않음 -> 프레임 변경 방지
+        if (!this.active || this.isDying) return; 
+        
         this.updateUI();
 
-        // [Refactor] 디버그 로직 분리 및 조건문 단순화
         if (this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText)) {
             this.handleDebugUpdates(delta);
         } else if (this.debugText) {
@@ -151,7 +180,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const adjustedDelta = delta * (this.scene.gameSpeed || 1);
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
 
-        // [Regen Logic] - 조건부 실행으로 최적화
         if (this.hp < this.maxHp * 0.5 && this.body.velocity.lengthSq() < 10 && !this.isTakingDamage && !this.isAttacking) {
             this.handleRegen(adjustedDelta);
         }
@@ -160,7 +188,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
 
-        // [AI & Movement Logic]
         if (this.isAvoiding) {
             this.updateAvoidance(adjustedDelta);
             this.updateAnimation();
@@ -172,7 +199,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
-        // Player / AI 분기
         if (this.isLeader) {
             this.updatePlayerLogic(adjustedDelta);
         } else {
@@ -198,7 +224,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this.hp = Math.min(this.hp + regenAmount, regenCap);
 
-        // 시각적 업데이트 최소화
         if (Math.abs(this.hp - (this.lastDrawnHpPct * this.maxHp)) > 1) {
             this.redrawHpBar();
         }
@@ -233,11 +258,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    // --- AI Methods (Optimized) ---
-
     isTargeted() {
         if (!this.targetGroup) return false;
-        // [Optimization] some 메소드 사용하여 빠른 반환
         return this.targetGroup.getChildren().some(enemy => enemy.active && enemy.currentTarget === this);
     }
 
@@ -281,7 +303,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         return true;
     }
 
-    // ... calculateWallAvoidDir, handleWallCollision, updateAvoidance 는 기존 로직 유지 ...
     calculateWallAvoidDir() {
         const blocked = this.body.blocked;
         const touching = this.body.touching; 
@@ -374,7 +395,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     updateAI(delta) {
-        // ... (HP Flee Check 로직 유지) ...
         const fleeThreshold = this.aiConfig.common?.fleeHpThreshold ?? 0.2;
         const hpRatio = this.hp / this.maxHp;
         
@@ -395,7 +415,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
-            // 타겟이 죽거나 없으면 재탐색
             if (!this.currentTarget || !this.currentTarget.active) {
                 this.currentTarget = this.findNearestEnemy();
             }
@@ -404,7 +423,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.currentTarget && this.currentTarget.active) {
             if (this.isAvoiding) return;
             
-            // [Optimization] 제곱 거리 비교 사용 (sqrt 연산 제거)
             const distSq = Phaser.Math.Distance.Squared(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
             const roleKey = this.role.toLowerCase();
             const aiParams = this.aiConfig[roleKey] || {};
@@ -413,9 +431,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 const kiteDist = aiParams.kiteDistance || 200;
                 const attackDist = aiParams.attackRange || 250;
                 
-                if (distSq < kiteDist * kiteDist) { // 거리 비교도 제곱으로
+                if (distSq < kiteDist * kiteDist) { 
                     const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
-                    this.scene.physics.velocityFromRotation(angle, this.moveSpeed, this.body.velocity); // Backwards is same as forward away
+                    this.scene.physics.velocityFromRotation(angle, this.moveSpeed, this.body.velocity); 
                     this.updateFlipX();
                 } else if (distSq > attackDist * attackDist) {
                     this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
@@ -434,7 +452,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
 
-    // [Refactor & Optimize] 단일 루프 탐색으로 변경 O(2N) -> O(N)
     findNearestEnemy() {
         const enemies = this.targetGroup.getChildren();
         
@@ -447,7 +464,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const myY = this.y;
 
         for (const enemy of enemies) {
-            if (!enemy.active) continue;
+            // [Important] 이미 사망 중인 적은 타겟에서 제외
+            if (!enemy.active || enemy.isDying) continue; 
 
             const distSq = (myX - enemy.x) ** 2 + (myY - enemy.y) ** 2;
 
@@ -464,7 +482,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
         }
 
-        // 힐러가 아닌 가장 가까운 적 우선, 없으면 힐러 반환
         return closestTarget || closestHealer;
     }
 
@@ -472,14 +489,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
         let lowestHpVal = Infinity; let target = null;
         for (let ally of allies) {
-            if (ally.active && ally !== this && ally.hp < ally.maxHp) {
+            if (ally.active && !ally.isDying && ally !== this && ally.hp < ally.maxHp) { 
                 if (ally.hp < lowestHpVal) { lowestHpVal = ally.hp; target = ally; }
             }
         }
         return target;
     }
     
-    // ... 나머지 updatePlayerMovement, updateFormationFollow, runAway, Visuals 등은 기존 유지 ...
     findWeakestEnemy() { return null; }
     findEnemyEngagingAlly() { return null; }
     
@@ -598,12 +614,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         const range = this.skillRange;
         this.targetGroup.getChildren().forEach(enemy => {
-            if (enemy.active && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) {
+            // [Important] 사망 중인 적에게 스킬 사용 안 함
+            if (enemy.active && !enemy.isDying && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) { 
                 enemy.takeDamage(this.attackPower * 2); 
             }
         });
         this.scene.time.delayedCall(500, () => {
-            if(this.active) {
+            // [Important] 내가 죽어가고 있다면 모션 복구 안 함
+            if(this.active && !this.isDying) { 
                 this.isUsingSkill = false;
                 this.resetVisuals();
             }
@@ -611,7 +629,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     takeDamage(amount) {
-        if (!this.scene.battleStarted) return;
+        // [Important] 이미 죽어가고 있다면 추가 데미지/모션 처리 무시
+        if (!this.scene.battleStarted || this.isDying) return; 
+
         this.hp -= amount;
         this.onTakeDamage(); 
         
@@ -623,10 +643,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const popSize = this.baseSize * 1.2;
         this.scene.tweens.add({
             targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
-            onComplete: () => { if (this.active) this.resetVisuals(); }
+            onComplete: () => { if (this.active && !this.isDying) this.resetVisuals(); }
         });
         this.scene.time.delayedCall(500, () => {
-            if (this.active && this.hp > 0) {
+            // [Important] 0.5초 뒤에 내가 죽어있거나 죽는 중이라면 모션 복구 안 함
+            if (this.active && this.hp > 0 && !this.isDying) {
                 this.isTakingDamage = false;
                 if (this.isAttacking) return; 
                 this.setFrame(FRAME_IDLE);
@@ -756,10 +777,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const popSize = this.baseSize * 1.2;
         this.scene.tweens.add({
             targets: this, displayWidth: popSize, displayHeight: popSize, duration: 50, yoyo: true, ease: 'Quad.easeOut',
-            onComplete: () => { if (this.active) this.resetVisuals(); }
+            onComplete: () => { if (this.active && !this.isDying) this.resetVisuals(); }
         });
         this.scene.time.delayedCall(300, () => {
-            if(this.active) {
+            if(this.active && !this.isDying) {
                 this.isAttacking = false;
                 if (this.isTakingDamage) return;
                 this.setFrame(FRAME_IDLE);

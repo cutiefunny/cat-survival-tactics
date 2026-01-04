@@ -12,7 +12,7 @@ import Healer from '../objects/roles/Healer';
 import Raccoon from '../objects/roles/Raccoon';
 
 // [Data & Config]
-import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; // [Refactor]
+import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
@@ -52,12 +52,10 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
-// [Refactor] ROLE_BASE_STATS 제거 (UnitData에서 가져옴)
-
 const DEFAULT_CONFIG = {
     showDebugStats: false,
     gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'stage1' },
-    aiSettings: DEFAULT_AI_SETTINGS, // [Refactor]
+    aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
@@ -99,6 +97,9 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
+        
+        // [New] 배치 제한 구역 초기화
+        this.placementZone = null;
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -250,12 +251,9 @@ export default class BattleScene extends Phaser.Scene {
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
-        // [Refactor] 유닛 생성 헬퍼 함수
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-            
-            // 중앙 데이터(ROLE_BASE_STATS)와 전달된 stats 병합
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const finalStats = { ...baseStats, ...stats };
             
@@ -266,11 +264,36 @@ export default class BattleScene extends Phaser.Scene {
             return unit;
         };
 
-        // --- Blue Team Spawn ---
+        // --- Blue Team Spawn (Random in 'Cats' Layer) ---
+        const catsLayer = map.getObjectLayer('Cats');
+        let spawnZone = null;
+
+        if (catsLayer && catsLayer.objects.length > 0) {
+            const obj = catsLayer.objects[0];
+            // Phaser Rectangle로 변환 (배치 제한을 위해 Scene에 저장)
+            spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
+            this.placementZone = spawnZone; 
+            console.log(`🐱 Blue Team Spawn Zone: x=${obj.x}, y=${obj.y}, w=${obj.width}, h=${obj.height}`);
+        } else {
+            console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
+        }
+
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
-            const unit = createUnit(300, startY + (i*spawnGap), 'blue', this.redTeam, roleConfig, i===0);
-            if (i===0) this.playerUnit = unit;
+            
+            let spawnX, spawnY;
+            if (spawnZone) {
+                // 구역 내 랜덤 스폰
+                spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
+                spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
+            } else {
+                // 기존 스폰 (Fallback)
+                spawnX = 300;
+                spawnY = startY + (i * spawnGap);
+            }
+
+            const unit = createUnit(spawnX, spawnY, 'blue', this.redTeam, roleConfig, i === 0);
+            if (i === 0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
 
@@ -279,14 +302,12 @@ export default class BattleScene extends Phaser.Scene {
         
         if (dogLayer && dogLayer.objects.length > 0) {
             console.log(`🐺 Spawning ${dogLayer.objects.length} dogs from 'Dogs' layer`);
-            
             dogLayer.objects.forEach((obj, index) => {
                 const stats = redRoles[index % redRoles.length];
                 const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
                 this.redTeam.add(unit);
             });
         } else {
-            // [Fallback]
             console.log("⚠️ No 'Dogs' layer found. Using default spawn logic.");
             for (let i = 0; i < redCount; i++) {
                 const stats = redRoles[i % redRoles.length];
@@ -320,6 +341,9 @@ export default class BattleScene extends Phaser.Scene {
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
+        // 배치 제한 해제 (선택사항, 필요 없다면 유지해도 됨)
+        // this.placementZone = null; 
+        
         this.uiManager.cleanupBeforeBattle();
 
         if (this.isMobile && this.playerUnit?.active) {

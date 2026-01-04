@@ -4,6 +4,28 @@
  "layers":[
         {
          "draworder":"topdown",
+         "id":7,
+         "name":"Cats",
+         "objects":[
+                {
+                 "height":305,
+                 "id":4,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":300,
+                 "x":10,
+                 "y":10
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
          "id":4,
          "name":"Dogs",
          "objects":[
@@ -142,8 +164,8 @@
          "x":0,
          "y":0
         }],
- "nextlayerid":7,
- "nextobjectid":4,
+ "nextlayerid":8,
+ "nextobjectid":5,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
