@@ -4,12 +4,11 @@ export default class InputManager {
     constructor(scene) {
         this.scene = scene;
         this.joyStick = null;
-        this.orientationOverlay = null;
-        this.isOrientationBad = false;
+        // [Removed] orientationOverlay 및 isOrientationBad 제거
         
         this.spaceKey = null;
 
-        // [New] 모바일 제어 상태 변수
+        // 모바일 제어 상태 변수
         this.prevPinchDistance = 0;
         this.isDraggingUnit = false;
     }
@@ -17,7 +16,7 @@ export default class InputManager {
     setupControls() {
         if (this.scene.cursors) return;
 
-        // [New] 멀티터치 활성화 (기본 1개 + 추가 1개 = 총 2개)
+        // 멀티터치 활성화 (기본 1개 + 추가 1개 = 총 2개)
         this.scene.input.addPointer(1);
 
         this.scene.cursors = this.scene.input.keyboard.createCursorKeys();
@@ -25,7 +24,7 @@ export default class InputManager {
         
         this.spaceKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // [New] 유닛 드래그 상태 추적 (카메라 이동과 겹침 방지)
+        // 유닛 드래그 상태 추적 (카메라 이동과 겹침 방지)
         this.scene.input.on('dragstart', () => { this.isDraggingUnit = true; });
         this.scene.input.on('dragend', () => { this.isDraggingUnit = false; });
         
@@ -64,7 +63,7 @@ export default class InputManager {
                     
                     if (this.prevPinchDistance > 0) {
                         const diff = dist - this.prevPinchDistance;
-                        const zoomFactor = 0.002; // 모바일 감도 조절
+                        const zoomFactor = 0.002; 
                         
                         let newZoom = this.scene.cameras.main.zoom + (diff * zoomFactor);
                         newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
@@ -73,7 +72,6 @@ export default class InputManager {
                     this.prevPinchDistance = dist;
                 } 
                 else {
-                    // 핀치 중이 아니면 거리 초기화
                     this.prevPinchDistance = 0;
 
                     // B. 그라운드 팬 (한 손가락)
@@ -128,9 +126,8 @@ export default class InputManager {
             console.log("📱 Mobile Device Detected.");
             this.scene.cameras.main.setZoom(0.8);
             
-            this.createOrientationOverlay();
+            // [Removed] createOrientationOverlay 및 checkOrientation 호출 제거
             this.scene.scale.on('resize', this.handleResize, this);
-            this.checkOrientation();
             this.setupJoystick();
         } else {
             // PC 초기 줌 설정
@@ -163,40 +160,8 @@ export default class InputManager {
         this.scene.joystickCursors = this.joyStick.createCursorKeys();
     }
 
-    createOrientationOverlay() {
-        if (this.orientationOverlay) return; 
-
-        this.orientationOverlay = this.scene.add.container(0, 0).setScrollFactor(0).setDepth(9999).setVisible(false);
-        const bg = this.scene.add.rectangle(0, 0, 100, 100, 0x000000).setOrigin(0.5); 
-        const text = this.scene.add.text(0, 0, "Please Rotate Your Device\n↔️ Landscape Only", {
-            fontSize: '40px', color: '#ffffff', align: 'center', fontStyle: 'bold'
-        }).setOrigin(0.5);
-        this.orientationOverlay.add([bg, text]);
-    }
-
-    checkOrientation() {
-        if (!this.orientationOverlay) return;
-        const { width, height } = this.scene.scale;
-        
-        if (height > width) {
-            this.orientationOverlay.setVisible(true);
-            const bg = this.orientationOverlay.list[0];
-            const txt = this.orientationOverlay.list[1];
-            if(bg) bg.setSize(width, height).setPosition(width/2, height/2);
-            if(txt) txt.setPosition(width/2, height/2);
-            
-            if (this.scene.physics.world && !this.scene.physics.world.isPaused) {
-                this.scene.physics.pause();
-            }
-            this.isOrientationBad = true;
-        } else {
-            this.orientationOverlay.setVisible(false);
-            if (this.isOrientationBad && !this.scene.isGameOver) {
-                this.scene.physics.resume();
-            }
-            this.isOrientationBad = false;
-        }
-    }
+    // [Removed] createOrientationOverlay() 메서드 삭제
+    // [Removed] checkOrientation() 메서드 삭제
 
     handleResize(gameSize) {
         const width = gameSize.width;
@@ -206,7 +171,7 @@ export default class InputManager {
             this.scene.cameras.main.setZoom(0.8);
         }
 
-        this.checkOrientation();
+        // [Removed] checkOrientation 호출 제거
 
         if (this.joyStick) {
             this.joyStick.setPosition(width - 80, height - 80);
@@ -233,9 +198,6 @@ export default class InputManager {
         }
 
         this.spaceKey = null;
-        if (this.orientationOverlay) {
-            this.orientationOverlay.destroy();
-            this.orientationOverlay = null;
-        }
+        // [Removed] orientationOverlay 정리 코드 삭제
     }
 }
