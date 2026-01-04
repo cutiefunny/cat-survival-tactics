@@ -1,45 +1,42 @@
+import Phaser from 'phaser';
+
 export default class BattleUIManager {
     constructor(scene) {
         this.scene = scene;
         console.log("🔧 [BattleUIManager] Initialized");
-
-        // [Debug] UIScene 실행 시도
-        const uiSceneKey = 'UIScene';
         
-        // Scene Manager에 등록되었는지 확인
-        if (this.scene.scene.get(uiSceneKey)) {
-             console.log("   -> UIScene found in SceneManager.");
-             
-             if (this.scene.scene.isActive(uiSceneKey)) {
-                console.log("   -> UIScene is active. Restarting...");
-                this.scene.scene.stop(uiSceneKey);
-            }
-            console.log("   -> Launching UIScene...");
-            this.scene.scene.launch(uiSceneKey);
-        } else {
-            console.error("❌ [BattleUIManager] UIScene NOT found in SceneManager! Check phaserConfig.js 'scene' array.");
+        this.isDebugEnabled = false; 
+
+        // BattleScene 시작 시 UIScene을 무조건 실행 (기존 실행 중이면 재시작)
+        if (this.scene.scene.isActive('UIScene')) {
+            this.scene.scene.stop('UIScene');
         }
+        this.scene.scene.launch('UIScene');
     }
 
     // --- Bridge Methods ---
 
-    createFooter() { /* UIScene handles this */ }
-    createAutoBattleButton() { /* UIScene handles this */ }
-    createSquadButton() { /* UIScene handles this */ }
-    createSpeedButton() { /* UIScene handles this */ }
-    createGameMessages() { /* UIScene handles this */ }
+    createFooter() { }
+    createAutoBattleButton() { }
+    createSquadButton() { }
+    createSpeedButton() { }
+    createGameMessages() { }
     createLoadingText() { }
     destroyLoadingText() { }
 
+    createDebugStats() { 
+        this.isDebugEnabled = true;
+        this.scene.time.delayedCall(100, () => {
+            const ui = this.scene.scene.get('UIScene');
+            if (ui && ui.showDebugStats) ui.showDebugStats();
+        });
+    }
+
     createStartButton(callback) {
-        console.log("🔧 [BattleUIManager] Requesting Start Button...");
-        this.scene.time.delayedCall(200, () => {
+        this.scene.time.delayedCall(100, () => {
             const ui = this.scene.scene.get('UIScene');
             if (ui && ui.showStartButton) {
-                console.log("   -> UIScene.showStartButton found. Executing.");
                 ui.showStartButton(callback);
-            } else {
-                console.warn("   ⚠️ UIScene or showStartButton method missing!");
             }
         });
     }
@@ -53,12 +50,16 @@ export default class BattleUIManager {
         if (ui && ui.showStartAnimation) ui.showStartAnimation();
     }
 
-    createGameOverUI(message, color, restartCallback) {
+    // [Fix] 인자를 4개(btnText, callback 포함)로 확장하여 UIScene에 전달
+    createGameOverUI(message, color, btnText, callback) {
         const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.createGameOverUI) ui.createGameOverUI(message, color, restartCallback);
+        if (ui && ui.createGameOverUI) {
+            ui.createGameOverUI(message, color, btnText, callback);
+        }
     }
 
     updateDebugStats(loop) {
+        if (!this.isDebugEnabled) return;
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.updateDebugStats) ui.updateDebugStats(loop.actualFps);
     }

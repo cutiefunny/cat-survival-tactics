@@ -47,13 +47,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.skillEffect = stats.skillEffect || 0;
         this.skillTimer = 0;
         this.isUsingSkill = false;
-        
-        // [Aggro System]
-        this.noCombatTimer = 0;      // 공격 못하고 있는 시간 체크
-        this.lastTargetChangeTime = 0; // [New] 타겟 변경 시점 기록 (헤맴 방지)
-
-        // [Position Safety] 벽 끼임 방지용 안전 좌표
-        this.lastValidPos = new Phaser.Math.Vector2(x, y);
 
         // [Status Flags]
         this.isDying = false; // 사망 애니메이션 진행 중 여부
@@ -65,6 +58,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.fleeTimer = 0;
         this.currentTarget = null;
         this.isLowHpFleeing = false;
+
+        // [Aggro System]
+        this.noCombatTimer = 0;
+        this.lastTargetChangeTime = 0; // 타겟 고정 타이머
 
         // [Optimization] 벡터 재사용
         this._tempVec = new Phaser.Math.Vector2();
@@ -108,42 +105,36 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         });
     }
 
+    // [Fix] 사망 애니메이션: 피격 모션 고정 및 회전
     die() {
-        if (this.isDying) return; 
+        if (this.isDying) return; // 중복 호출 방지
         this.isDying = true;
 
         this.destroyDebugObjects();
-        if (this.hpBar) {
-            this.hpBar.destroy();
-            this.hpBar = null;
-        }
+        if (this.hpBar) this.hpBar.destroy();
 
+        // 1. 물리 바디 비활성화 (밀림/충돌 방지)
         if (this.body) {
             this.setVelocity(0, 0);
             this.body.checkCollision.none = true;
             this.body.enable = false; 
         }
 
-        this.scene.tweens.killTweensOf(this); 
-        if (this.anims.isPlaying) this.stop(); 
-        this.setFrame(FRAME_HIT); 
-        this.clearTint(); 
+        // 2. 애니메이션 정지 및 피격 모션 고정 (가장 중요)
+        this.scene.tweens.killTweensOf(this); // 기존 효과(피격 팝업 등) 제거
+        if (this.anims.isPlaying) this.stop(); // 걷기 애니메이션 강제 정지
+        this.setFrame(FRAME_HIT); // 피격 프레임으로 강제 설정
+        this.clearTint(); // 빨간색 틴트 제거
 
+        // 3. 사망 연출: 0.5초 동안 90도 회전
         this.scene.tweens.add({
             targets: this,
-            angle: 90,       
+            angle: 90,       // 90도 회전 (눕기)
+            // alpha: 0,     // 투명해지지 않고 그대로 쓰러지는 모습을 보여주기 위해 주석 처리 (원하시면 주석 해제)
             duration: 500,   
             ease: 'Power1',
             onComplete: () => {
-                if (this.active) {
-                    this.destroy(); 
-                }
-            }
-        });
-
-        this.scene.time.delayedCall(600, () => {
-            if (this.active) {
-                this.destroy();
+                this.destroy(); // 애니메이션이 끝난 후 제거
             }
         });
     }
@@ -178,29 +169,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    checkEnvironmentOverlap() {
-        if (!this.scene.wallLayer && !this.scene.blockLayer) return;
-
-        const wallTile = this.scene.wallLayer ? this.scene.wallLayer.getTileAtWorldXY(this.x, this.y) : null;
-        const blockTile = this.scene.blockLayer ? this.scene.blockLayer.getTileAtWorldXY(this.x, this.y) : null;
-
-        const isWall = (wallTile && wallTile.collides);
-        const isBlock = (blockTile && blockTile.collides);
-
-        if (isWall || isBlock) {
-            this.x = this.lastValidPos.x;
-            this.y = this.lastValidPos.y;
-            this.setVelocity(0, 0);
-        } else {
-            this.lastValidPos.set(this.x, this.y);
-        }
-    }
-
     update(time, delta) {
+        // [Important] 사망 중(isDying)이면 그 어떤 업데이트 로직도 실행하지 않음 -> 프레임 변경 방지
         if (!this.active || this.isDying) return; 
         
-        this.checkEnvironmentOverlap();
-
         this.updateUI();
 
         if (this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText)) {
@@ -240,28 +212,21 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
-    updateAggroLogic(delta) {
-        if (this.currentTarget && this.currentTarget.active) {
-            const timeSinceLastAttack = this.scene.time.now - this.lastAttackTime;
-            
-            // 3초 이상 교전이 없으면 강제로 타겟 변경 시도 (어그로 리셋)
-            if (timeSinceLastAttack > 3000) {
-                this.noCombatTimer += delta;
-                if (this.noCombatTimer > 200) { 
-                    this.noCombatTimer = 0;
-                    
-                    const newTarget = this.findNearestEnemy(this.currentTarget);
-                    
-                    if (newTarget) {
-                        this.currentTarget = newTarget;
-                        this.lastTargetChangeTime = this.scene.time.now; // 타겟 변경 시점 기록
-                    }
-                }
-            } else {
-                this.noCombatTimer = 0;
-            }
-        } else {
-            this.noCombatTimer = 0;
+    // [New] 타겟 선택 공통 로직 (1초 쿨타임 적용)
+    updateTargetSelection() {
+        const now = this.scene.time.now;
+        const timeSinceSwitch = now - this.lastTargetChangeTime;
+        
+        // 현재 타겟이 유효하고, 1초가 지나지 않았으면 유지 (Flickering 방지)
+        if (this.currentTarget && this.currentTarget.active && timeSinceSwitch < 1000) {
+            return;
+        }
+
+        // 새 타겟 탐색
+        const newTarget = this.findNearestEnemy();
+        if (newTarget && newTarget !== this.currentTarget) {
+            this.currentTarget = newTarget;
+            this.lastTargetChangeTime = now;
         }
     }
 
@@ -290,7 +255,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updatePlayerMovement();
         const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
         if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
-            this.updateAggroLogic(delta);
             this.updateAI(delta);
         }
     }
@@ -305,7 +269,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             if (this.isLowHpFleeing) {
                 this.updateAI(delta);
             } else {
-                this.updateAggroLogic(delta);
                 switch (this.scene.squadState) {
                     case 'FORMATION': this.updateFormationFollow(delta); break;
                     case 'FLEE': this.runAway(delta); break;
@@ -313,7 +276,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 }
             }
         } else {
-            this.updateAggroLogic(delta);
             this.updateAI(delta);
         }
     }
@@ -475,22 +437,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 100 + Math.random() * 100;
-            
-            // [Fix] 타겟 고정 (Minimum Focus Time): 1초 동안은 타겟 유지
-            const now = this.scene.time.now;
-            const timeSinceSwitch = now - this.lastTargetChangeTime;
-            
-            // 현재 타겟이 살아있고, 아직 1초가 안 지났다면 타겟 재탐색을 건너뜀
-            if (this.currentTarget && this.currentTarget.active && timeSinceSwitch < 1000) {
-                // Keep Target
-            } else {
-                // 1초가 지났거나 타겟이 없으면 가장 가까운 적 찾기
-                const newTarget = this.findNearestEnemy();
-                if (newTarget && newTarget !== this.currentTarget) {
-                    this.currentTarget = newTarget;
-                    this.lastTargetChangeTime = now; // 타겟 변경 시각 갱신
-                }
-            }
+            // [Fix] 타겟 선택 로직을 updateTargetSelection으로 통합하여 1초 쿨타임 적용
+            this.updateTargetSelection();
         }
 
         if (this.currentTarget && this.currentTarget.active) {
@@ -525,7 +473,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
 
-    findNearestEnemy(excludeUnit = null) {
+    findNearestEnemy() {
         const enemies = this.targetGroup.getChildren();
         
         let closestDistSq = Infinity;
@@ -537,7 +485,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const myY = this.y;
 
         for (const enemy of enemies) {
-            if (!enemy.active || enemy.isDying || enemy === excludeUnit) continue; 
+            // [Important] 이미 사망 중인 적은 타겟에서 제외
+            if (!enemy.active || enemy.isDying) continue; 
 
             const distSq = (myX - enemy.x) ** 2 + (myY - enemy.y) ** 2;
 
@@ -589,8 +538,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     
     updateFormationFollow(delta) {
         if (this.isLeader) return; 
+        
         this.thinkTimer -= delta;
-        if (this.thinkTimer <= 0) { this.thinkTimer = 100 + Math.random() * 100; this.currentTarget = this.findNearestEnemy(); }
+        if (this.thinkTimer <= 0) { 
+            this.thinkTimer = 100 + Math.random() * 100; 
+            // [Fix] 기존엔 그냥 findNearestEnemy()였으나, 이제 1초 제한 체크하는 공통 로직 사용
+            this.updateTargetSelection();
+        }
         
         if (!this.isLowHpFleeing) {
             if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
@@ -607,7 +561,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
     
     runAway(delta) {
-        if (!this.currentTarget || !this.currentTarget.active) this.currentTarget = this.findNearestEnemy();
+        if (!this.currentTarget || !this.currentTarget.active) {
+            // 도망칠 땐 굳이 1초 제한을 둘 필요가 없을 수 있으나, 일관성을 위해 체크 가능.
+            // 하지만 당장 위협이 사라진 상태라면 즉시 찾는 게 맞음.
+            this.currentTarget = this.findNearestEnemy();
+        }
+        
         if (this.currentTarget && this.currentTarget.active) {
             const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y); 
             const speed = this.moveSpeed * 1.2; 
@@ -686,11 +645,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         const range = this.skillRange;
         this.targetGroup.getChildren().forEach(enemy => {
+            // [Important] 사망 중인 적에게 스킬 사용 안 함
             if (enemy.active && !enemy.isDying && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) { 
                 enemy.takeDamage(this.attackPower * 2); 
             }
         });
         this.scene.time.delayedCall(500, () => {
+            // [Important] 내가 죽어가고 있다면 모션 복구 안 함
             if(this.active && !this.isDying) { 
                 this.isUsingSkill = false;
                 this.resetVisuals();
@@ -699,7 +660,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     takeDamage(amount) {
-        if (!this.active || !this.scene.battleStarted || this.isDying) return; 
+        // [Important] 이미 죽어가고 있다면 추가 데미지/모션 처리 무시
+        if (!this.scene.battleStarted || this.isDying) return; 
 
         this.hp -= amount;
         this.onTakeDamage(); 
@@ -715,6 +677,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             onComplete: () => { if (this.active && !this.isDying) this.resetVisuals(); }
         });
         this.scene.time.delayedCall(500, () => {
+            // [Important] 0.5초 뒤에 내가 죽어있거나 죽는 중이라면 모션 복구 안 함
             if (this.active && this.hp > 0 && !this.isDying) {
                 this.isTakingDamage = false;
                 if (this.isAttacking) return; 

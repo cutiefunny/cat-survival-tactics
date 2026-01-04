@@ -24,12 +24,14 @@ import CombatManager from '../systems/CombatManager';
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
 import level1Data from '../../assets/maps/level1.json';
+import level2Data from '../../assets/maps/level2.json'; // Level 2 데이터
 
 // [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
+import tilesetParkImg from '../../assets/tilesets/park.png'; // Park 타일셋
 
 // [Assets - Units]
 import leaderSheet from '../../assets/units/leader.png';
@@ -52,9 +54,12 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
+// [Level Config]
+const LEVEL_LIST = ['level1', 'level2']; 
+
 const DEFAULT_CONFIG = {
     showDebugStats: false,
-    gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'stage1' },
+    gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1' },
     aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
@@ -73,6 +78,11 @@ export default class BattleScene extends Phaser.Scene {
         super({ key: 'BattleScene' });
     }
 
+    init(data) {
+        this.currentLevelIndex = data.levelIndex || 0;
+        console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (Target: ${LEVEL_LIST[this.currentLevelIndex]})`);
+    }
+
     preload() {
         const sheetConfig = { frameWidth: 100, frameHeight: 100 };
 
@@ -84,13 +94,17 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
+        // 맵 데이터 로드
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.tilemapTiledJSON('level1', level1Data);
+        this.load.tilemapTiledJSON('level2', level2Data);
         
+        // 타일셋 이미지 로드
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
         this.load.image('tiles_city', tilesetCity1Img);
         this.load.image('tiles_city2', tilesetCity2Img);
+        this.load.image('tiles_park', tilesetParkImg);
     }
 
     create() {
@@ -133,33 +147,45 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.uiManager.destroyLoadingText();
-        const selectedMap = config.gameSettings.mapSelection || 'stage1';
-        console.log(`🗺️ Starting Game with Map: ${selectedMap}`);
-        this.startGame(config, selectedMap);
+        
+        const targetMapKey = LEVEL_LIST[this.currentLevelIndex];
+        const mapKey = this.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
+        
+        console.log(`🗺️ [BattleScene] Loading Map: '${mapKey}' (Target was '${targetMapKey}')`);
+        this.startGame(config, mapKey);
     }
 
     startGame(config, mapKey) {
-        const keyToUse = this.cache.tilemap.exists(mapKey) ? mapKey : 'stage1';
-        const map = this.make.tilemap({ key: keyToUse });
+        const map = this.make.tilemap({ key: mapKey });
         
         const tilesets = [];
 
-        if (keyToUse === 'stage1') {
+        if (mapKey === 'stage1') {
             const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
             const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
             if (t1) tilesets.push(t1);
             if (t2) tilesets.push(t2);
-        } else if (keyToUse === 'level1') {
-            const t1 = map.addTilesetImage('City_20', 'tiles_city');
-            const t2 = map.addTilesetImage('City_20_2', 'tiles_city2');
+
+        } else if (mapKey === 'level2') {
+            console.log("🌲 Loading Tileset for Level 2: Park");
+            const t1 = map.addTilesetImage('Park', 'tiles_park');
+            if (t1) tilesets.push(t1);
+
+        } else {
+            const t1 = map.addTilesetImage('City', 'tiles_city');
+            const t2 = map.addTilesetImage('City2', 'tiles_city2');
             
             if (t1) tilesets.push(t1);
             if (t2) tilesets.push(t2);
 
             if (tilesets.length === 0) {
-                console.log("🔍 Auto-detecting level1 tilesets...");
+                console.log("🔍 Auto-detecting tilesets...");
                 map.tilesets.forEach(ts => {
-                    const imgKey = ts.name.includes('2') ? 'tiles_city2' : 'tiles_city';
+                    let imgKey;
+                    if (ts.name.includes('Park')) imgKey = 'tiles_park';
+                    else if (ts.name.includes('2')) imgKey = 'tiles_city2';
+                    else imgKey = 'tiles_city';
+                    
                     const t = map.addTilesetImage(ts.name, imgKey);
                     if (t) tilesets.push(t);
                 });
@@ -176,6 +202,21 @@ export default class BattleScene extends Phaser.Scene {
         if (this.blockLayer) this.blockLayer.setCollisionByExclusion([-1]);
         
         this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+
+        // [New] Blocks Object Layer 처리 (충돌체 생성)
+        this.blockObjectGroup = this.physics.add.staticGroup();
+        const blockObjectLayer = map.getObjectLayer('Blocks');
+        
+        if (blockObjectLayer) {
+            console.log(`🧱 Found 'Blocks' object layer with ${blockObjectLayer.objects.length} objects.`);
+            blockObjectLayer.objects.forEach(obj => {
+                // Tiled의 좌표는 Top-Left 기준, Phaser Rectangle은 Center 기준이므로 보정
+                const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
+                this.physics.add.existing(rect, true); // static body 생성
+                rect.setVisible(false); // 충돌 영역은 보이지 않게 설정
+                this.blockObjectGroup.add(rect);
+            });
+        }
 
         this.mapWidth = map.widthInPixels;
         this.mapHeight = map.heightInPixels;
@@ -216,12 +257,9 @@ export default class BattleScene extends Phaser.Scene {
 
     updateCameraBounds(screenWidth, screenHeight) {
         if (!this.mapWidth || !this.mapHeight) return;
-
         const paddingX = Math.max(0, (screenWidth - this.mapWidth) / 2);
         const paddingY = Math.max(0, (screenHeight - this.mapHeight) / 2);
-
         this.cameras.main.setBounds(-paddingX, -paddingY, this.mapWidth + 2 * paddingX, this.mapHeight + 2 * paddingY);
-
         if (paddingX > 0 || paddingY > 0) {
             this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
         }
@@ -229,7 +267,6 @@ export default class BattleScene extends Phaser.Scene {
 
     createStandardAnimations() {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
-        
         unitTextures.forEach(key => {
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
                 const frameRate = (key === 'healer') ? 3 : 6;
@@ -254,15 +291,10 @@ export default class BattleScene extends Phaser.Scene {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
-            
             const safeStats = { ...stats };
-            if (baseStats.attackRange) {
-                safeStats.attackRange = baseStats.attackRange;
-            }
+            if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
             const finalStats = { ...baseStats, ...safeStats };
-            
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
-            
             unit.setInteractive();
             this.input.setDraggable(unit);
             return unit;
@@ -270,25 +302,20 @@ export default class BattleScene extends Phaser.Scene {
 
         const catsLayer = map.getObjectLayer('Cats');
         let spawnZone = null;
-
         if (catsLayer && catsLayer.objects.length > 0) {
             const obj = catsLayer.objects[0];
             spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
             this.placementZone = spawnZone; 
-            
             this.zoneGraphics = this.add.graphics();
             this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
             this.zoneGraphics.fillRectShape(spawnZone);
             this.zoneGraphics.setDepth(0); 
-
-            console.log(`🐱 Blue Team Spawn Zone: x=${obj.x}, y=${obj.y}, w=${obj.width}, h=${obj.height}`);
         } else {
             console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
         }
 
         for (let i = 0; i < blueCount; i++) {
             const roleConfig = blueRoles[i % blueRoles.length];
-            
             let spawnX, spawnY;
             if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
@@ -297,16 +324,13 @@ export default class BattleScene extends Phaser.Scene {
                 spawnX = 300;
                 spawnY = startY + (i * spawnGap);
             }
-
             const unit = createUnit(spawnX, spawnY, 'blue', this.redTeam, roleConfig, i === 0);
             if (i === 0) this.playerUnit = unit;
             this.blueTeam.add(unit);
         }
 
         const dogLayer = map.getObjectLayer('Dogs');
-        
         if (dogLayer && dogLayer.objects.length > 0) {
-            console.log(`🐺 Spawning ${dogLayer.objects.length} dogs from 'Dogs' layer`);
             dogLayer.objects.forEach((obj, index) => {
                 const stats = redRoles[index % redRoles.length];
                 const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
@@ -324,11 +348,10 @@ export default class BattleScene extends Phaser.Scene {
     
     setupPhysicsColliders(wallLayer, blockLayer) {
         const onWallCollision = (unit, tile) => {
-            if (unit && typeof unit.handleWallCollision === 'function') {
-                unit.handleWallCollision(tile);
-            }
+            if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
-
+        
+        // 기존 타일 레이어 충돌
         if (wallLayer) {
             this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, wallLayer, onWallCollision);
@@ -336,6 +359,12 @@ export default class BattleScene extends Phaser.Scene {
         if (blockLayer) {
             this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, blockLayer, onWallCollision);
+        }
+
+        // [New] Block 오브젝트 레이어 충돌 추가
+        if (this.blockObjectGroup) {
+            this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision);
+            this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision);
         }
 
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
@@ -346,14 +375,8 @@ export default class BattleScene extends Phaser.Scene {
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
-        
-        if (this.zoneGraphics) {
-            this.zoneGraphics.destroy();
-            this.zoneGraphics = null;
-        }
-
+        if (this.zoneGraphics) { this.zoneGraphics.destroy(); this.zoneGraphics = null; }
         this.uiManager.cleanupBeforeBattle();
-
         if (this.isMobile && this.playerUnit?.active) {
              this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
         }
@@ -364,30 +387,20 @@ export default class BattleScene extends Phaser.Scene {
         if (!this.playerUnit || !this.playerUnit.active) return;
         const lx = this.playerUnit.x;
         const ly = this.playerUnit.y;
-        
         this.blueTeam.getChildren().forEach(unit => {
-            if (unit.active) {
-                unit.saveFormationPosition(lx, ly);
-            }
+            if (unit.active) unit.saveFormationPosition(lx, ly);
         });
     }
 
     selectPlayerUnit(newUnit) {
         if (!newUnit || !newUnit.active || this.playerUnit === newUnit) return;
-
         if (this.playerUnit) {
             this.playerUnit.isLeader = false;
-            if (this.playerUnit.active && !this.playerUnit.isDying) {
-                this.playerUnit.resetVisuals();
-            }
+            if (this.playerUnit.active && !this.playerUnit.isDying) this.playerUnit.resetVisuals();
         }
-
         this.playerUnit = newUnit;
         newUnit.isLeader = true;
-        if (newUnit.active && !newUnit.isDying) {
-            newUnit.resetVisuals();
-        }
-
+        if (newUnit.active && !newUnit.isDying) newUnit.resetVisuals();
         this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
         this.updateFormationOffsets();
     }
@@ -396,10 +409,7 @@ export default class BattleScene extends Phaser.Scene {
         const nextLeader = this.blueTeam.getChildren().find(unit => 
             unit.active && !unit.isDying && unit !== this.playerUnit
         );
-        
-        if (nextLeader) {
-            this.selectPlayerUnit(nextLeader);
-        }
+        if (nextLeader) this.selectPlayerUnit(nextLeader);
     }
 
     updateFormationOffsets() {
@@ -413,28 +423,20 @@ export default class BattleScene extends Phaser.Scene {
     toggleAutoBattle() {
         this.isAutoBattle = !this.isAutoBattle;
         this.uiManager.updateAutoButton(this.isAutoBattle);
-        if (!this.isAutoBattle && this.playerUnit?.body) {
-            this.playerUnit.setVelocity(0);
-        }
+        if (!this.isAutoBattle && this.playerUnit?.body) this.playerUnit.setVelocity(0);
     }
 
-    // [Fix] 전술 변경: FLEE(도망) 제거 -> FREE(자율) <-> FORMATION(대형) 2단계 토글
     toggleSquadState() {
-        if (this.squadState === 'FREE') {
-            this.squadState = 'FORMATION';
-        } else {
-            this.squadState = 'FREE';
-        }
+        if (this.squadState === 'FREE') this.squadState = 'FORMATION';
+        else this.squadState = 'FREE';
         this.uiManager.updateSquadButton(this.squadState);
     }
 
     toggleGameSpeed() {
         this.gameSpeed++;
         if (this.gameSpeed > 3) this.gameSpeed = 1;
-        
         this.physics.world.timeScale = 1 / this.gameSpeed; 
         this.time.timeScale = this.gameSpeed;
-        
         this.uiManager.updateSpeedButton(this.gameSpeed);
     }
 
@@ -446,7 +448,6 @@ export default class BattleScene extends Phaser.Scene {
 
     update(time, delta) {
         if (this.inputManager.isOrientationBad) return;
-
         this.uiManager.updateDebugStats(this.game.loop);
         
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
@@ -471,33 +472,62 @@ export default class BattleScene extends Phaser.Scene {
             if (!this.playerUnit || !this.playerUnit.active || this.playerUnit.isDying) {
                 this.transferControlToNextUnit();
             }
-
             this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
-
             const blueCount = this.blueTeam.countActive();
             const redCount = this.redTeam.countActive();
 
-            if (blueCount === 0) this.finishGame("Red Team Wins!", '#ff4444');
-            else if (redCount === 0) this.finishGame("Blue Team Wins!", '#4488ff');
-            else this.uiManager.updateScore(blueCount, redCount);
+            if (blueCount === 0) {
+                this.finishGame("Defeat...", '#ff4444', false); 
+            } else if (redCount === 0) {
+                this.finishGame("Victory!", '#4488ff', true);   
+            } else {
+                this.uiManager.updateScore(blueCount, redCount);
+            }
         }
     }
 
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
-        
         if (this.cameras.main.deadzone) {
              this.cameras.main.setDeadzone(gameSize.width * 0.4, gameSize.height * 0.4);
         }
-
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
 
-    finishGame(message, color) {
+    finishGame(message, color, isWin) {
+        if (this.isGameOver) return; 
         this.isGameOver = true;
         this.physics.pause();
         this.inputManager.destroy(); 
-        this.uiManager.createGameOverUI(message, color, () => this.scene.restart());
+
+        let btnText = "Tap to Restart";
+        let callback = () => this.restartLevel();
+
+        if (isWin) {
+            if (this.currentLevelIndex < LEVEL_LIST.length - 1) {
+                btnText = "Next Level ▶️";
+                callback = () => this.nextLevel();
+            } else {
+                btnText = "All Clear! 🏆";
+                message = "Champion!";
+                callback = () => this.restartGamerFromBeginning();
+            }
+        }
+
+        this.uiManager.createGameOverUI(message, color, btnText, callback);
+    }
+
+    restartLevel() {
+        this.scene.restart({ levelIndex: this.currentLevelIndex });
+    }
+
+    nextLevel() {
+        const nextIndex = this.currentLevelIndex + 1;
+        this.scene.restart({ levelIndex: nextIndex });
+    }
+
+    restartGamerFromBeginning() {
+        this.scene.restart({ levelIndex: 0 });
     }
 }

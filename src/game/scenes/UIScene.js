@@ -8,7 +8,6 @@ export default class UIScene extends Phaser.Scene {
     create() {
         this.footerHeight = 80;
         
-        // 버튼 컨테이너 참조
         this.autoBtn = null;
         this.squadBtn = null;
         this.speedBtn = null;
@@ -103,7 +102,6 @@ export default class UIScene extends Phaser.Scene {
 
         const { width, height } = this.scale;
         
-        // [Fix] 모바일 화면 크기에 맞춰 버튼 크기 조절
         const btnWidth = Math.min(220, width * 0.6);
         const btnHeight = Math.min(80, height * 0.15);
         const fontSize = Math.min(28, width * 0.08);
@@ -138,7 +136,6 @@ export default class UIScene extends Phaser.Scene {
     showStartAnimation() {
         if (this.msgText) {
             const { width } = this.scale;
-            // [Fix] 시작 텍스트 크기 반응형
             const fontSize = Math.min(48, width * 0.12);
             this.msgText.setFontSize(`${fontSize}px`);
             
@@ -153,64 +150,51 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    // [Fix] Game Over 모달 반응형 사이즈 적용
-    createGameOverUI(message, color, restartCallback) {
+    // [New] 결과 화면: 동적 버튼 텍스트 및 콜백 지원 + 피드백 버튼
+    createGameOverUI(message, color, btnText, callback) {
+        // ... (기존 UI 생성 코드 유지) ...
         const { width, height } = this.scale;
-        
-        // 배경 (반투명 검정)
         const bg = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.7).setDepth(2999);
-        // 배경 터치 시 아무일도 안일어나게 하여(인터랙션 차단) 뒤쪽 게임 화면 클릭 방지
-        bg.setInteractive(); 
+        bg.setInteractive();
 
-        // 폰트 사이즈 계산 (반응형)
+        // (폰트 크기 계산 등 생략...)
         const isMobile = width < 600;
         const titleFontSize = isMobile ? Math.floor(width * 0.1) : 64; 
         const subFontSize = isMobile ? Math.floor(width * 0.05) : 32;
 
-        // 1. 결과 텍스트 (승리/패배) - 화면 상단부 (40% 지점)
         const text = this.add.text(width/2, height * 0.35, message, {
-            fontSize: `${titleFontSize}px`, 
-            fontStyle: 'bold', 
-            fill: color, 
-            stroke: '#ffffff', 
-            strokeThickness: isMobile ? 3 : 4,
-            wordWrap: { width: width * 0.9 }
+            fontSize: `${titleFontSize}px`, fontStyle: 'bold', fill: color, stroke: '#ffffff', strokeThickness: isMobile ? 3 : 4, wordWrap: { width: width * 0.9 }
         }).setOrigin(0.5).setDepth(3000);
 
-        // 2. 재시작 버튼 - 화면 중단부 (55% 지점)
-        const restartBtn = this.add.text(width/2, height * 0.55, '🔄 Tap to Restart', {
-            fontSize: `${subFontSize}px`, 
-            fill: '#ffffff',
-            fontStyle: 'bold'
+        // 액션 버튼
+        const actionBtn = this.add.text(width/2, height * 0.55, btnText, {
+            fontSize: `${subFontSize}px`, fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
 
-        restartBtn.on('pointerdown', () => {
-            // 효과음이나 트윈 효과 추가 가능
+        actionBtn.on('pointerdown', () => {
+            console.log("🖱️ [UIScene] Action Button Clicked:", btnText);
             this.tweens.add({
-                targets: restartBtn, scale: 0.9, duration: 50, yoyo: true,
+                targets: actionBtn, scale: 0.9, duration: 50, yoyo: true,
                 onComplete: () => {
-                    this.scene.get('BattleScene').scene.restart();
+                    if (callback) {
+                        console.log("   -> Executing callback...");
+                        callback();
+                    }
+                    // UI 씬 리셋
                     this.scene.restart(); 
                 }
             });
         });
 
-        // 3. [New] 피드백 남기기 버튼 - 화면 하단부 (70% 지점)
+        // 피드백 버튼
         const feedbackBtn = this.add.text(width/2, height * 0.7, '💬 피드백 남기기', {
-            fontSize: `${subFontSize * 0.9}px`, // 재시작 버튼보다 살짝 작게
-            fill: '#00ffff', // 눈에 띄는 색상 (Cyan)
-            fontStyle: 'bold',
-            backgroundColor: '#00000088', // 가독성을 위한 배경
-            padding: { x: 10, y: 5 }
+            fontSize: `${subFontSize * 0.9}px`, fill: '#00ffff', fontStyle: 'bold', backgroundColor: '#00000088', padding: { x: 10, y: 5 }
         }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
 
         feedbackBtn.on('pointerdown', () => {
             this.tweens.add({
                 targets: feedbackBtn, scale: 0.9, duration: 50, yoyo: true,
-                onComplete: () => {
-                    // 새 탭에서 링크 열기
-                    window.open('https://musclecat-studio.com/thread', '_blank');
-                }
+                onComplete: () => { window.open('https://musclecat-studio.com/thread', '_blank'); }
             });
         });
     }
@@ -218,11 +202,17 @@ export default class UIScene extends Phaser.Scene {
     createDebugStats() {
         this.debugStats = this.add.text(10, 10, '', {
             font: '14px monospace', fill: '#00ff00', backgroundColor: '#000000aa'
-        }).setDepth(9999);
+        }).setDepth(9999).setVisible(false);
+    }
+
+    showDebugStats() {
+        if (this.debugStats) this.debugStats.setVisible(true);
     }
 
     updateDebugStats(fps) {
-        if (this.debugStats) this.debugStats.setText(`FPS: ${fps.toFixed(1)}`);
+        if (this.debugStats && this.debugStats.visible) {
+            this.debugStats.setText(`FPS: ${fps.toFixed(1)}`);
+        }
     }
 
     updateAutoButton(isAuto) {
@@ -267,30 +257,15 @@ export default class UIScene extends Phaser.Scene {
         const width = this.scale.width;
         const centerY = this.footerHeight / 2;
 
-        // 버튼 3개 너비 = 120 * 3 = 360px
-        // 화면이 360px보다 작으면 버튼을 축소(Scale Down)해야 함
         const totalBtnWidth = 360; 
         let scale = 1;
-        
-        if (width < totalBtnWidth) {
-            scale = width / totalBtnWidth;
-        }
-
+        if (width < totalBtnWidth) scale = width / totalBtnWidth;
         const btnWidth = 120 * scale;
         const startX = (width - (btnWidth * 3)) / 2 + (btnWidth / 2);
 
-        if (this.autoBtn) {
-            this.autoBtn.setScale(scale);
-            this.autoBtn.setPosition(startX, centerY);
-        }
-        if (this.squadBtn) {
-            this.squadBtn.setScale(scale);
-            this.squadBtn.setPosition(startX + btnWidth, centerY);
-        }
-        if (this.speedBtn) {
-            this.speedBtn.setScale(scale);
-            this.speedBtn.setPosition(startX + btnWidth * 2, centerY);
-        }
+        if (this.autoBtn) { this.autoBtn.setScale(scale); this.autoBtn.setPosition(startX, centerY); }
+        if (this.squadBtn) { this.squadBtn.setScale(scale); this.squadBtn.setPosition(startX + btnWidth, centerY); }
+        if (this.speedBtn) { this.speedBtn.setScale(scale); this.speedBtn.setPosition(startX + btnWidth * 2, centerY); }
 
         const bg = this.footer.list[0];
         const border = this.footer.list[1];
