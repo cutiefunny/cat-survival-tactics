@@ -47,12 +47,54 @@ export default class BattleUIManager {
     }
 
     createStartButton(callback) {
-        this.startButton = this.scene.add.text(this.scene.cameras.main.centerX, 550, 'CLICK TO START', {
-            fontSize: '50px', fill: '#ffffff', backgroundColor: '#00aa00', padding: { x: 20, y: 15 },
-            fontStyle: 'bold'
-        }).setOrigin(0.5).setInteractive().setScrollFactor(0); 
+        const { width, height } = this.scene.scale;
 
-        this.startButton.on('pointerdown', callback);
+        // [CHANGE] 버튼 스타일로 변경 및 크기 축소
+        this.startBtn = this.scene.add.text(width / 2, height / 2, "CLICK TO START", {
+            fontSize: '24px',          // 글자 크기 축소 (기존 대비 작게)
+            fontFamily: 'Arial',
+            fontStyle: 'bold',
+            color: '#ffffff',
+            backgroundColor: '#000000', // 검은 배경 (버튼 느낌)
+            padding: { x: 20, y: 10 },  // 내부 여백
+            stroke: '#ffffff',          // 테두리 효과
+            strokeThickness: 2
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(1000); // 최상단 노출
+
+        // 호버 효과 (마우스 올리면 노란색)
+        this.startBtn.on('pointerover', () => this.startBtn.setStyle({ fill: '#ffd700', stroke: '#ffd700' }));
+        this.startBtn.on('pointerout', () => this.startBtn.setStyle({ fill: '#ffffff', stroke: '#ffffff' }));
+
+        // 클릭 이벤트
+        this.startBtn.on('pointerdown', () => {
+            // 클릭 시 살짝 눌리는 애니메이션
+            this.scene.tweens.add({
+                targets: this.startBtn,
+                scaleX: 0.9, scaleY: 0.9,
+                duration: 50,
+                yoyo: true,
+                onComplete: () => {
+                    this.startBtn.destroy(); // 버튼 제거
+                    this.startBtn = null;
+                    callback(); // 게임 시작 콜백 실행
+                }
+            });
+        });
+
+        // 둥둥 떠있는 대기 애니메이션
+        this.scene.tweens.add({
+            targets: this.startBtn,
+            scaleX: 1.05, scaleY: 1.05,
+            duration: 800,
+            yoyo: true,
+            repeat: -1
+        });
+        
+        // cleanupBeforeBattle에서 참조할 수 있도록 startText 대신 startBtn 사용 시 주의 (또는 둘 다 할당)
+        this.startText = this.startBtn; 
     }
 
     createGameMessages() {

@@ -100,6 +100,7 @@ export default class BattleScene extends Phaser.Scene {
         
         // [New] 배치 제한 구역 초기화
         this.placementZone = null;
+        this.zoneGraphics = null; // 구역 시각화용 그래픽 객체
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -187,7 +188,7 @@ export default class BattleScene extends Phaser.Scene {
         this.battleStarted = false;
         this.isSetupPhase = true;
         this.checkBattleTimer = 0;
-        this.isAutoBattle = false;
+        this.isAutoBattle = true;
         this.squadState = 'FREE'; 
         this.gameSpeed = 1;
         this.physics.world.timeScale = 1;
@@ -197,6 +198,7 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createStartButton(() => this.handleStartBattle());
         this.uiManager.createGameMessages();
         this.uiManager.createAutoBattleButton(() => this.toggleAutoBattle());
+        this.uiManager.updateAutoButton(this.isAutoBattle);
         this.uiManager.createSquadButton(() => this.toggleSquadState());
         this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
 
@@ -273,6 +275,13 @@ export default class BattleScene extends Phaser.Scene {
             // Phaser Rectangle로 변환 (배치 제한을 위해 Scene에 저장)
             spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
             this.placementZone = spawnZone; 
+            
+            // [NEW] 배치 구역 시각화 (투명 녹색)
+            this.zoneGraphics = this.add.graphics();
+            this.zoneGraphics.fillStyle(0x00ff00, 0.2); // 녹색, 투명도 0.2
+            this.zoneGraphics.fillRectShape(spawnZone);
+            this.zoneGraphics.setDepth(0); // 바닥에 깔리도록 depth 설정
+
             console.log(`🐱 Blue Team Spawn Zone: x=${obj.x}, y=${obj.y}, w=${obj.width}, h=${obj.height}`);
         } else {
             console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
@@ -341,6 +350,13 @@ export default class BattleScene extends Phaser.Scene {
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
+        
+        // [NEW] 전투 시작 시 배치 구역 표시 제거
+        if (this.zoneGraphics) {
+            this.zoneGraphics.destroy();
+            this.zoneGraphics = null;
+        }
+
         // 배치 제한 해제 (선택사항, 필요 없다면 유지해도 됨)
         // this.placementZone = null; 
         

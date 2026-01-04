@@ -5,7 +5,10 @@ export default class Leader extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = true) {
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
         this.role = 'Leader';
-        // Leader 특화 로직이 있다면 여기에 추가
+        
+        // [FIX] 외부 설정이나 Config에서 잘못된 사거리가 넘어오더라도
+        // Leader는 무조건 근접 공격(50)을 하도록 강제 설정
+        this.attackRange = 50; 
     }
 
     performSkill() {
