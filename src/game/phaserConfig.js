@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
 import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
+import UIScene from './scenes/UIScene'; // [Check] UIScene Import
 
 export const getGameConfig = (containerId) => {
     // [New] 모바일 디바이스 감지
@@ -36,6 +37,7 @@ export const getGameConfig = (containerId) => {
                 start: true
             }]
         },
-        scene: [BattleScene]
+        // [Check] BattleScene 먼저, 그 위에 UIScene이 오버레이되도록 순서 배치
+        scene: [BattleScene, UIScene]
     };
 };

@@ -4,8 +4,6 @@ export default class InputManager {
     constructor(scene) {
         this.scene = scene;
         this.joyStick = null;
-        // [Removed] orientationOverlay 및 isOrientationBad 제거
-        
         this.spaceKey = null;
 
         // 모바일 제어 상태 변수
@@ -16,19 +14,34 @@ export default class InputManager {
     setupControls() {
         if (this.scene.cursors) return;
 
-        // 멀티터치 활성화 (기본 1개 + 추가 1개 = 총 2개)
-        this.scene.input.addPointer(1);
+        console.log("🎮 InputManager: Controls Setup Initialized");
 
         this.scene.cursors = this.scene.input.keyboard.createCursorKeys();
         this.scene.wasd = this.scene.input.keyboard.addKeys({ up: 'W', left: 'A', down: 'S', right: 'D' });
         
         this.spaceKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // 유닛 드래그 상태 추적 (카메라 이동과 겹침 방지)
-        this.scene.input.on('dragstart', () => { this.isDraggingUnit = true; });
-        this.scene.input.on('dragend', () => { this.isDraggingUnit = false; });
+        // [Debug] 글로벌 포인터 이벤트 감지
+        this.scene.input.on('pointerdown', (pointer, currentlyOver) => {
+            console.log(`👇 Pointer Down: x=${pointer.x.toFixed(0)}, y=${pointer.y.toFixed(0)}, button=${pointer.button}`);
+            if (currentlyOver && currentlyOver.length > 0) {
+                console.log(`   🎯 Clicked Objects: ${currentlyOver.length}`, currentlyOver);
+            } else {
+                console.log("   ❌ No Object Clicked (Background)");
+            }
+        });
+
+        // 유닛 드래그 상태 추적
+        this.scene.input.on('dragstart', (pointer, gameObject) => { 
+            console.log("✊ Drag Start");
+            this.isDraggingUnit = true; 
+        });
+        this.scene.input.on('dragend', (pointer, gameObject) => { 
+            console.log("🖐️ Drag End");
+            this.isDraggingUnit = false; 
+        });
         
-        // [PC Only] 마우스 휠 줌 (Zoom In/Out)
+        // [PC Only] 마우스 휠 줌
         this.scene.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
             if (!this.scene.isMobile) {
                 const currentZoom = this.scene.cameras.main.zoom;
@@ -44,7 +57,9 @@ export default class InputManager {
         // [PC & Mobile] 카메라 이동 및 줌 통합 핸들러
         this.scene.input.on('pointermove', (pointer) => {
             // 1. [PC] 마우스 휠 클릭(Middle Button)으로 화면 이동
-            if (!this.scene.isMobile && pointer.isDown && pointer.middleButtonDown()) {
+            const isMiddleBtn = (pointer.button === 1) || (pointer.middleButtonDown && pointer.middleButtonDown());
+            
+            if (!this.scene.isMobile && pointer.isDown && isMiddleBtn) {
                 const cam = this.scene.cameras.main;
                 const dx = (pointer.position.x - pointer.prevPosition.x) / cam.zoom;
                 const dy = (pointer.position.y - pointer.prevPosition.y) / cam.zoom;
@@ -57,8 +72,7 @@ export default class InputManager {
                 const p1 = this.scene.input.pointer1;
                 const p2 = this.scene.input.pointer2;
 
-                // A. 핀치 줌 (두 손가락)
-                if (p1.isDown && p2.isDown) {
+                if (p1 && p2 && p1.isDown && p2.isDown) {
                     const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
                     
                     if (this.prevPinchDistance > 0) {
@@ -73,9 +87,6 @@ export default class InputManager {
                 } 
                 else {
                     this.prevPinchDistance = 0;
-
-                    // B. 그라운드 팬 (한 손가락)
-                    // 조건: 터치 중 + 유닛 드래그 아님 + 조이스틱 조작 아님
                     const isUsingJoystick = (this.joyStick && this.joyStick.pointer === pointer);
                     
                     if (pointer.isDown && !this.isDraggingUnit && !isUsingJoystick) {
@@ -89,7 +100,7 @@ export default class InputManager {
             }
         });
 
-        // [Common] 유닛 드래그 배치 (Unit Placement)
+        // [Common] 유닛 드래그 배치
         this.scene.input.on('drag', (pointer, gameObject, dragX, dragY) => {
             if (this.scene.isSetupPhase) {
                 let targetX = dragX;
@@ -125,13 +136,10 @@ export default class InputManager {
         if (isMobile) {
             console.log("📱 Mobile Device Detected.");
             this.scene.cameras.main.setZoom(0.8);
-            
-            // [Removed] createOrientationOverlay 및 checkOrientation 호출 제거
             this.scene.scale.on('resize', this.handleResize, this);
             this.setupJoystick();
         } else {
-            // PC 초기 줌 설정
-            // this.scene.cameras.main.setZoom(0.5); 
+            console.log("💻 PC Device Detected.");
         }
     }
 
@@ -160,9 +168,6 @@ export default class InputManager {
         this.scene.joystickCursors = this.joyStick.createCursorKeys();
     }
 
-    // [Removed] createOrientationOverlay() 메서드 삭제
-    // [Removed] checkOrientation() 메서드 삭제
-
     handleResize(gameSize) {
         const width = gameSize.width;
         const height = gameSize.height;
@@ -170,8 +175,6 @@ export default class InputManager {
         if (this.scene.isMobile) {
             this.scene.cameras.main.setZoom(0.8);
         }
-
-        // [Removed] checkOrientation 호출 제거
 
         if (this.joyStick) {
             this.joyStick.setPosition(width - 80, height - 80);
@@ -195,9 +198,9 @@ export default class InputManager {
             this.scene.input.off('drag');
             this.scene.input.off('dragstart');
             this.scene.input.off('dragend');
+            this.scene.input.off('pointerdown'); // 리스너 해제 추가
         }
 
         this.spaceKey = null;
-        // [Removed] orientationOverlay 정리 코드 삭제
     }
 }

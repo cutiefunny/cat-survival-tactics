@@ -250,13 +250,11 @@ export default class BattleScene extends Phaser.Scene {
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
         
-        // [Fixed] 유저가 수정한 createUnit (사거리 오염 방지 적용)
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
             const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             
-            // [Safety] Config에서 잘못된 attackRange가 넘어와도 기본 스탯을 우선시하도록 안전장치 마련
             const safeStats = { ...stats };
             if (baseStats.attackRange) {
                 safeStats.attackRange = baseStats.attackRange;
@@ -379,7 +377,6 @@ export default class BattleScene extends Phaser.Scene {
 
         if (this.playerUnit) {
             this.playerUnit.isLeader = false;
-            // [Fix] 기존 리더가 사망 중이 아닐 때만 비주얼 복구 (사망 모션 방해 금지)
             if (this.playerUnit.active && !this.playerUnit.isDying) {
                 this.playerUnit.resetVisuals();
             }
@@ -387,7 +384,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.playerUnit = newUnit;
         newUnit.isLeader = true;
-        // [Safety] 새 리더가 된 유닛도 상태가 온전할 때만 리셋
         if (newUnit.active && !newUnit.isDying) {
             newUnit.resetVisuals();
         }
@@ -396,15 +392,12 @@ export default class BattleScene extends Phaser.Scene {
         this.updateFormationOffsets();
     }
     
-    // [New] 다음 유닛으로 통제권 이동
     transferControlToNextUnit() {
-        // 살아있고(Active) && 사망 중이 아닌(!isDying) 유닛 탐색
         const nextLeader = this.blueTeam.getChildren().find(unit => 
             unit.active && !unit.isDying && unit !== this.playerUnit
         );
         
         if (nextLeader) {
-            // console.log(`👑 Leadership transferred to ${nextLeader.role}`);
             this.selectPlayerUnit(nextLeader);
         }
     }
@@ -425,11 +418,10 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
+    // [Fix] 전술 변경: FLEE(도망) 제거 -> FREE(자율) <-> FORMATION(대형) 2단계 토글
     toggleSquadState() {
         if (this.squadState === 'FREE') {
             this.squadState = 'FORMATION';
-        } else if (this.squadState === 'FORMATION') {
-            this.squadState = 'FLEE';
         } else {
             this.squadState = 'FREE';
         }
@@ -457,7 +449,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.updateDebugStats(this.game.loop);
         
-        // 스킬 사용: 리더가 살아있을 때만 가능
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { 
                 this.playerUnit.tryUseSkill();
@@ -477,7 +468,6 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         if (this.battleStarted) {
-            // [New] 리더 상태 체크: 사망 또는 비활성 시 통제권 이전
             if (!this.playerUnit || !this.playerUnit.active || this.playerUnit.isDying) {
                 this.transferControlToNextUnit();
             }
