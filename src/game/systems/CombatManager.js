@@ -69,11 +69,12 @@ export default class CombatManager {
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            if (attacker.role === 'Shooter' && defender.active && !defender.isDying) {
-                this.scene.tweens.add({ targets: defender, x: '+=3', duration: 30, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
-            }
+            // [Fix] 좌표 직접 수정(x+=3) Tween 제거 -> 물리 엔진과 충돌 방지
+            // Shooter의 경우 시각적 효과가 필요하다면 setOffset이나 Scale 등으로 대체 권장
             
             if (!defender.active || !defender.body || defender.isDying) return;
+
+            // [Knockback] 물리 엔진(velocity)을 통한 넉백만 적용
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
             defender.body.velocity.x += Math.cos(angle) * knockbackForce;

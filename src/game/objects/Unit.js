@@ -37,6 +37,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset = { x: 0, y: 0 };
         this.savedRelativePos = { x: 0, y: 0 };
 
+        // [Position Validation]
+        this.lastValidPosition = { x: x, y: y };
+
+        // [Pathfinding State]
+        this.currentPath = [];
+        this.pathUpdateTimer = 0;
+        this.lastPathCalcTime = 0;
+
         // [Combat]
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
@@ -63,13 +71,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.noCombatTimer = 0;
         this.lastTargetChangeTime = 0; 
 
-        // [Optimization] 벡터 재사용
+        // [Optimization]
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
         this._tempDir = new Phaser.Math.Vector2();
 
-        // [Avoidance System]
+        // [Avoidance System] - 제거됨 (변수만 유지하거나 삭제 가능, 여기선 호환성 위해 남김)
         this.isAvoiding = false;
         this.avoidTimer = 0;
         this.avoidDir = new Phaser.Math.Vector2();
@@ -164,12 +172,42 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
+    validatePosition() {
+        if (!this.active || !this.body) return;
+
+        let isInvalid = false;
+
+        if (this.scene.blockLayer) {
+            const tile = this.scene.blockLayer.getTileAtWorldXY(this.x, this.y);
+            if (tile && tile.canCollide) {
+                isInvalid = true;
+            }
+        }
+
+        if (!isInvalid && this.scene.blockObjectGroup) {
+            if (this.scene.physics.overlap(this, this.scene.blockObjectGroup)) {
+                isInvalid = true;
+            }
+        }
+
+        if (isInvalid) {
+            this.x = this.lastValidPosition.x;
+            this.y = this.lastValidPosition.y;
+            this.body.reset(this.x, this.y); 
+            this.setVelocity(0, 0); 
+        } else {
+            this.lastValidPosition.x = this.x;
+            this.lastValidPosition.y = this.y;
+        }
+    }
+
     update(time, delta) {
         if (!this.active || this.isDying) return; 
         
+        this.validatePosition();
         this.updateUI();
 
-        if (this.scene.uiManager && (this.scene.uiManager.debugStats || this.scene.uiManager.debugText)) {
+        if (this.scene.uiManager && this.scene.uiManager.isDebugEnabled) {
             this.handleDebugUpdates(delta);
         } else if (this.debugText) {
             this.destroyDebugObjects();
@@ -186,14 +224,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
 
-        if (this.isAvoiding) {
-            this.updateAvoidance(adjustedDelta);
-            this.updateAnimation();
-            return;
-        }
-
-        this.wallFreeTimer += adjustedDelta;
-        if (this.wallFreeTimer > 1000) this.savedAvoidDir = null;
+        // [Note] isAvoiding 관련 로직 제거됨 (코드 단순화)
 
         if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
@@ -206,19 +237,18 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
-    // [Fix] 타겟이 죽어가고 있다면(isDying) 즉시 타겟을 해제하도록 수정
     updateTargetSelection() {
         const now = this.scene.time.now;
         const timeSinceSwitch = now - this.lastTargetChangeTime;
         
-        // 현재 타겟이 유효하고, 죽지 않았으며, 쿨타임이 안 지났다면 유지
-        if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying && timeSinceSwitch < 1000) {
+        const isShooter = (this.role === 'Shooter');
+        const switchCooldown = isShooter ? 100 : 1000;
+
+        if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying && timeSinceSwitch < switchCooldown) {
             return;
         }
 
-        // 새 타겟 탐색
         const newTarget = this.findNearestEnemy();
-        // 타겟이 바뀌었거나, 기존 타겟이 죽었으면 갱신
         if (newTarget !== this.currentTarget) {
             this.currentTarget = newTarget;
             this.lastTargetChangeTime = now;
@@ -227,11 +257,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     handleDebugUpdates(delta) {
         if (!this.debugText) this.createDebugObjects();
-        this.debugUpdateTimer += delta;
-        if (this.debugUpdateTimer > 200) {
-            this.updateDebugVisuals();
-            this.debugUpdateTimer = 0;
-        }
+        this.updateDebugVisuals();
     }
 
     handleRegen(delta) {
@@ -281,7 +307,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     checkLineOfSight() {
-        // [Fix] 타겟이 죽어가고 있다면 시야 체크 불필요
         if (!this.currentTarget || !this.currentTarget.active || this.currentTarget.isDying) return false;
 
         const now = this.scene.time.now;
@@ -292,28 +317,38 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const wallLayer = this.scene.wallLayer;
         const blockLayer = this.scene.blockLayer;
 
-        if (!wallLayer) {
-            this.lastLosResult = true;
-            return true;
-        }
-
         this._tempStart.set(this.x, this.y);
         this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
+        const line = new Phaser.Geom.Line(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
 
-        const distance = this._tempStart.distance(this._tempEnd);
-        const stepSize = 35;
-        const steps = Math.ceil(distance / stepSize);
+        // Raycasting Check (Layers)
+        if (wallLayer || blockLayer) {
+            const distance = this._tempStart.distance(this._tempEnd);
+            const stepSize = 35;
+            const steps = Math.ceil(distance / stepSize);
 
-        for (let i = 1; i < steps; i++) {
-            const t = i / steps;
-            const cx = this._tempStart.x + (this._tempEnd.x - this._tempStart.x) * t;
-            const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
+            for (let i = 1; i < steps; i++) {
+                const t = i / steps;
+                const cx = this._tempStart.x + (this._tempEnd.x - this._tempStart.x) * t;
+                const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
 
-            if (wallLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
-                this.lastLosResult = false; return false;
+                if (wallLayer && wallLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
+                    this.lastLosResult = false; return false;
+                }
+                if (blockLayer && blockLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
+                    this.lastLosResult = false; return false;
+                }
             }
-            if (blockLayer && blockLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
-                this.lastLosResult = false; return false;
+        }
+
+        // Object Intersection Check
+        if (this.scene.blockObjectGroup) {
+            const blocks = this.scene.blockObjectGroup.getChildren();
+            for (const block of blocks) {
+                const bounds = block.getBounds();
+                if (Phaser.Geom.Intersects.LineToRectangle(line, bounds)) {
+                    this.lastLosResult = false; return false;
+                }
             }
         }
 
@@ -321,95 +356,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         return true;
     }
 
-    calculateWallAvoidDir() {
-        const blocked = this.body.blocked;
-        const touching = this.body.touching; 
-        
-        let tx = 0, ty = 0;
-        if (this.currentTarget && this.currentTarget.active) {
-            tx = this.currentTarget.x;
-            ty = this.currentTarget.y;
-        } else {
-            tx = this.x + 100; 
-            ty = this.y;
-        }
-
-        this._tempDir.set(0, 0);
-
-        if (blocked.left || blocked.right || touching.left || touching.right) {
-            const dirY = (ty > this.y) ? 1 : -1;
-            this._tempDir.set(0, dirY);
-        } else if (blocked.up || blocked.down || touching.up || touching.down) {
-            const dirX = (tx > this.x) ? 1 : -1;
-            this._tempDir.set(dirX, 0);
-        } else {
-            const diffX = Math.abs(tx - this.x);
-            const diffY = Math.abs(ty - this.y);
-            
-            if (diffX > diffY) {
-                const dirY = (ty > this.y) ? 1 : -1;
-                this._tempDir.set(0, dirY);
-            } else {
-                const dirX = (tx > this.x) ? 1 : -1;
-                this._tempDir.set(dirX, 0);
-            }
-        }
-        
-        return this._tempDir.normalize();
-    }
-
+    // [Simplified] 벽 충돌 처리: 경로만 리셋하고 멈춤 (슬라이딩 없음)
     handleWallCollision(tile) {
-        this.wallFreeTimer = 0;
-
-        if (this.isAvoiding) {
-            const blocked = this.body.blocked;
-            const isBlocked = (this.avoidDir.x > 0 && blocked.right) || (this.avoidDir.x < 0 && blocked.left) || 
-                              (this.avoidDir.y > 0 && blocked.down) || (this.avoidDir.y < 0 && blocked.up);
-            
-            if (isBlocked) {
-                this.avoidDir.negate();
-                if (this.savedAvoidDir) this.savedAvoidDir.copy(this.avoidDir);
-            }
-            this.avoidTimer = 500; 
-            return;
+        if (this.currentPath.length > 0) {
+            this.currentPath = []; // 경로를 잃었으므로 다시 탐색하도록 리셋
+            this.setVelocity(0, 0);
         }
-
-        if (this.checkLineOfSight()) {
-            return;
-        }
-
-        this.isAvoiding = true;
-        this.avoidTimer = 500; 
-        this.setVelocity(0, 0);
-
-        let useSavedDir = false;
-        if (this.savedAvoidDir) {
-            const blocked = this.body.blocked;
-            const isBlocked = (this.savedAvoidDir.x > 0 && blocked.right) || (this.savedAvoidDir.x < 0 && blocked.left) || 
-                              (this.savedAvoidDir.y > 0 && blocked.down) || (this.savedAvoidDir.y < 0 && blocked.up);
-            
-            if (!isBlocked) {
-                this.avoidDir.copy(this.savedAvoidDir);
-                useSavedDir = true;
-            }
-        }
-
-        if (!useSavedDir) {
-            const newDir = this.calculateWallAvoidDir();
-            this.avoidDir.copy(newDir);
-            if (!this.savedAvoidDir) {
-                this.savedAvoidDir = new Phaser.Math.Vector2(newDir.x, newDir.y);
-            } else {
-                this.savedAvoidDir.set(newDir.x, newDir.y);
-            }
-        }
-    }
-
-    updateAvoidance(delta) {
-        this.setVelocity(this.avoidDir.x * this.moveSpeed, this.avoidDir.y * this.moveSpeed);
-        this.updateFlipX();
-        this.avoidTimer -= delta;
-        if (this.avoidTimer <= 0) this.isAvoiding = false;
     }
 
     updateAI(delta) {
@@ -436,13 +388,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.updateTargetSelection();
         }
 
-        // [Fix] 타겟 유효성 체크에 isDying 추가
         if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-            if (this.isAvoiding) return;
-            
             const distSq = Phaser.Math.Distance.Squared(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
             const roleKey = this.role.toLowerCase();
             const aiParams = this.aiConfig[roleKey] || {};
+            let desiredRange = 50; 
 
             if (this.role === 'Shooter') {
                 const kiteDist = aiParams.kiteDistance || 200;
@@ -452,15 +402,22 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                     const angle = Phaser.Math.Angle.Between(this.currentTarget.x, this.currentTarget.y, this.x, this.y);
                     this.scene.physics.velocityFromRotation(angle, this.moveSpeed, this.body.velocity); 
                     this.updateFlipX();
-                } else if (distSq > attackDist * attackDist) {
-                    this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
-                    this.updateFlipX();
-                } else {
-                    this.setVelocity(0, 0);
+                    return;
                 }
+                desiredRange = attackDist;
             } else {
-                this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
-                this.updateFlipX();
+                desiredRange = this.attackRange || 50;
+            }
+
+            const inRange = distSq <= desiredRange * desiredRange;
+            // 시야 체크 (벽 뒤에 있으면 이동해야 함)
+            const hasLOS = inRange ? this.checkLineOfSight() : false;
+
+            if (inRange && hasLOS) {
+                this.setVelocity(0, 0);
+                this.currentPath = [];
+            } else {
+                this.moveToTargetSmart(delta);
             }
         } else {
             this.setVelocity(0, 0);
@@ -469,11 +426,76 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
 
+    // [Restored] Pathfinding AI Logic
+    moveToTargetSmart(delta) {
+        if (!this.currentTarget) return;
+
+        // 1. 직선 경로 확인
+        const isLineClear = this.scene.pathfindingManager.isLineClear(
+            { x: this.x, y: this.y }, 
+            { x: this.currentTarget.x, y: this.currentTarget.y }
+        );
+
+        // 2. 직선 이동 가능하면 바로 이동
+        if (isLineClear) {
+            this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
+            this.updateFlipX();
+            this.currentPath = []; 
+            return;
+        }
+
+        // 3. 경로 탐색 (장애물 우회)
+        this.pathUpdateTimer -= delta;
+        if (this.currentPath.length === 0 || this.pathUpdateTimer <= 0) {
+            this.pathUpdateTimer = 500 + Math.random() * 300; 
+            const path = this.scene.pathfindingManager.findPath(
+                { x: this.x, y: this.y },
+                { x: this.currentTarget.x, y: this.currentTarget.y }
+            );
+            if (path && path.length > 0) {
+                this.currentPath = path;
+                this.lastPathCalcTime = this.scene.time.now;
+            }
+        }
+
+        // 4. 경로 따라가기
+        if (this.currentPath.length > 0) {
+            const nextPoint = this.currentPath[0];
+            const distToPoint = Phaser.Math.Distance.Between(this.x, this.y, nextPoint.x, nextPoint.y);
+
+            if (distToPoint < 15) { 
+                this.currentPath.shift();
+                if (this.currentPath.length > 0) {
+                    this.moveToPoint(this.currentPath[0]);
+                }
+            } else {
+                this.moveToPoint(nextPoint);
+            }
+        } else {
+            // 경로 없음 -> 일단 직진 (Physics 처리)
+            this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
+        }
+        this.updateFlipX();
+    }
+
+    moveToPoint(point) {
+        this.scene.physics.moveTo(this, point.x, point.y, this.moveSpeed);
+        const diffX = point.x - this.x;
+        if (diffX > 0) this.setFlipX(true);
+        else if (diffX < 0) this.setFlipX(false);
+    }
+
+    // ... [기존 findNearestEnemy 등 나머지 메서드들] ...
+
     findNearestEnemy() {
         const enemies = this.targetGroup.getChildren();
-        
         let closestDistSq = Infinity;
         let closestTarget = null;
+        
+        const ignoreRoles = (this.role === 'Shooter');
+
+        let closestNonHealerDistSq = Infinity;
+        let closestNonHealer = null;
         let closestHealerDistSq = Infinity;
         let closestHealer = null;
 
@@ -485,20 +507,28 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
             const distSq = (myX - enemy.x) ** 2 + (myY - enemy.y) ** 2;
 
-            if (enemy.role === 'Healer') {
-                if (distSq < closestHealerDistSq) {
-                    closestHealerDistSq = distSq;
-                    closestHealer = enemy;
-                }
-            } else {
+            if (ignoreRoles) {
                 if (distSq < closestDistSq) {
                     closestDistSq = distSq;
                     closestTarget = enemy;
                 }
+            } else {
+                if (enemy.role === 'Healer') {
+                    if (distSq < closestHealerDistSq) {
+                        closestHealerDistSq = distSq;
+                        closestHealer = enemy;
+                    }
+                } else {
+                    if (distSq < closestNonHealerDistSq) {
+                        closestNonHealerDistSq = distSq;
+                        closestNonHealer = enemy;
+                    }
+                }
             }
         }
-
-        return closestTarget || closestHealer;
+        
+        if (ignoreRoles) return closestTarget;
+        return closestNonHealer || closestHealer;
     }
 
     findLowestHpAlly() {
@@ -712,12 +742,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         let statusStr = "COMBAT";
         let color = "#ffffff";
-        let hpColor = "#ffffff";
-
-        if (this.isAvoiding) {
-            statusStr = "⚠️AVOID";
-            color = "#ffff00"; 
-        } else if (this.isLowHpFleeing) {
+        
+        if (this.isLowHpFleeing) {
             statusStr = "😱FLEE";
             color = "#ff0000"; 
         } else if (this.body.velocity.lengthSq() < 10 && this.hp < this.maxHp * 0.5) {
@@ -729,23 +755,37 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
 
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
-        if (hpPct < 20) hpColor = "#ff0000";
-        else if (hpPct < 50) hpColor = "#ffff00";
-
         this.debugText.setText(`${statusStr}\nHP:${hpPct}%`);
         this.debugText.setColor(color);
         
         if (this.currentTarget && this.currentTarget.active) {
-            this.debugGraphic.lineStyle(1, 0xff0000, 0.5);
+            this.debugGraphic.lineStyle(1, 0xff0000, 0.3);
             this.debugGraphic.lineBetween(this.x, this.y, this.currentTarget.x, this.currentTarget.y);
         }
         
-        if (this.isAvoiding) {
-            this.debugGraphic.lineStyle(2, 0xffff00, 1);
+        if (this.currentPath && this.currentPath.length > 0) {
+            const now = this.scene.time.now;
+            const isFresh = (now - this.lastPathCalcTime < 300); 
+            
+            const pathColor = isFresh ? 0x00ff00 : 0x00ffff; 
+            const lineWidth = isFresh ? 4 : 2;
+            const alpha = isFresh ? 0.9 : 0.5;
+
+            this.debugGraphic.lineStyle(lineWidth, pathColor, alpha);
             this.debugGraphic.beginPath();
             this.debugGraphic.moveTo(this.x, this.y);
-            this.debugGraphic.lineTo(this.x + this.avoidDir.x * 50, this.y + this.avoidDir.y * 50);
+            this.currentPath.forEach(pt => this.debugGraphic.lineTo(pt.x, pt.y));
             this.debugGraphic.strokePath();
+            
+            this.debugGraphic.fillStyle(pathColor, alpha);
+            this.currentPath.forEach(pt => {
+                this.debugGraphic.fillCircle(pt.x, pt.y, 3);
+            });
+            
+            if (isFresh) {
+                 this.debugText.setText("⚡RECALC⚡\n" + this.debugText.text);
+                 this.debugText.setColor("#00ff00");
+            }
         }
     }
 

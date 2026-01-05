@@ -150,14 +150,11 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    // [New] 결과 화면: 동적 버튼 텍스트 및 콜백 지원 + 피드백 버튼
     createGameOverUI(message, color, btnText, callback) {
-        // ... (기존 UI 생성 코드 유지) ...
         const { width, height } = this.scale;
         const bg = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.7).setDepth(2999);
         bg.setInteractive();
 
-        // (폰트 크기 계산 등 생략...)
         const isMobile = width < 600;
         const titleFontSize = isMobile ? Math.floor(width * 0.1) : 64; 
         const subFontSize = isMobile ? Math.floor(width * 0.05) : 32;
@@ -166,7 +163,6 @@ export default class UIScene extends Phaser.Scene {
             fontSize: `${titleFontSize}px`, fontStyle: 'bold', fill: color, stroke: '#ffffff', strokeThickness: isMobile ? 3 : 4, wordWrap: { width: width * 0.9 }
         }).setOrigin(0.5).setDepth(3000);
 
-        // 액션 버튼
         const actionBtn = this.add.text(width/2, height * 0.55, btnText, {
             fontSize: `${subFontSize}px`, fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
@@ -180,13 +176,11 @@ export default class UIScene extends Phaser.Scene {
                         console.log("   -> Executing callback...");
                         callback();
                     }
-                    // UI 씬 리셋
                     this.scene.restart(); 
                 }
             });
         });
 
-        // 피드백 버튼
         const feedbackBtn = this.add.text(width/2, height * 0.7, '💬 피드백 남기기', {
             fontSize: `${subFontSize * 0.9}px`, fill: '#00ffff', fontStyle: 'bold', backgroundColor: '#00000088', padding: { x: 10, y: 5 }
         }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
@@ -200,8 +194,9 @@ export default class UIScene extends Phaser.Scene {
     }
 
     createDebugStats() {
+        // [Style] 폰트와 배경색 설정
         this.debugStats = this.add.text(10, 10, '', {
-            font: '14px monospace', fill: '#00ff00', backgroundColor: '#000000aa'
+            font: '14px monospace', fill: '#00ff00', backgroundColor: '#000000aa', padding: { x: 4, y: 4 }
         }).setDepth(9999).setVisible(false);
     }
 
@@ -209,9 +204,14 @@ export default class UIScene extends Phaser.Scene {
         if (this.debugStats) this.debugStats.setVisible(true);
     }
 
-    updateDebugStats(fps) {
+    // [Fix] 인자에 mem(메모리) 추가 및 표시 로직 개선
+    updateDebugStats(fps, mem) {
         if (this.debugStats && this.debugStats.visible) {
-            this.debugStats.setText(`FPS: ${fps.toFixed(1)}`);
+            let text = `FPS: ${Math.round(fps)}`;
+            if (mem) {
+                text += `\nMEM: ${mem} MB`;
+            }
+            this.debugStats.setText(text);
         }
     }
 

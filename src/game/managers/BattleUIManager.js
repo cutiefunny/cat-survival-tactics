@@ -7,7 +7,6 @@ export default class BattleUIManager {
         
         this.isDebugEnabled = false; 
 
-        // BattleScene 시작 시 UIScene을 무조건 실행 (기존 실행 중이면 재시작)
         if (this.scene.scene.isActive('UIScene')) {
             this.scene.scene.stop('UIScene');
         }
@@ -50,7 +49,6 @@ export default class BattleUIManager {
         if (ui && ui.showStartAnimation) ui.showStartAnimation();
     }
 
-    // [Fix] 인자를 4개(btnText, callback 포함)로 확장하여 UIScene에 전달
     createGameOverUI(message, color, btnText, callback) {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.createGameOverUI) {
@@ -61,7 +59,15 @@ export default class BattleUIManager {
     updateDebugStats(loop) {
         if (!this.isDebugEnabled) return;
         const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.updateDebugStats) ui.updateDebugStats(loop.actualFps);
+        
+        // [Improvement] FPS와 함께 메모리 정보도 수집하여 전달 시도
+        if (ui && ui.updateDebugStats) {
+            let memInfo = null;
+            if (window.performance && window.performance.memory) {
+                memInfo = Math.round(window.performance.memory.usedJSHeapSize / 1024 / 1024);
+            }
+            ui.updateDebugStats(loop.actualFps, memInfo);
+        }
     }
     
     updateScore(blue, red) {}

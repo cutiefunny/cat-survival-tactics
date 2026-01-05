@@ -20,6 +20,7 @@ import { db } from "../../firebaseConfig";
 import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../systems/CombatManager';
+import PathfindingManager from '../systems/PathfindingManager'; 
 
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
@@ -54,7 +55,6 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
-// [Level Config] - export 추가하여 DevPage에서 참조 가능하게 변경
 export const LEVEL_LIST = ['level1', 'level2']; 
 
 const DEFAULT_CONFIG = {
@@ -79,11 +79,6 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     init(data) {
-        // [DevPage Update] 시작 레벨 우선순위 로직 적용
-        // 1. data.levelIndex (재시작/다음 레벨 이동 등 내부 호출 시 최우선)
-        // 2. window.TACTICS_START_LEVEL (DevPage 설정값)
-        // 3. 0 (기본값)
-        
         let targetIndex = 0;
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
@@ -106,12 +101,10 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
-        // 맵 데이터 로드
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.tilemapTiledJSON('level1', level1Data);
         this.load.tilemapTiledJSON('level2', level2Data);
         
-        // 타일셋 이미지 로드
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
         this.load.image('tiles_city', tilesetCity1Img);
@@ -123,9 +116,11 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
+        this.pathfindingManager = new PathfindingManager(this); 
         
         this.placementZone = null;
         this.zoneGraphics = null; 
+        this.blocksDebugGraphics = null; // [New] Blocks 디버그용 그래픽
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -163,7 +158,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.destroyLoadingText();
         
-        // [Fix] levelIndex가 범위를 벗어나지 않도록 방어 코드 추가
         if (this.currentLevelIndex >= LEVEL_LIST.length) this.currentLevelIndex = 0;
         
         const targetMapKey = LEVEL_LIST[this.currentLevelIndex];
@@ -234,6 +228,9 @@ export default class BattleScene extends Phaser.Scene {
             });
         }
 
+        const obstacleLayers = [this.wallLayer, this.blockLayer].filter(l => l !== null);
+        this.pathfindingManager.setup(map, obstacleLayers);
+
         this.mapWidth = map.widthInPixels;
         this.mapHeight = map.heightInPixels;
         this.updateCameraBounds(this.scale.width, this.scale.height);
@@ -269,6 +266,36 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
+    }
+
+    // [New] Blocks 영역 디버그 시각화 (빨간색 레이어)
+    createBlocksDebug() {
+        if (!this.blocksDebugGraphics) {
+            this.blocksDebugGraphics = this.add.graphics().setDepth(9998); // 유닛 디버그 텍스트보다 살짝 아래
+        }
+        this.blocksDebugGraphics.clear();
+        this.blocksDebugGraphics.fillStyle(0xff0000, 0.33); // 빨간색, 투명도 33%
+
+        // 1. Tilemap Layers (Walls, Blocks)
+        const drawLayer = (layer) => {
+            if (layer) {
+                layer.forEachTile(tile => {
+                    if (tile.canCollide) {
+                        this.blocksDebugGraphics.fillRect(tile.pixelX, tile.pixelY, tile.width, tile.height);
+                    }
+                });
+            }
+        };
+        drawLayer(this.wallLayer);
+        drawLayer(this.blockLayer);
+
+        // 2. Block Objects (사각형 장애물)
+        if (this.blockObjectGroup) {
+            this.blockObjectGroup.getChildren().forEach(obj => {
+                const b = obj.getBounds();
+                this.blocksDebugGraphics.fillRect(b.x, b.y, b.width, b.height);
+            });
+        }
     }
 
     updateCameraBounds(screenWidth, screenHeight) {
@@ -402,7 +429,13 @@ export default class BattleScene extends Phaser.Scene {
         const lx = this.playerUnit.x;
         const ly = this.playerUnit.y;
         this.blueTeam.getChildren().forEach(unit => {
-            if (unit.active) unit.saveFormationPosition(lx, ly);
+            if (unit.active) {
+                if (typeof unit.saveFormationPosition === 'function') {
+                    unit.saveFormationPosition(lx, ly);
+                } else {
+                    console.warn(`Unit ${unit.role} missing saveFormationPosition method`);
+                }
+            }
         });
     }
 
@@ -464,6 +497,14 @@ export default class BattleScene extends Phaser.Scene {
         if (this.inputManager.isOrientationBad) return;
         this.uiManager.updateDebugStats(this.game.loop);
         
+        // [Modified] 디버그 모드 상태에 따른 Blocks 영역 시각화 제어
+        if (this.uiManager.isDebugEnabled) {
+            if (!this.blocksDebugGraphics) this.createBlocksDebug();
+            this.blocksDebugGraphics.setVisible(true);
+        } else {
+            if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
+        }
+
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { 
                 this.playerUnit.tryUseSkill();
