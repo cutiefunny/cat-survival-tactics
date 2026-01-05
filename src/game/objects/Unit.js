@@ -44,6 +44,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.currentPath = [];
         this.pathUpdateTimer = 0;
         this.lastPathCalcTime = 0;
+        
+        // [New] Stuck Detection (끼임 감지)
+        this.stuckTimer = 0;
 
         // [Combat]
         this.attackCooldown = stats.attackCooldown || 500;
@@ -75,14 +78,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this._tempVec = new Phaser.Math.Vector2();
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
-        this._tempDir = new Phaser.Math.Vector2();
-
-        // [Avoidance System] - 제거됨 (변수만 유지하거나 삭제 가능, 여기선 호환성 위해 남김)
-        this.isAvoiding = false;
-        this.avoidTimer = 0;
-        this.avoidDir = new Phaser.Math.Vector2();
-        this.savedAvoidDir = null;
-        this.wallFreeTimer = 0;
 
         // [LOS Optimization]
         this.losCheckTimer = 0;
@@ -91,15 +86,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         // [Debug UI]
         this.debugText = null;
         this.debugGraphic = null;
-        this.debugUpdateTimer = 0;
         this.lastDrawnHpPct = 1;
 
         // [Physics Init]
         scene.add.existing(this);
         scene.physics.add.existing(this);
         this.setCollideWorldBounds(true);
-        this.setBounce(0.2);
-        this.setDrag(200);
+        this.setBounce(0); // [Modified] 튕김 제거 (슬라이딩에 유리)
+        this.setDrag(200); // 마찰력
 
         // [Components Init]
         this.hpBar = scene.add.graphics().setDepth(100);
@@ -177,6 +171,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         let isInvalid = false;
 
+        // 타일맵 벽 레이어와 겹치는지 확인 (Overlap)
         if (this.scene.blockLayer) {
             const tile = this.scene.blockLayer.getTileAtWorldXY(this.x, this.y);
             if (tile && tile.canCollide) {
@@ -184,6 +179,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
         }
 
+        // 블록 오브젝트와 겹치는지 확인
         if (!isInvalid && this.scene.blockObjectGroup) {
             if (this.scene.physics.overlap(this, this.scene.blockObjectGroup)) {
                 isInvalid = true;
@@ -191,6 +187,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
 
         if (isInvalid) {
+            // 끼어있으면 이전 위치로 복귀
             this.x = this.lastValidPosition.x;
             this.y = this.lastValidPosition.y;
             this.body.reset(this.x, this.y); 
@@ -223,8 +220,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.scene.isSetupPhase) { this.setVelocity(0, 0); return; }
         this.enforceWorldBounds();
         if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
-
-        // [Note] isAvoiding 관련 로직 제거됨 (코드 단순화)
 
         if (this.fleeTimer > 0) this.fleeTimer -= adjustedDelta;
 
@@ -356,11 +351,15 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         return true;
     }
 
-    // [Simplified] 벽 충돌 처리: 경로만 리셋하고 멈춤 (슬라이딩 없음)
+    // [핵심 수정] 벽 충돌 시 멈추지 않고(setVelocity(0,0) 제거), Stuck 감지에 의존하여 슬라이딩 허용
     handleWallCollision(tile) {
+        // 충돌 시 강제로 멈추지 않음 -> 물리 엔진이 밀어내면서 자연스럽게 슬라이딩됨
+        // 단, 꽉 막혔을 때를 대비해 경로 재탐색 타이머만 앞당김
         if (this.currentPath.length > 0) {
-            this.currentPath = []; // 경로를 잃었으므로 다시 탐색하도록 리셋
-            this.setVelocity(0, 0);
+            if (this.body.speed < 5) {
+                // 속도가 거의 없으면 재탐색을 좀 더 빨리 하도록
+                this.pathUpdateTimer -= 50; 
+            }
         }
     }
 
@@ -410,12 +409,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             }
 
             const inRange = distSq <= desiredRange * desiredRange;
-            // 시야 체크 (벽 뒤에 있으면 이동해야 함)
             const hasLOS = inRange ? this.checkLineOfSight() : false;
 
             if (inRange && hasLOS) {
                 this.setVelocity(0, 0);
                 this.currentPath = [];
+                this.stuckTimer = 0; // 공격 중엔 stuck 아님
             } else {
                 this.moveToTargetSmart(delta);
             }
@@ -426,9 +425,26 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team !== 'blue' || this.scene.isAutoBattle) this.tryUseSkill();
     }
 
-    // [Restored] Pathfinding AI Logic
     moveToTargetSmart(delta) {
         if (!this.currentTarget) return;
+        
+        // [New] Stuck Detection (이동하려는데 못 가는 경우)
+        if (this.currentPath.length > 0 || this.currentTarget) {
+            // 예상 속도보다 현저히 느리면 (충돌 중)
+            if (this.body.speed < this.moveSpeed * 0.1) {
+                this.stuckTimer += delta;
+                if (this.stuckTimer > 200) { // 0.2초 이상 막혀있으면
+                    this.stuckTimer = 0;
+                    this.currentPath = []; // 경로 리셋
+                    this.pathUpdateTimer = 0; // 즉시 재탐색
+                    
+                    // 꽉 막힌 경우 살짝 밀어주기 (선택 사항)
+                    // this.setVelocity(Phaser.Math.Between(-20, 20), Phaser.Math.Between(-20, 20));
+                }
+            } else {
+                this.stuckTimer = 0;
+            }
+        }
 
         // 1. 직선 경로 확인
         const isLineClear = this.scene.pathfindingManager.isLineClear(
@@ -472,7 +488,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.moveToPoint(nextPoint);
             }
         } else {
-            // 경로 없음 -> 일단 직진 (Physics 처리)
+            // 경로 없음 -> 일단 직진
             this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
         }
         this.updateFlipX();
@@ -485,7 +501,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         else if (diffX < 0) this.setFlipX(false);
     }
 
-    // ... [기존 findNearestEnemy 등 나머지 메서드들] ...
+    // ... [기존 findNearestEnemy 등 나머지 메서드들 유지] ...
 
     findNearestEnemy() {
         const enemies = this.targetGroup.getChildren();

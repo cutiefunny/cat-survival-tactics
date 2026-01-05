@@ -2,9 +2,7 @@ import { createSignal, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
-
-// [설정] 레벨 목록 정의 (BattleScene과 동일하게 유지)
-const LEVEL_LIST = ['level1', 'level2'];
+import { LEVEL_KEYS } from "../game/managers/LevelManager"; // [New] 레벨 리스트 동적 로드
 
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
@@ -273,7 +271,8 @@ const DevPage = () => {
                         background: "#222", color: "white", fontSize: "1em", fontWeight: "bold" 
                     }}
                 >
-                    {LEVEL_LIST.map((level, idx) => (
+                    {/* LEVEL_KEYS를 사용하여 동적으로 옵션 생성 */}
+                    {LEVEL_KEYS.map((level, idx) => (
                         <option value={idx}>{idx}: {level}</option>
                     ))}
                 </select>

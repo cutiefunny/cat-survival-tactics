@@ -15,6 +15,7 @@ import Raccoon from '../objects/roles/Raccoon';
 import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
+import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; // 동적 레벨 매니저 유지
 
 // [Managers & Systems]
 import BattleUIManager from '../managers/BattleUIManager';
@@ -24,8 +25,6 @@ import PathfindingManager from '../systems/PathfindingManager';
 
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
-import level1Data from '../../assets/maps/level1.json';
-import level2Data from '../../assets/maps/level2.json'; 
 
 // [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
@@ -33,6 +32,12 @@ import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
 import tilesetParkImg from '../../assets/tilesets/park.png'; 
+
+// [New Assets - Street Tilesets]
+import tilesetStreet1Img from '../../assets/tilesets/street1.png';
+import tilesetStreet2Img from '../../assets/tilesets/street2.png';
+import tilesetStreet3Img from '../../assets/tilesets/street3.png';
+import tilesetStreet4Img from '../../assets/tilesets/street4.png';
 
 // [Assets - Units]
 import leaderSheet from '../../assets/units/leader.png';
@@ -54,8 +59,6 @@ const UnitClasses = {
     'Raccoon': Raccoon,
     'NormalDog': Unit 
 };
-
-export const LEVEL_LIST = ['level1', 'level2']; 
 
 const DEFAULT_CONFIG = {
     showDebugStats: false,
@@ -87,7 +90,8 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.currentLevelIndex = targetIndex;
-        console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (Target: ${LEVEL_LIST[this.currentLevelIndex]})`);
+        const levelName = LEVEL_KEYS[this.currentLevelIndex] || 'Unknown';
+        console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (${levelName})`);
     }
 
     preload() {
@@ -102,14 +106,24 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
-        this.load.tilemapTiledJSON('level1', level1Data);
-        this.load.tilemapTiledJSON('level2', level2Data);
+        
+        // LevelManager를 통해 모든 레벨 데이터를 로드
+        LEVEL_KEYS.forEach(key => {
+            console.log(`🗺️ Preloading Map: ${key}`);
+            this.load.tilemapTiledJSON(key, LEVEL_DATA[key]);
+        });
         
         this.load.image('tiles_grass', tilesetGrassImg);
         this.load.image('tiles_plant', tilesetPlantImg);
         this.load.image('tiles_city', tilesetCity1Img);
         this.load.image('tiles_city2', tilesetCity2Img);
         this.load.image('tiles_park', tilesetParkImg);
+        
+        // [New] Street Tilesets Preload
+        this.load.image('tiles_street1', tilesetStreet1Img);
+        this.load.image('tiles_street2', tilesetStreet2Img);
+        this.load.image('tiles_street3', tilesetStreet3Img);
+        this.load.image('tiles_street4', tilesetStreet4Img);
     }
 
     create() {
@@ -120,7 +134,7 @@ export default class BattleScene extends Phaser.Scene {
         
         this.placementZone = null;
         this.zoneGraphics = null; 
-        this.blocksDebugGraphics = null; // [New] Blocks 디버그용 그래픽
+        this.blocksDebugGraphics = null;
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -158,12 +172,12 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.destroyLoadingText();
         
-        if (this.currentLevelIndex >= LEVEL_LIST.length) this.currentLevelIndex = 0;
+        if (this.currentLevelIndex >= LEVEL_KEYS.length) this.currentLevelIndex = 0;
         
-        const targetMapKey = LEVEL_LIST[this.currentLevelIndex];
+        const targetMapKey = LEVEL_KEYS[this.currentLevelIndex];
         const mapKey = this.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
         
-        console.log(`🗺️ [BattleScene] Loading Map: '${mapKey}' (Target was '${targetMapKey}')`);
+        console.log(`🗺️ [BattleScene] Loading Map: '${mapKey}'`);
         this.startGame(config, mapKey);
     }
 
@@ -178,30 +192,37 @@ export default class BattleScene extends Phaser.Scene {
             if (t1) tilesets.push(t1);
             if (t2) tilesets.push(t2);
 
-        } else if (mapKey === 'level2') {
-            console.log("🌲 Loading Tileset for Level 2: Park");
-            const t1 = map.addTilesetImage('Park', 'tiles_park');
-            if (t1) tilesets.push(t1);
-
         } else {
-            const t1 = map.addTilesetImage('City', 'tiles_city');
-            const t2 = map.addTilesetImage('City2', 'tiles_city2');
+            // [Modified] 타일셋 자동 감지 및 매핑 로직 확장
             
-            if (t1) tilesets.push(t1);
-            if (t2) tilesets.push(t2);
+            // 1. 기본 매핑 시도 (기존 City 타일셋)
+            const tCity1 = map.addTilesetImage('City', 'tiles_city');
+            const tCity2 = map.addTilesetImage('City2', 'tiles_city2');
+            if (tCity1) tilesets.push(tCity1);
+            if (tCity2) tilesets.push(tCity2);
 
-            if (tilesets.length === 0) {
-                console.log("🔍 Auto-detecting tilesets...");
-                map.tilesets.forEach(ts => {
-                    let imgKey;
-                    if (ts.name.includes('Park')) imgKey = 'tiles_park';
-                    else if (ts.name.includes('2')) imgKey = 'tiles_city2';
-                    else imgKey = 'tiles_city';
-                    
+            // 2. 추가 타일셋 자동 감지
+            map.tilesets.forEach(ts => {
+                // 이미 로드된 타일셋은 건너뜀
+                if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
+
+                let imgKey = null;
+                const name = ts.name;
+
+                // 이름 기반 매칭 규칙
+                if (name.includes('Park')) imgKey = 'tiles_park';
+                else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
+                else if (name.includes('street2') || name === 'Street2') imgKey = 'tiles_street2';
+                else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
+                else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
+                else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
+                else if (name.includes('City')) imgKey = 'tiles_city';
+
+                if (imgKey) {
                     const t = map.addTilesetImage(ts.name, imgKey);
                     if (t) tilesets.push(t);
-                });
-            }
+                }
+            });
         }
 
         const validTilesets = tilesets.filter(t => t);
@@ -219,7 +240,6 @@ export default class BattleScene extends Phaser.Scene {
         const blockObjectLayer = map.getObjectLayer('Blocks');
         
         if (blockObjectLayer) {
-            console.log(`🧱 Found 'Blocks' object layer with ${blockObjectLayer.objects.length} objects.`);
             blockObjectLayer.objects.forEach(obj => {
                 const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
                 this.physics.add.existing(rect, true); 
@@ -268,15 +288,13 @@ export default class BattleScene extends Phaser.Scene {
         this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
     }
 
-    // [New] Blocks 영역 디버그 시각화 (빨간색 레이어)
     createBlocksDebug() {
         if (!this.blocksDebugGraphics) {
-            this.blocksDebugGraphics = this.add.graphics().setDepth(9998); // 유닛 디버그 텍스트보다 살짝 아래
+            this.blocksDebugGraphics = this.add.graphics().setDepth(9998);
         }
         this.blocksDebugGraphics.clear();
-        this.blocksDebugGraphics.fillStyle(0xff0000, 0.33); // 빨간색, 투명도 33%
+        this.blocksDebugGraphics.fillStyle(0xff0000, 0.33);
 
-        // 1. Tilemap Layers (Walls, Blocks)
         const drawLayer = (layer) => {
             if (layer) {
                 layer.forEachTile(tile => {
@@ -289,7 +307,6 @@ export default class BattleScene extends Phaser.Scene {
         drawLayer(this.wallLayer);
         drawLayer(this.blockLayer);
 
-        // 2. Block Objects (사각형 장애물)
         if (this.blockObjectGroup) {
             this.blockObjectGroup.getChildren().forEach(obj => {
                 const b = obj.getBounds();
@@ -402,7 +419,6 @@ export default class BattleScene extends Phaser.Scene {
             this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, blockLayer, onWallCollision);
         }
-
         if (this.blockObjectGroup) {
             this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision);
             this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision);
@@ -432,8 +448,6 @@ export default class BattleScene extends Phaser.Scene {
             if (unit.active) {
                 if (typeof unit.saveFormationPosition === 'function') {
                     unit.saveFormationPosition(lx, ly);
-                } else {
-                    console.warn(`Unit ${unit.role} missing saveFormationPosition method`);
                 }
             }
         });
@@ -497,7 +511,6 @@ export default class BattleScene extends Phaser.Scene {
         if (this.inputManager.isOrientationBad) return;
         this.uiManager.updateDebugStats(this.game.loop);
         
-        // [Modified] 디버그 모드 상태에 따른 Blocks 영역 시각화 제어
         if (this.uiManager.isDebugEnabled) {
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
             this.blocksDebugGraphics.setVisible(true);
@@ -560,7 +573,8 @@ export default class BattleScene extends Phaser.Scene {
         let callback = () => this.restartLevel();
 
         if (isWin) {
-            if (this.currentLevelIndex < LEVEL_LIST.length - 1) {
+            // 현재 레벨 인덱스가 전체 레벨 수보다 작으면 다음 레벨로 진행
+            if (this.currentLevelIndex < LEVEL_KEYS.length - 1) {
                 btnText = "Next Level ▶️";
                 callback = () => this.nextLevel();
             } else {
