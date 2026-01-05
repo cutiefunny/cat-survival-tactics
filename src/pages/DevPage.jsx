@@ -3,6 +3,9 @@ import { createStore } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
+// [설정] 레벨 목록 정의 (BattleScene과 동일하게 유지)
+const LEVEL_LIST = ['level1', 'level2'];
+
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
   Leader: { hp: 200, attackPower: 25, moveSpeed: 90, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
@@ -10,7 +13,6 @@ const DEFAULT_ROLE_DEFS = {
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
-  // [Modified] Healer: skillCooldown, skillRange, aggroStackLimit 추가
   Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10 },
   Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, attackCooldown: 400, skillCooldown: 8000 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
@@ -19,9 +21,9 @@ const DEFAULT_ROLE_DEFS = {
 
 const DEFAULT_CONFIG = {
   showDebugStats: false, 
-  gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250 },
+  // [Modified] startLevelIndex 추가 (기본값 0)
+  gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0 },
   aiSettings: {
-    // [New] fleeHpThreshold: 도망 기준 HP 비율, hpRegenRate: 초당 회복율
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
     dealer: { safeDistance: 150, followDistance: 50 },
@@ -50,7 +52,6 @@ const DevPage = () => {
         // AI 설정 병합
         if (data.aiSettings) {
              merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
-             // common 내부 병합
              if (data.aiSettings.common) {
                  merged.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...data.aiSettings.common };
              }
@@ -73,6 +74,11 @@ const DevPage = () => {
         const rCount = merged.gameSettings.redCount || 6;
         merged.gameSettings.blueCount = bCount;
         merged.gameSettings.redCount = rCount;
+        
+        // [New] startLevelIndex 안전장치
+        if (merged.gameSettings.startLevelIndex === undefined) {
+            merged.gameSettings.startLevelIndex = 0;
+        }
 
         merged.blueTeamRoles = syncArrayLength(merged.blueTeamRoles || [], bCount, "Normal", merged.roleDefinitions);
         merged.redTeamRoles = syncArrayLength(merged.redTeamRoles || [], rCount, "NormalDog", merged.roleDefinitions);
@@ -215,7 +221,6 @@ const DevPage = () => {
                     </span>
                 )}
 
-                {/* [New] Healer 전용 Aggro Stack 입력 필드 */}
                 {unit.role === 'Healer' && (
                      <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
                         😡Stack <input 
@@ -257,6 +262,23 @@ const DevPage = () => {
                 </span>
             </label>
 
+            {/* [New] Start Level Selection */}
+            <label style={{display: "flex", alignItems: "center", background: "#333", padding: "10px", borderRadius: "5px"}}>
+                <span style={{ color: "#aaa", fontWeight: "bold", marginRight: "10px" }}>🚀 Start Level:</span>
+                <select 
+                    value={config.gameSettings.startLevelIndex ?? 0}
+                    onChange={(e) => setConfig("gameSettings", "startLevelIndex", parseInt(e.target.value))}
+                    style={{ 
+                        padding: "5px", borderRadius: "4px", border: "1px solid #555", 
+                        background: "#222", color: "white", fontSize: "1em", fontWeight: "bold" 
+                    }}
+                >
+                    {LEVEL_LIST.map((level, idx) => (
+                        <option value={idx}>{idx}: {level}</option>
+                    ))}
+                </select>
+            </label>
+
             <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap", marginTop: "10px" }}>
                 <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
                 <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
@@ -267,7 +289,6 @@ const DevPage = () => {
         <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
           <h2 style={{ color: "#aaa", "margin-top": 0 }}>🧠 AI Parameters</h2>
           <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
-             {/* [New] Common AI Settings (Flee & Regen) */}
              <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
                  <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
                  <div style={{display: "flex", gap: "15px", flexWrap: "wrap"}}>
@@ -314,7 +335,6 @@ const DevPage = () => {
                             
                             <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
                             
-                            {/* [Modified] 라벨 수정 (Healer는 Unused) */}
                             <label style={{fontSize: "0.8em", color:"#aaffaa"}}>
                                 {role === 'Healer' ? 'Motion CD (N/A)' : 'ATK CD'}
                                 <input 
@@ -325,7 +345,6 @@ const DevPage = () => {
                                 />
                             </label>
                             
-                            {/* [Modified] Healer도 skillCooldown이 정의되어 있으므로 S.CD 렌더링됨 */}
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
                                 <>
                                     <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>
@@ -336,7 +355,6 @@ const DevPage = () => {
                                 </>
                             )}
                             
-                            {/* [New] Healer 전용 Aggro Stack 입력 필드 */}
                             {config.roleDefinitions[role].aggroStackLimit !== undefined && (
                                 <label style={{fontSize: "0.8em", color:"#ffaaaa"}}>
                                     Aggro Stack

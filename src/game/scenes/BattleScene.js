@@ -24,14 +24,14 @@ import CombatManager from '../systems/CombatManager';
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
 import level1Data from '../../assets/maps/level1.json';
-import level2Data from '../../assets/maps/level2.json'; // Level 2 데이터
+import level2Data from '../../assets/maps/level2.json'; 
 
 // [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
 import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
-import tilesetParkImg from '../../assets/tilesets/park.png'; // Park 타일셋
+import tilesetParkImg from '../../assets/tilesets/park.png'; 
 
 // [Assets - Units]
 import leaderSheet from '../../assets/units/leader.png';
@@ -54,8 +54,8 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
-// [Level Config]
-const LEVEL_LIST = ['level1', 'level2']; 
+// [Level Config] - export 추가하여 DevPage에서 참조 가능하게 변경
+export const LEVEL_LIST = ['level1', 'level2']; 
 
 const DEFAULT_CONFIG = {
     showDebugStats: false,
@@ -79,7 +79,19 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     init(data) {
-        this.currentLevelIndex = data.levelIndex || 0;
+        // [DevPage Update] 시작 레벨 우선순위 로직 적용
+        // 1. data.levelIndex (재시작/다음 레벨 이동 등 내부 호출 시 최우선)
+        // 2. window.TACTICS_START_LEVEL (DevPage 설정값)
+        // 3. 0 (기본값)
+        
+        let targetIndex = 0;
+        if (data && data.levelIndex !== undefined) {
+            targetIndex = data.levelIndex;
+        } else if (window.TACTICS_START_LEVEL !== undefined) {
+            targetIndex = window.TACTICS_START_LEVEL;
+        }
+
+        this.currentLevelIndex = targetIndex;
         console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (Target: ${LEVEL_LIST[this.currentLevelIndex]})`);
     }
 
@@ -130,6 +142,9 @@ export default class BattleScene extends Phaser.Scene {
             if (docSnap.exists()) {
                 const dbData = docSnap.data();
                 config = { ...DEFAULT_CONFIG, ...dbData };
+                if (dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
+                    this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
+                }
                 if (dbData.aiSettings) {
                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
                      if (dbData.aiSettings.common) {
@@ -147,6 +162,9 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.uiManager.destroyLoadingText();
+        
+        // [Fix] levelIndex가 범위를 벗어나지 않도록 방어 코드 추가
+        if (this.currentLevelIndex >= LEVEL_LIST.length) this.currentLevelIndex = 0;
         
         const targetMapKey = LEVEL_LIST[this.currentLevelIndex];
         const mapKey = this.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
@@ -203,17 +221,15 @@ export default class BattleScene extends Phaser.Scene {
         
         this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
-        // [New] Blocks Object Layer 처리 (충돌체 생성)
         this.blockObjectGroup = this.physics.add.staticGroup();
         const blockObjectLayer = map.getObjectLayer('Blocks');
         
         if (blockObjectLayer) {
             console.log(`🧱 Found 'Blocks' object layer with ${blockObjectLayer.objects.length} objects.`);
             blockObjectLayer.objects.forEach(obj => {
-                // Tiled의 좌표는 Top-Left 기준, Phaser Rectangle은 Center 기준이므로 보정
                 const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
-                this.physics.add.existing(rect, true); // static body 생성
-                rect.setVisible(false); // 충돌 영역은 보이지 않게 설정
+                this.physics.add.existing(rect, true); 
+                rect.setVisible(false); 
                 this.blockObjectGroup.add(rect);
             });
         }
@@ -351,7 +367,6 @@ export default class BattleScene extends Phaser.Scene {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
         
-        // 기존 타일 레이어 충돌
         if (wallLayer) {
             this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, wallLayer, onWallCollision);
@@ -361,7 +376,6 @@ export default class BattleScene extends Phaser.Scene {
             this.physics.add.collider(this.redTeam, blockLayer, onWallCollision);
         }
 
-        // [New] Block 오브젝트 레이어 충돌 추가
         if (this.blockObjectGroup) {
             this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision);
             this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision);

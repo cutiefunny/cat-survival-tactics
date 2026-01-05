@@ -57,7 +57,8 @@ export default class CombatManager {
     }
 
     performAttack(attacker, defender) {
-        if (!attacker.active || !defender.active) return;
+        // [Fix] 이미 죽어가고 있는 적(isDying)은 공격 대상에서 제외
+        if (!attacker.active || !defender.active || defender.isDying) return;
         
         if (attacker.isLowHpFleeing) return;
 
@@ -68,11 +69,11 @@ export default class CombatManager {
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            if (attacker.role === 'Shooter' && defender.active) {
+            if (attacker.role === 'Shooter' && defender.active && !defender.isDying) {
                 this.scene.tweens.add({ targets: defender, x: '+=3', duration: 30, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
             }
             
-            if (!defender.active || !defender.body) return;
+            if (!defender.active || !defender.body || defender.isDying) return;
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
             defender.body.velocity.x += Math.cos(angle) * knockbackForce;
