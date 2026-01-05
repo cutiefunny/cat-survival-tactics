@@ -6,7 +6,7 @@ export default class Healer extends Unit {
         stats.role = 'Healer';
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
         
-        // [New] 설정값에서 스택 한계치 가져오기 (기본값 10)
+        // 설정값에서 스택 한계치 가져오기 (기본값 10)
         this.aggroStackLimit = stats.aggroStackLimit || 10;
         this.healStack = 0;
         
@@ -16,9 +16,11 @@ export default class Healer extends Unit {
     updateAI(delta) {
         this.thinkTimer -= delta;
 
+        // 1. 체력이 20% 이하면 자신을 최우선 치유 대상으로 설정
         if (this.hp / this.maxHp <= 0.2) {
             this.currentTarget = this; 
         } else {
+            // 2. 가장 체력이 낮은 아군 탐색
             const weakAlly = this.findLowestHpAlly();
             this.currentTarget = weakAlly ? weakAlly : null;
         }
@@ -53,7 +55,28 @@ export default class Healer extends Unit {
         }
     }
 
+    // [핵심 수정] 애니메이션 업데이트 로직 오버라이드 (강력 고정)
+    updateAnimation() {
+        // 스킬(힐) 사용 중일 때는 무조건 힐 모션(Frame 3) 고정
+        if (this.isUsingSkill) {
+            if (this.anims.isPlaying) this.stop();
+            
+            // 4번째 이미지(인덱스 3)를 강제로 지정
+            // 안전장치 제거: 개발자님이 이미지가 있다고 확인했으므로 무조건 3번 프레임 호출
+            if (this.frame.name !== '3') {
+                this.setFrame(3);
+            }
+            return; // 부모 클래스의 updateAnimation(Idle 설정 등) 실행 방지
+        }
+        
+        // 스킬 사용 중이 아닐 때만 기본 동작(걷기/대기) 수행
+        super.updateAnimation();
+    }
+
     updateFlipX() {
+        // 힐 중에는 방향 전환 하지 않음 (타겟 고정)
+        if (this.isUsingSkill) return;
+
         if (this.body.velocity.x < -20) {
             this.setFlipX(false);
         } else if (this.body.velocity.x > 20) {
@@ -72,7 +95,6 @@ export default class Healer extends Unit {
         const cooldownSec = Math.max(0, this.skillTimer / 1000).toFixed(1);
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
 
-        // [Visual] 설정된 Limit로 표시 (Stack: 5/15)
         this.debugText.setText(`HP:${hpPct}%\nCD:${cooldownSec}s\nStack:${this.healStack}/${this.aggroStackLimit}`);
         this.debugText.setColor(this.healStack >= (this.aggroStackLimit - 1) ? '#ff4444' : '#00ff00');
 
@@ -88,21 +110,27 @@ export default class Healer extends Unit {
             return;
         }
 
+        // 1. 상태 플래그 설정 (updateAnimation에서 감지함)
         this.isUsingSkill = true;
+        
+        // 2. 물리 및 애니메이션 정지
+        this.setVelocity(0, 0); 
         this.stop(); 
-        if (this.texture.frameTotal > 3) {
-            this.setFrame(3); 
-        }
+        
+        // 3. 즉시 프레임 변경 (깜빡임 방지)
+        this.setFrame(3);
+
+        // 4. 방향 전환 (아군 바라보기)
+        const diffX = target.x - this.x;
+        if (diffX !== 0) this.setFlipX(diffX > 0);
         
         const healAmount = this.attackPower; 
         
         target.hp = Math.min(target.hp + healAmount, target.maxHp);
         target.redrawHpBar();
 
-        // 힐 성공 시 스택 증가
         this.healStack++;
         
-        // [Modified] 설정된 aggroStackLimit 도달 시 어그로 발동
         if (this.healStack >= this.aggroStackLimit) {
             this.triggerAggro();
             this.healStack = 0; 
@@ -112,10 +140,11 @@ export default class Healer extends Unit {
 
         this.showHealEffect(target, healAmount);
 
+        // 0.5초 후 스킬 상태 해제
         this.scene.time.delayedCall(500, () => {
             if (this.active) {
                 this.isUsingSkill = false;
-                this.resetVisuals();
+                this.resetVisuals(); // Idle 상태로 복귀
             }
         });
     }
@@ -135,12 +164,8 @@ export default class Healer extends Unit {
         const enemies = this.targetGroup.getChildren();
         enemies.forEach(enemy => {
             if (enemy.active) {
-                // [Modified] 탱커의 도발(isProvoked) 상태여도 무시하고 어그로를 가져옴 (덮어쓰기)
-                // 탱커가 나중에 다시 스킬을 쓰면 그때 다시 탱커에게 돌아감 (Last Action Wins)
-                
                 enemy.currentTarget = this;
                 
-                // 도발 상태였다면 해제 (선택 사항: 힐러가 뺏으면 도발 풀림)
                 if (enemy.isProvoked) {
                     enemy.isProvoked = false;
                 }
