@@ -13,46 +13,105 @@ export default class Healer extends Unit {
     }
 
     updateAI(delta) {
-        // [Modified] Use this.ai.thinkTimer
         this.ai.thinkTimer -= delta;
 
-        // 1. 체력이 20% 이하면 자신을 최우선 치유 대상으로 설정
-        if (this.hp / this.maxHp <= 0.2) {
-            this.ai.currentTarget = this; // [Modified] Use this.ai
+        // [New] 1. 타겟 선정 (가장 체력이 낮은 아군 우선)
+        let bestTarget = null;
+
+        // 1-1. 자가 생존 우선 (HP 30% 이하)
+        if (this.hp / this.maxHp <= 0.3) {
+            bestTarget = this;
         } else {
-            // 2. 가장 체력이 낮은 아군 탐색
-            const weakAlly = this.ai.findLowestHpAlly(); // [Modified] Use this.ai
-            this.ai.currentTarget = weakAlly ? weakAlly : null;
+            // 1-2. 가장 체력이 낮은 아군 탐색
+            bestTarget = this.ai.findLowestHpAlly();
         }
 
-        // [Modified] Use this.ai.currentTarget
+        // 1-3. 타겟 교체 판정
+        if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying || this.ai.currentTarget.hp >= this.ai.currentTarget.maxHp) {
+            // 현재 타겟이 없거나, 죽었거나, 다 나았으면 -> 즉시 교체
+            this.ai.currentTarget = bestTarget;
+        } else if (bestTarget && bestTarget !== this.ai.currentTarget) {
+            // 현재 타겟이 있는데 더 급한 환자가 생긴 경우
+            
+            // 자가 치유가 필요해졌으면 즉시 전환
+            if (bestTarget === this) {
+                this.ai.currentTarget = bestTarget;
+            } 
+            // 다른 아군이 현재 타겟보다 HP가 10 이상 더 낮으면 전환 (과도한 스위칭 방지용 최소 버퍼)
+            else if (bestTarget.hp < this.ai.currentTarget.hp - 10) {
+                this.ai.currentTarget = bestTarget;
+            }
+        }
+
+        // [Safety Check] 만약 타겟이 여전히 null이면 리더를 따라다님 (유휴 상태)
+        if (!this.ai.currentTarget && this.scene.playerUnit && this.scene.playerUnit.active) {
+             // 힐 할 대상이 없으면 공격 로직이나 리더 따라가기 수행
+             // 여기서는 리더 뒤 포지셔닝으로 연결
+        }
+
+        // 2. [이동 및 행동]
         if (this.ai.currentTarget) {
             const target = this.ai.currentTarget;
             const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
             
-            const stopDist = 150; 
-            const moveDist = 200; 
-            const isMoving = this.body.velocity.lengthSq() > 10;
+            const healRange = 180; 
+            const moveBuffer = 30; // 이동 떨림 방지 버퍼
 
-            if (isMoving) {
-                if (dist <= stopDist) {
-                    this.setVelocity(0, 0);
-                    this.updateFlipX(); 
-                    this.tryUseSkill();
-                } else {
-                    this.scene.physics.moveToObject(this, target, this.moveSpeed);
-                    this.updateFlipX();
-                }
+            // 멈춰있을 때는 더 멀어져야 움직임 (Deadzone)
+            const isStopped = this.body.speed < 10;
+            const threshold = isStopped ? (healRange + moveBuffer) : healRange;
+            
+            if (dist <= threshold) {
+                // 사거리 안
+                this.setVelocity(0, 0);
+                this.updateFlipX(); 
+                this.tryUseSkill();
             } else {
-                if (dist > moveDist) {
-                    this.scene.physics.moveToObject(this, target, this.moveSpeed);
-                    this.updateFlipX();
-                } else {
-                    this.tryUseSkill(); 
-                }
+                // 사거리 밖 -> 접근
+                this.scene.physics.moveToObject(this, target, this.moveSpeed);
+                this.updateFlipX();
             }
         } else {
-            this.ai.followLeader(); // [Modified] Use this.ai
+            // 힐 할 대상이 없으면 안전한 위치로
+            this.maintainSafePosition();
+        }
+    }
+
+    maintainSafePosition() {
+        if (!this.scene.playerUnit || !this.scene.playerUnit.active) {
+            this.setVelocity(0, 0);
+            return;
+        }
+
+        const leader = this.scene.playerUnit;
+        
+        // 적들의 무게중심 계산
+        let enemyCX = 0, enemyCY = 0, count = 0;
+        this.targetGroup.getChildren().forEach(e => {
+            if(e.active && !e.isDying) { enemyCX += e.x; enemyCY += e.y; count++; }
+        });
+
+        if (count > 0) {
+            enemyCX /= count;
+            enemyCY /= count;
+
+            // 리더 기준, 적 반대 방향
+            const angle = Phaser.Math.Angle.Between(enemyCX, enemyCY, leader.x, leader.y);
+            const safeDist = 120;
+            const targetX = leader.x + Math.cos(angle) * safeDist;
+            const targetY = leader.y + Math.sin(angle) * safeDist;
+            
+            const distToTarget = Phaser.Math.Distance.Between(this.x, this.y, targetX, targetY);
+            
+            // 도착 지점 떨림 방지
+            if (distToTarget > 15) {
+                this.scene.physics.moveTo(this, targetX, targetY, this.moveSpeed * 0.9);
+                this.updateFlipX();
+            } else {
+                this.setVelocity(0, 0);
+            }
+        } else {
+            this.ai.followLeader();
         }
     }
 
@@ -70,6 +129,7 @@ export default class Healer extends Unit {
     updateFlipX() {
         if (this.isUsingSkill) return;
 
+        // 속도 데드존 적용
         if (this.body.velocity.x < -20) {
             this.setFlipX(false);
         } else if (this.body.velocity.x > 20) {
@@ -87,11 +147,12 @@ export default class Healer extends Unit {
 
         const cooldownSec = Math.max(0, this.skillTimer / 1000).toFixed(1);
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
+        
+        const stateStr = (this.ai.currentTarget ? "➕HEAL" : "🛡️SAFE");
 
-        this.debugText.setText(`HP:${hpPct}%\nCD:${cooldownSec}s\nStack:${this.healStack}/${this.aggroStackLimit}`);
-        this.debugText.setColor(this.healStack >= (this.aggroStackLimit - 1) ? '#ff4444' : '#00ff00');
+        this.debugText.setText(`${stateStr}\nHP:${hpPct}%\nStack:${this.healStack}/${this.aggroStackLimit}`);
+        this.debugText.setColor((this.healStack >= (this.aggroStackLimit - 1) ? '#ff4444' : '#00ff00'));
 
-        // [Modified] Use this.ai.currentTarget
         if (this.ai.currentTarget && this.ai.currentTarget.active) {
             this.debugGraphic.lineStyle(1, 0x00ff00, 0.5);
             this.debugGraphic.lineBetween(this.x, this.y, this.ai.currentTarget.x, this.ai.currentTarget.y);
@@ -99,7 +160,7 @@ export default class Healer extends Unit {
     }
 
     performSkill() {
-        const target = this.ai.currentTarget; // [Modified] Use this.ai
+        const target = this.ai.currentTarget; 
         if (!target || !target.active || target.hp >= target.maxHp) {
             return;
         }
@@ -110,7 +171,7 @@ export default class Healer extends Unit {
         this.setFrame(3);
 
         const diffX = target.x - this.x;
-        if (diffX !== 0) this.setFlipX(diffX > 0);
+        if (Math.abs(diffX) > 10) this.setFlipX(diffX > 0);
         
         const healAmount = this.attackPower; 
         target.hp = Math.min(target.hp + healAmount, target.maxHp);
@@ -122,8 +183,6 @@ export default class Healer extends Unit {
             this.triggerAggro();
             this.healStack = 0; 
         }
-
-        //console.log(`💚 [Healer] Healed. Stack: ${this.healStack}/${this.aggroStackLimit}`);
 
         this.showHealEffect(target, healAmount);
 
@@ -150,12 +209,8 @@ export default class Healer extends Unit {
         const enemies = this.targetGroup.getChildren();
         enemies.forEach(enemy => {
             if (enemy.active) {
-                // [Modified] Use enemy.ai.currentTarget
                 if (enemy.ai) enemy.ai.currentTarget = this;
-                
-                if (enemy.isProvoked) {
-                    enemy.isProvoked = false;
-                }
+                if (enemy.isProvoked) enemy.isProvoked = false;
                 
                 const icon = this.scene.add.text(enemy.x, enemy.y - 40, "!", { 
                     fontSize: '24px', color: '#ff0000', fontStyle: 'bold' 

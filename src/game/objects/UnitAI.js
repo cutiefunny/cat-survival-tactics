@@ -29,41 +29,57 @@ export default class UnitAI {
         this._tempEnd = new Phaser.Math.Vector2();
     }
 
-    // [New] 역할군(Role) 클래스에서 매 프레임 호출해야 함
     processAggro(delta) {
         if (this.provokedTimer > 0) {
             this.provokedTimer -= delta;
         }
     }
 
-    // [New] 도발 상태인지 확인 (타겟이 유효해야 함)
     get isProvoked() {
         return this.provokedTimer > 0 && this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
     }
 
     update(delta) {
-        // 기본 UnitAI update는 Role이 없는 유닛이나 override하지 않은 유닛이 사용
         this.processAggro(delta);
 
         const unit = this.unit;
-        const fleeThreshold = unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
-        const hpRatio = unit.hp / unit.maxHp;
         
-        if (!this.isLowHpFleeing && hpRatio <= fleeThreshold) {
-            this.isLowHpFleeing = true;
-            unit.setTint(0xff5555); 
-        } else if (this.isLowHpFleeing && hpRatio >= 0.5) {
-            this.isLowHpFleeing = false;
-            unit.resetVisuals(); 
+        // 1. [생존 본능] 낮은 체력일 때 도망 및 회복 (탱커 제외)
+        if (unit.role !== 'Tanker') {
+            const fleeThreshold = unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
+            const hpRatio = unit.hp / unit.maxHp;
+            
+            if (!this.isLowHpFleeing && hpRatio <= fleeThreshold) {
+                this.isLowHpFleeing = true;
+                unit.setTint(0xff5555); 
+            } else if (this.isLowHpFleeing && hpRatio >= 0.5) {
+                this.isLowHpFleeing = false;
+                unit.resetVisuals(); 
+            }
+
+            if (this.isLowHpFleeing) {
+                // [Fix] 무작정 도망가지 않고, 안전 거리(350px) 확보 시 정지하여 회복 유도
+                const nearestThreat = this.findNearestEnemy();
+                let distToThreat = Infinity;
+                
+                if (nearestThreat) {
+                    distToThreat = Phaser.Math.Distance.Between(unit.x, unit.y, nearestThreat.x, nearestThreat.y);
+                }
+                
+                // 적이 안전 거리보다 가까우면 도망, 아니면 멈춰서 쉼 (Regen 발동 조건 충족)
+                // 벽에 막혀서 거리가 안 벌어지면 어쩔 수 없지만, 넓은 곳에서는 멈추게 됨
+                const safeDist = 350;
+
+                if (distToThreat < safeDist) {
+                     this.runAway(delta);
+                } else {
+                     unit.setVelocity(0, 0); 
+                     unit.updateFlipX(); 
+                }
+                return;
+            }
         }
 
-        if (this.isLowHpFleeing) {
-            if (unit.isTargeted()) this.runAway(delta);
-            else { unit.setVelocity(0, 0); unit.updateFlipX(); }
-            return;
-        }
-
-        // [핵심] 도발 상태면 다른 생각 금지
         if (this.isProvoked) {
             if (this.currentTarget) {
                 this.moveToTargetSmart(delta);
@@ -94,6 +110,13 @@ export default class UnitAI {
                 unit.setVelocity(0, 0);
                 this.currentPath = [];
                 this.stuckTimer = 0;
+                
+                if (unit.role === 'Shooter') {
+                     // Shooter logic (lookAt)
+                } else {
+                     const diffX = this.currentTarget.x - unit.x;
+                     if (Math.abs(diffX) > 10) unit.setFlipX(diffX > 0);
+                }
             } else {
                 this.moveToTargetSmart(delta);
             }
@@ -110,7 +133,7 @@ export default class UnitAI {
         const now = this.scene.time.now;
         const timeSinceSwitch = now - this.lastTargetChangeTime;
         
-        if (this.isProvoked) return; // [Double Check]
+        if (this.isProvoked) return; 
 
         const isShooter = (this.unit.role === 'Shooter');
         const switchCooldown = isShooter ? 100 : 1000;
@@ -185,6 +208,65 @@ export default class UnitAI {
         return target;
     }
 
+    findAllyUnderAttack() {
+        const allies = (this.unit.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
+        let bestTarget = null;
+        let maxUrgency = -1;
+
+        for (let ally of allies) {
+            if (!ally.active || ally.isDying || ally === this.unit) continue;
+
+            const targetingEnemies = ally.findEnemiesTargetingMe ? ally.findEnemiesTargetingMe().length : 0;
+            const hpRatio = ally.hp / ally.maxHp;
+
+            let urgency = (targetingEnemies * 100) + ((1 - hpRatio) * 200);
+            if (ally.role === 'Healer') urgency += 300;
+            if (ally.role === 'Shooter') urgency += 150;
+
+            if (targetingEnemies > 0 && urgency > maxUrgency) {
+                maxUrgency = urgency;
+                bestTarget = ally;
+            }
+        }
+        return bestTarget;
+    }
+
+    findStrategicTarget(weights = {}) {
+        const enemies = this.unit.targetGroup.getChildren();
+        
+        const wDist = weights.distance ?? 1.0; 
+        const wHp = weights.lowHp ?? 2.0;       
+        const roleBonus = weights.rolePriority ?? { 'Healer': 500, 'Shooter': 300 }; 
+
+        let bestTarget = null;
+        let bestScore = -Infinity;
+        const myX = this.unit.x;
+        const myY = this.unit.y;
+
+        for (const enemy of enemies) {
+            if (!enemy.active || enemy.isDying) continue;
+
+            const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
+            if (dist <= 0.1) continue;
+
+            const hpRatio = enemy.hp / enemy.maxHp;
+            
+            let score = 0;
+            score += (1000 / dist) * wDist;          
+            score += ((1 - hpRatio) * 1000) * wHp;   
+            
+            if (roleBonus[enemy.role]) {
+                score += roleBonus[enemy.role];      
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestTarget = enemy;
+            }
+        }
+        return bestTarget;
+    }
+
     checkLineOfSight() {
         if (!this.currentTarget || !this.currentTarget.active || this.currentTarget.isDying) return false;
 
@@ -195,6 +277,11 @@ export default class UnitAI {
 
         const wallLayer = this.scene.wallLayer;
         const blockLayer = this.scene.blockLayer;
+
+        if (!wallLayer && !blockLayer && (!this.scene.blockObjectGroup || this.scene.blockObjectGroup.getLength() === 0)) {
+            this.lastLosResult = true;
+            return true;
+        }
 
         this._tempStart.set(this.unit.x, this.unit.y);
         this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
@@ -297,12 +384,12 @@ export default class UnitAI {
     moveToPoint(point) {
         this.scene.physics.moveTo(this.unit, point.x, point.y, this.unit.moveSpeed);
         const diffX = point.x - this.unit.x;
-        if (diffX > 0) this.unit.setFlipX(true);
-        else if (diffX < 0) this.unit.setFlipX(false);
+        if (Math.abs(diffX) > 5) {
+            this.unit.setFlipX(diffX > 0);
+        }
     }
 
     runAway(delta) {
-        // 도발 상태면 도망가지 않음 (전사가 도발했는데 도망가면 이상하므로)
         if (this.isProvoked) {
             this.moveToTargetSmart(delta);
             return;
@@ -332,7 +419,8 @@ export default class UnitAI {
         const targetY = this.scene.playerUnit.y + this.unit.formationOffset.y;
         
         const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, targetX, targetY);
-        if (distSq > 100) { 
+        
+        if (distSq > 150) { 
             this.scene.physics.moveTo(this.unit, targetX, targetY, this.unit.moveSpeed);
             this.unit.updateFlipX();
         } else {

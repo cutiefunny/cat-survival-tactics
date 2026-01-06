@@ -75,6 +75,7 @@ export default class Runner extends Unit {
             }
         } 
         else {
+            // [Fix] 메서드 구현 추가로 오류 해결
             const engagingEnemy = this.findEnemyEngagingAlly();
             if (engagingEnemy) {
                 this.ai.currentTarget = engagingEnemy;
@@ -112,6 +113,32 @@ export default class Runner extends Unit {
             }
         }
         return closestShooter;
+    }
+
+    // [New] 아군과 교전 중인(나를 보지 않는) 적 찾기
+    findEnemyEngagingAlly() {
+        const enemies = this.targetGroup.getChildren();
+        let closestEnemy = null;
+        let minDistSq = Infinity;
+
+        for (let enemy of enemies) {
+            if (!enemy.active || enemy.isDying) continue;
+            
+            // 적의 현재 타겟 확인 (UnitAI 또는 Unit 속성 호환)
+            const enemyTarget = enemy.ai ? enemy.ai.currentTarget : enemy.currentTarget;
+
+            if (enemyTarget && enemyTarget.active && !enemyTarget.isDying) {
+                // 적의 타겟이 '나'가 아니고, '나의 팀원'일 때 (즉, 다른 곳을 보고 있을 때)
+                if (enemyTarget !== this && enemyTarget.team === this.team) {
+                    const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
+                    if (distSq < minDistSq) {
+                        minDistSq = distSq;
+                        closestEnemy = enemy;
+                    }
+                }
+            }
+        }
+        return closestEnemy;
     }
 
     moveIdeallyTowards(target) {
