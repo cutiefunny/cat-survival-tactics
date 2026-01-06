@@ -3,12 +3,26 @@ import Phaser from 'phaser';
 export default class InputManager {
     constructor(scene) {
         this.scene = scene;
-        this.joyStick = null;
         this.spaceKey = null;
 
         // 모바일 제어 상태 변수
         this.prevPinchDistance = 0;
-        this.isDraggingUnit = false;
+        this.isDraggingUnit = false; // 배치 단계 드래그
+
+        // [New] 유닛 조작 상태 변수 (가상 조이스틱 대체)
+        this.isControllingUnit = false;
+        this.controlPointerId = -1;
+        this.dragOrigin = { x: 0, y: 0 };
+
+        // [New] 가상 커서 (Unit.js 호환용 - 조이스틱 신호 시뮬레이션)
+        this.virtualCursors = {
+            up: { isDown: false },
+            down: { isDown: false },
+            left: { isDown: false },
+            right: { isDown: false }
+        };
+        // Unit.js가 참조하는 joystickCursors를 가상 커서로 연결
+        this.scene.joystickCursors = this.virtualCursors;
     }
 
     setupControls() {
@@ -16,7 +30,7 @@ export default class InputManager {
 
         console.log("🎮 InputManager: Controls Setup Initialized");
 
-        // [Fix] 멀티터치 지원을 위해 포인터 추가
+        // 멀티터치 지원 (핀치 줌 등)
         this.scene.input.addPointer(2);
 
         this.scene.cursors = this.scene.input.keyboard.createCursorKeys();
@@ -24,108 +38,156 @@ export default class InputManager {
         
         this.spaceKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // [Debug] 글로벌 포인터 이벤트 감지
-        this.scene.input.on('pointerdown', (pointer, currentlyOver) => {
-            // console.log(`👇 Pointer Down: x=${pointer.x.toFixed(0)}, y=${pointer.y.toFixed(0)}, button=${pointer.button}`);
-        });
+        // =========================================================
+        // [New] 1. 유닛 터치 감지 (이동 시작)
+        // =========================================================
+        this.scene.input.on('pointerdown', (pointer) => {
+            if (!this.scene.isMobile) return;
+            if (this.isDraggingUnit) return; // 배치 중이면 무시
 
-        // 유닛 드래그 상태 추적
-        this.scene.input.on('dragstart', (pointer, gameObject) => { 
-            this.isDraggingUnit = true; 
-        });
-        this.scene.input.on('dragend', (pointer, gameObject) => { 
-            this.isDraggingUnit = false; 
-        });
-        
-        // [PC Only] 마우스 휠 줌
-        this.scene.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
-            if (!this.scene.isMobile) {
-                const currentZoom = this.scene.cameras.main.zoom;
-                const zoomFactor = 0.001; 
+            // 플레이어 유닛 터치 판정
+            if (this.scene.playerUnit && this.scene.playerUnit.active) {
+                const unit = this.scene.playerUnit;
+                const bounds = unit.getBounds();
                 
-                let newZoom = currentZoom - (deltaY * zoomFactor);
-                newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
+                // 터치 영역 확장 (편의성)
+                const hitPadding = 40; 
                 
-                this.scene.cameras.main.setZoom(newZoom);
+                // 월드 좌표 기준 히트 테스트
+                if (pointer.worldX >= bounds.x - hitPadding && 
+                    pointer.worldX <= bounds.right + hitPadding &&
+                    pointer.worldY >= bounds.y - hitPadding && 
+                    pointer.worldY <= bounds.bottom + hitPadding) {
+                    
+                    this.isControllingUnit = true;
+                    this.controlPointerId = pointer.id;
+                    this.dragOrigin = { x: pointer.x, y: pointer.y }; // 화면 좌표 기준 드래그 시작점
+
+                    // 조작 시작 시 카메라가 유닛을 다시 따라가도록 설정
+                    this.scene.cameras.main.startFollow(unit, true, 0.1, 0.1);
+                }
             }
         });
 
-        // [PC & Mobile] 카메라 이동 및 줌 통합 핸들러
+        // =========================================================
+        // [New] 2. 포인터 이동 (유닛 이동 or 카메라 조작)
+        // =========================================================
         this.scene.input.on('pointermove', (pointer) => {
-            // 1. [PC] 마우스 휠 클릭(Middle Button)으로 화면 이동
+            // 1. [PC] 마우스 휠 클릭 이동
             const isMiddleBtn = (pointer.button === 1) || (pointer.middleButtonDown && pointer.middleButtonDown());
-            
             if (!this.scene.isMobile && pointer.isDown && isMiddleBtn) {
-                this.scene.cameras.main.stopFollow(); // [Fix] 수동 이동 시 팔로우 중지 (시점 고정)
-                
+                this.scene.cameras.main.stopFollow();
                 const cam = this.scene.cameras.main;
-                const dx = (pointer.position.x - pointer.prevPosition.x) / cam.zoom;
-                const dy = (pointer.position.y - pointer.prevPosition.y) / cam.zoom;
-                cam.scrollX -= dx;
-                cam.scrollY -= dy;
+                cam.scrollX -= (pointer.position.x - pointer.prevPosition.x) / cam.zoom;
+                cam.scrollY -= (pointer.position.y - pointer.prevPosition.y) / cam.zoom;
             }
 
-            // 2. [Mobile] 터치 제어 (핀치 줌 & 패닝)
+            // 2. [Mobile] 터치 제어
             if (this.scene.isMobile) {
                 const p1 = this.scene.input.pointer1;
                 const p2 = this.scene.input.pointer2;
 
-                // 멀티터치(두 손가락) -> 핀치 줌
+                // A) 멀티터치 -> 핀치 줌
                 if (p1.isDown && p2.isDown) {
                     const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-                    
                     if (this.prevPinchDistance > 0) {
                         const diff = dist - this.prevPinchDistance;
-                        const zoomFactor = 0.002; // 줌 감도
-                        
+                        const zoomFactor = 0.002; 
                         let newZoom = this.scene.cameras.main.zoom + (diff * zoomFactor);
-                        newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5); 
+                        newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
                         this.scene.cameras.main.setZoom(newZoom);
                     }
                     this.prevPinchDistance = dist;
                 } 
                 else {
-                    // 한 손가락 -> 패닝 (이동)
                     this.prevPinchDistance = 0;
-                    const isUsingJoystick = (this.joyStick && this.joyStick.pointer === pointer);
-                    
-                    // 드래그 중이거나 조이스틱 사용 중이 아닐 때만 카메라 이동
-                    if (pointer.isDown && !this.isDraggingUnit && !isUsingJoystick) {
-                        this.scene.cameras.main.stopFollow(); // [Fix] 수동 이동 시 팔로우 중지 (시점 고정)
-                        
+
+                    // B) 유닛 조작 중 (드래그로 이동 방향 결정)
+                    if (this.isControllingUnit && pointer.id === this.controlPointerId) {
+                        this.updateUnitMovement(pointer);
+                    }
+                    // C) 카메라 패닝 (유닛 조작 중이 아닐 때만)
+                    else if (pointer.isDown && !this.isDraggingUnit && !this.isControllingUnit) {
+                        this.scene.cameras.main.stopFollow(); // 시점 고정 (유닛 추적 해제)
                         const cam = this.scene.cameras.main;
-                        const dx = (pointer.position.x - pointer.prevPosition.x) / cam.zoom;
-                        const dy = (pointer.position.y - pointer.prevPosition.y) / cam.zoom;
-                        cam.scrollX -= dx;
-                        cam.scrollY -= dy;
+                        cam.scrollX -= (pointer.position.x - pointer.prevPosition.x) / cam.zoom;
+                        cam.scrollY -= (pointer.position.y - pointer.prevPosition.y) / cam.zoom;
                     }
                 }
             }
         });
 
-        // [Common] 유닛 드래그 배치
+        // =========================================================
+        // [New] 3. 터치 종료 (이동 멈춤)
+        // =========================================================
+        this.scene.input.on('pointerup', (pointer) => {
+            if (this.isControllingUnit && pointer.id === this.controlPointerId) {
+                this.stopUnitMovement();
+            }
+        });
+
+        // 유닛 배치 드래그 (Setup Phase)
+        this.scene.input.on('dragstart', () => { this.isDraggingUnit = true; });
+        this.scene.input.on('dragend', () => { this.isDraggingUnit = false; });
+        
         this.scene.input.on('drag', (pointer, gameObject, dragX, dragY) => {
             if (this.scene.isSetupPhase) {
                 let targetX = dragX;
                 let targetY = dragY;
-
                 if (this.scene.placementZone) {
                     const zone = this.scene.placementZone;
                     const padding = gameObject.width / 2 || 20; 
-
                     targetX = Phaser.Math.Clamp(dragX, zone.x + padding, zone.right - padding);
                     targetY = Phaser.Math.Clamp(dragY, zone.y + padding, zone.bottom - padding);
                 }
-
                 gameObject.x = targetX;
                 gameObject.y = targetY;
-                
                 if (gameObject.body) {
                     gameObject.body.x = targetX - gameObject.body.width / 2;
                     gameObject.body.y = targetY - gameObject.body.height / 2;
                 }
             }
         });
+
+        // PC 휠 줌
+        this.scene.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
+            if (!this.scene.isMobile) {
+                const currentZoom = this.scene.cameras.main.zoom;
+                let newZoom = currentZoom - (deltaY * 0.001);
+                newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
+                this.scene.cameras.main.setZoom(newZoom);
+            }
+        });
+    }
+
+    // [New] 드래그 거리에 따른 가상 커서 업데이트 (Unit.js가 읽을 수 있도록)
+    updateUnitMovement(pointer) {
+        const dx = pointer.x - this.dragOrigin.x;
+        const dy = pointer.y - this.dragOrigin.y;
+        const threshold = 15; // 민감도
+
+        // 초기화
+        this.virtualCursors.left.isDown = false;
+        this.virtualCursors.right.isDown = false;
+        this.virtualCursors.up.isDown = false;
+        this.virtualCursors.down.isDown = false;
+
+        // 방향 판정
+        if (dx < -threshold) this.virtualCursors.left.isDown = true;
+        else if (dx > threshold) this.virtualCursors.right.isDown = true;
+        
+        if (dy < -threshold) this.virtualCursors.up.isDown = true;
+        else if (dy > threshold) this.virtualCursors.down.isDown = true;
+    }
+
+    // [New] 조작 종료 처리
+    stopUnitMovement() {
+        this.isControllingUnit = false;
+        this.controlPointerId = -1;
+        this.virtualCursors.left.isDown = false;
+        this.virtualCursors.right.isDown = false;
+        this.virtualCursors.up.isDown = false;
+        this.virtualCursors.down.isDown = false;
     }
 
     checkMobileAndSetup() {
@@ -138,61 +200,23 @@ export default class InputManager {
 
         if (isMobile) {
             console.log("📱 Mobile Device Detected.");
-            // 초기 줌 설정
             this.scene.cameras.main.setZoom(0.8);
             this.scene.scale.on('resize', this.handleResize, this);
-            this.setupJoystick();
+            // setupJoystick 제거됨
         } else {
             console.log("💻 PC Device Detected.");
         }
     }
 
-    setupJoystick() {
-        if (!this.scene.plugins.get('rexVirtualJoystick')) return;
-
-        if (this.joyStick) {
-            this.joyStick.destroy();
-            this.joyStick = null;
-        }
-
-        this.joyStick = this.scene.plugins.get('rexVirtualJoystick').add(this.scene, {
-            x: this.scene.cameras.main.width - 80,
-            y: this.scene.cameras.main.height - 80,
-            radius: 80,
-            base: this.scene.add.circle(0, 0, 80, 0x888888, 0.5).setDepth(100),
-            thumb: this.scene.add.circle(0, 0, 40, 0xcccccc, 0.8).setDepth(101),
-            dir: '8dir',
-            forceMin: 16,
-            enable: true
-        });
-        
-        this.joyStick.base.setScrollFactor(0);
-        this.joyStick.thumb.setScrollFactor(0);
-        
-        this.scene.joystickCursors = this.joyStick.createCursorKeys();
-    }
-
     handleResize(gameSize) {
-        const width = gameSize.width;
-        const height = gameSize.height;
-
-        // [Fix] 리사이즈 시 줌 초기화 로직 제거
-
-        if (this.joyStick) {
-            this.joyStick.setPosition(width - 80, height - 80);
-        }
+        // 모바일 줌 초기화 로직 제거 (사용자 줌 유지)
     }
     
     destroy() {
-        if (this.joyStick) {
-            this.joyStick.destroy();
-            this.joyStick = null;
-        }
-
         if (this.scene) {
             this.scene.cursors = null;
             this.scene.wasd = null;
-            this.scene.joystickCursors = null;
+            this.scene.joystickCursors = null; // 참조 해제
             this.scene.scale.off('resize', this.handleResize, this);
             
             this.scene.input.off('wheel'); 
@@ -201,6 +225,7 @@ export default class InputManager {
             this.scene.input.off('dragstart');
             this.scene.input.off('dragend');
             this.scene.input.off('pointerdown'); 
+            this.scene.input.off('pointerup');
         }
 
         this.spaceKey = null;
