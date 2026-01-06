@@ -10,19 +10,43 @@ export default class Shooter extends Unit {
         this.isFlanking = false;
     }
 
-    updateAI(delta) {
-        // 1. [생존 최우선] 적과의 거리 체크 (Kiting)
-        const nearestThreat = this.ai.findNearestEnemy(); 
-        if (nearestThreat) {
-            const distSq = Phaser.Math.Distance.Squared(this.x, this.y, nearestThreat.x, nearestThreat.y);
-            const kiteDist = this.aiConfig.shooter?.kiteDistance || 200;
-            const kiteDistSq = kiteDist * kiteDist;
+    // 대열 유지 모드에서도 사거리 내 적 공격 허용
+    updateNpcLogic(delta) {
+        if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
+            const nearest = this.ai.findNearestEnemy();
+            if (nearest && nearest.active && !nearest.isDying) {
+                const dist = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
+                
+                // 적이 공격 사거리 안에 들어왔다면? -> 전투 로직(updateAI) 실행
+                if (dist <= this.attackRange) {
+                    this.updateAI(delta);
+                    return;
+                }
+            }
+        }
+        
+        // 적이 없거나 멀면 -> 리더 따라가기 (기존 로직)
+        super.updateNpcLogic(delta);
+    }
 
-            // 너무 가까우면 공격보다 도망 우선
-            if (distSq < kiteDistSq * 0.6) { 
-                this.fleeFrom(nearestThreat);
-                this.lookAt(nearestThreat);
-                return;
+    updateAI(delta) {
+        const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
+
+        // 1. [생존 최우선] 적과의 거리 체크 (Kiting)
+        // [Fix] 대열유지 모드일 때는 카이팅(도망) 금지 -> 대열 고수
+        if (!isFormationMode) {
+            const nearestThreat = this.ai.findNearestEnemy(); 
+            if (nearestThreat) {
+                const distSq = Phaser.Math.Distance.Squared(this.x, this.y, nearestThreat.x, nearestThreat.y);
+                const kiteDist = this.aiConfig.shooter?.kiteDistance || 200;
+                const kiteDistSq = kiteDist * kiteDist;
+
+                // 너무 가까우면 공격보다 도망 우선
+                if (distSq < kiteDistSq * 0.6) { 
+                    this.fleeFrom(nearestThreat);
+                    this.lookAt(nearestThreat);
+                    return;
+                }
             }
         }
 
@@ -43,7 +67,8 @@ export default class Shooter extends Unit {
         if (this.ai.currentTarget && this.ai.currentTarget.active) {
             this.lookAt(this.ai.currentTarget);
         } else {
-            super.updateFlipX();
+            if (this.body.velocity.x < -5) this.setFlipX(false);
+            else if (this.body.velocity.x > 5) this.setFlipX(true);
         }
     }
 
@@ -55,17 +80,40 @@ export default class Shooter extends Unit {
             return;
         }
 
-        // UnitAI에 추가된 findStrategicTarget 사용
+        // 전략적 타겟팅
         this.ai.currentTarget = this.ai.findStrategicTarget({
             distance: 1.0,
             lowHp: 3.0, 
             rolePriority: { 'Healer': 500, 'Shooter': 200 }
         });
+
+        // 대열 유지 모드일 때, 타겟이 사거리 밖이면 '가장 가까운 사거리 내 적'으로 변경
+        if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
+            const target = this.ai.currentTarget;
+            if (target) {
+                const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
+                if (dist > this.attackRange) {
+                    const nearest = this.ai.findNearestEnemy();
+                    if (nearest) {
+                        const d2 = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
+                        if (d2 <= this.attackRange) {
+                            this.ai.currentTarget = nearest;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     executeMovement() {
         const target = this.ai.currentTarget;
         if (!target || !target.active) {
+            this.setVelocity(0, 0);
+            return;
+        }
+
+        // [Fix] 대열 유지 모드라면? -> 적 추격도 안 하고, 뒷걸음질도 안 함. 제자리 사수.
+        if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
             this.setVelocity(0, 0);
             return;
         }
@@ -118,9 +166,8 @@ export default class Shooter extends Unit {
     }
 
     lookAt(target) {
-        // [Fix] 시선 처리 데드존 추가 (떨림 방지)
         const diffX = target.x - this.x;
-        if (Math.abs(diffX) < 10) return; // 기존 5 -> 10으로 증가
+        if (Math.abs(diffX) < 10) return;
 
         const isBlue = this.team === 'blue';
         if (target.x < this.x) this.setFlipX(isBlue ? false : true);

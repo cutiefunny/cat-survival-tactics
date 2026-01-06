@@ -8,45 +8,68 @@ export default class Healer extends Unit {
         
         this.aggroStackLimit = stats.aggroStackLimit || 10;
         this.healStack = 0;
-        
+        this.healRange = 180; // 치유 사거리 상수화
+
         console.log(`💚 [Healer] Spawned! Heal CD: ${this.skillMaxCooldown}ms, Aggro Limit: ${this.aggroStackLimit}`);
+    }
+
+    // [New] 대열 유지 모드: 사거리 내 환자가 있을 때만 제자리 힐
+    updateNpcLogic(delta) {
+        if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
+            // 사거리 내에 치료 가능한 아군이 있는지 확인
+            const targetInRange = this.findLowestHpAllyInRange(this.healRange);
+            
+            if (targetInRange) {
+                this.updateAI(delta);
+                return;
+            }
+        }
+        
+        // 환자가 없거나 멀면 -> 리더 따라가기 (대열 복귀)
+        super.updateNpcLogic(delta);
     }
 
     updateAI(delta) {
         this.ai.thinkTimer -= delta;
+        const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
-        // [New] 1. 타겟 선정 (가장 체력이 낮은 아군 우선)
+        // 1. [타겟 선정]
         let bestTarget = null;
 
-        // 1-1. 자가 생존 우선 (HP 30% 이하)
-        if (this.hp / this.maxHp <= 0.3) {
-            bestTarget = this;
+        if (isFormationMode) {
+            // [Fix] 대열모드: 사거리 내의 아군 중에서만 타겟 선정
+            if (this.hp / this.maxHp <= 0.3) {
+                bestTarget = this; // 자가 치유 우선
+            } else {
+                bestTarget = this.findLowestHpAllyInRange(this.healRange);
+            }
         } else {
-            // 1-2. 가장 체력이 낮은 아군 탐색
-            bestTarget = this.ai.findLowestHpAlly();
+            // 일반모드: 전체 아군 중 가장 위급한 대상 (기존 로직)
+            if (this.hp / this.maxHp <= 0.3) {
+                bestTarget = this; 
+            } else {
+                bestTarget = this.ai.findLowestHpAlly();
+            }
         }
 
-        // 1-3. 타겟 교체 판정
+        // 타겟 교체 로직 (빈번한 교체 방지)
         if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying || this.ai.currentTarget.hp >= this.ai.currentTarget.maxHp) {
-            // 현재 타겟이 없거나, 죽었거나, 다 나았으면 -> 즉시 교체
             this.ai.currentTarget = bestTarget;
         } else if (bestTarget && bestTarget !== this.ai.currentTarget) {
-            // 현재 타겟이 있는데 더 급한 환자가 생긴 경우
-            
-            // 자가 치유가 필요해졌으면 즉시 전환
             if (bestTarget === this) {
                 this.ai.currentTarget = bestTarget;
             } 
-            // 다른 아군이 현재 타겟보다 HP가 10 이상 더 낮으면 전환 (과도한 스위칭 방지용 최소 버퍼)
             else if (bestTarget.hp < this.ai.currentTarget.hp - 10) {
                 this.ai.currentTarget = bestTarget;
             }
         }
-
-        // [Safety Check] 만약 타겟이 여전히 null이면 리더를 따라다님 (유휴 상태)
-        if (!this.ai.currentTarget && this.scene.playerUnit && this.scene.playerUnit.active) {
-             // 힐 할 대상이 없으면 공격 로직이나 리더 따라가기 수행
-             // 여기서는 리더 뒤 포지셔닝으로 연결
+        
+        // 대열모드인데 타겟이 사거리 밖으로 나갔다면 타겟 해제
+        if (isFormationMode && this.ai.currentTarget && this.ai.currentTarget !== this) {
+            const dist = Phaser.Math.Distance.Between(this.x, this.y, this.ai.currentTarget.x, this.ai.currentTarget.y);
+            if (dist > this.healRange) {
+                this.ai.currentTarget = null;
+            }
         }
 
         // 2. [이동 및 행동]
@@ -54,27 +77,59 @@ export default class Healer extends Unit {
             const target = this.ai.currentTarget;
             const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
             
-            const healRange = 180; 
-            const moveBuffer = 30; // 이동 떨림 방지 버퍼
+            // [Fix] 대열 유지 모드면 이동 금지 (제자리 힐)
+            if (isFormationMode) {
+                this.setVelocity(0, 0);
+                // 사거리 체크 후 힐
+                if (dist <= this.healRange) {
+                    this.updateFlipX(); 
+                    this.tryUseSkill();
+                }
+                return;
+            }
 
-            // 멈춰있을 때는 더 멀어져야 움직임 (Deadzone)
+            // --- 이하 일반 모드 이동 로직 ---
+            const moveBuffer = 30; 
             const isStopped = this.body.speed < 10;
-            const threshold = isStopped ? (healRange + moveBuffer) : healRange;
+            const threshold = isStopped ? (this.healRange + moveBuffer) : this.healRange;
             
             if (dist <= threshold) {
-                // 사거리 안
                 this.setVelocity(0, 0);
                 this.updateFlipX(); 
                 this.tryUseSkill();
             } else {
-                // 사거리 밖 -> 접근
                 this.scene.physics.moveToObject(this, target, this.moveSpeed);
                 this.updateFlipX();
             }
         } else {
-            // 힐 할 대상이 없으면 안전한 위치로
-            this.maintainSafePosition();
+            // 타겟이 없으면
+            if (isFormationMode) {
+                this.setVelocity(0, 0); // 대열모드면 대기 (updateNpcLogic에서 처리되지만 안전장치)
+            } else {
+                this.maintainSafePosition(); // 일반모드면 포지셔닝
+            }
         }
+    }
+
+    // [New] 사거리 내에서 가장 HP가 낮은 아군 찾기
+    findLowestHpAllyInRange(range) {
+        const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
+        let lowestHpVal = Infinity; 
+        let target = null;
+        
+        for (let ally of allies) {
+            // 살아있고, 치료가 필요하며, 사거리 내에 있는 아군
+            if (ally.active && !ally.isDying && ally.hp < ally.maxHp) {
+                const dist = Phaser.Math.Distance.Between(this.x, this.y, ally.x, ally.y);
+                if (dist <= range) {
+                    if (ally.hp < lowestHpVal) { 
+                        lowestHpVal = ally.hp; 
+                        target = ally; 
+                    }
+                }
+            }
+        }
+        return target;
     }
 
     maintainSafePosition() {
@@ -85,7 +140,6 @@ export default class Healer extends Unit {
 
         const leader = this.scene.playerUnit;
         
-        // 적들의 무게중심 계산
         let enemyCX = 0, enemyCY = 0, count = 0;
         this.targetGroup.getChildren().forEach(e => {
             if(e.active && !e.isDying) { enemyCX += e.x; enemyCY += e.y; count++; }
@@ -95,7 +149,6 @@ export default class Healer extends Unit {
             enemyCX /= count;
             enemyCY /= count;
 
-            // 리더 기준, 적 반대 방향
             const angle = Phaser.Math.Angle.Between(enemyCX, enemyCY, leader.x, leader.y);
             const safeDist = 120;
             const targetX = leader.x + Math.cos(angle) * safeDist;
@@ -103,7 +156,6 @@ export default class Healer extends Unit {
             
             const distToTarget = Phaser.Math.Distance.Between(this.x, this.y, targetX, targetY);
             
-            // 도착 지점 떨림 방지
             if (distToTarget > 15) {
                 this.scene.physics.moveTo(this, targetX, targetY, this.moveSpeed * 0.9);
                 this.updateFlipX();
@@ -129,7 +181,6 @@ export default class Healer extends Unit {
     updateFlipX() {
         if (this.isUsingSkill) return;
 
-        // 속도 데드존 적용
         if (this.body.velocity.x < -20) {
             this.setFlipX(false);
         } else if (this.body.velocity.x > 20) {
