@@ -150,51 +150,90 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    createGameOverUI(message, color, btnText, callback) {
+    // [Modified] 스킬 항목 제거 및 레이아웃 조정
+    createGameOverUI(data, callback) {
         const { width, height } = this.scale;
-        const bg = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.7).setDepth(2999);
-        bg.setInteractive();
+        const isWin = data.isWin;
+        const title = data.title;
+        const color = data.color;
+        const btnText = data.btnText;
+        const stats = data.stats || {}; 
 
-        const isMobile = width < 600;
-        const titleFontSize = isMobile ? Math.floor(width * 0.1) : 64; 
-        const subFontSize = isMobile ? Math.floor(width * 0.05) : 32;
+        const overlay = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.85).setDepth(2999).setInteractive();
 
-        const text = this.add.text(width/2, height * 0.35, message, {
-            fontSize: `${titleFontSize}px`, fontStyle: 'bold', fill: color, stroke: '#ffffff', strokeThickness: isMobile ? 3 : 4, wordWrap: { width: width * 0.9 }
-        }).setOrigin(0.5).setDepth(3000);
+        const panelWidth = Math.min(400, width * 0.9);
+        const panelHeight = Math.min(500, height * 0.8);
+        const panel = this.add.container(width/2, height/2).setDepth(3000);
 
-        const actionBtn = this.add.text(width/2, height * 0.55, btnText, {
-            fontSize: `${subFontSize}px`, fill: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
+        const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x222222).setStrokeStyle(4, 0xffffff);
+        panel.add(bg);
 
-        actionBtn.on('pointerdown', () => {
-            console.log("🖱️ [UIScene] Action Button Clicked:", btnText);
+        const titleText = this.add.text(0, -panelHeight * 0.4, title, {
+            fontSize: '48px', fontStyle: 'bold', fill: color, stroke: '#ffffff', strokeThickness: 4
+        }).setOrigin(0.5);
+        panel.add(titleText);
+
+        if (isWin && stats.score !== undefined) {
+            const startY = -panelHeight * 0.2;
+            const gapY = 50; // 간격을 약간 넓힘
+            const labelStyle = { fontSize: '20px', fill: '#aaaaaa' };
+            const valStyle = { fontSize: '20px', fill: '#ffffff', fontStyle: 'bold' };
+
+            // 1. 클리어 시간
+            const timeStr = `${Math.floor(stats.time / 60)}m ${stats.time % 60}s`;
+            const l1 = this.add.text(-panelWidth*0.4, startY, "클리어 시간", labelStyle).setOrigin(0, 0.5);
+            const v1 = this.add.text(panelWidth*0.4, startY, timeStr, valStyle).setOrigin(1, 0.5);
+            
+            // 2. 생존 유닛
+            const l2 = this.add.text(-panelWidth*0.4, startY + gapY, "생존 유닛", labelStyle).setOrigin(0, 0.5);
+            const v2 = this.add.text(panelWidth*0.4, startY + gapY, `${stats.survivors}`, valStyle).setOrigin(1, 0.5);
+
+            panel.add([l1, v1, l2, v2]);
+
+            // 구분선
+            const line = this.add.rectangle(0, startY + gapY*1.8, panelWidth * 0.8, 2, 0x555555);
+            panel.add(line);
+
+            // 3. 최종 점수 & 랭크
+            const scoreLabel = this.add.text(0, startY + gapY*3, "TOTAL SCORE", { fontSize: '16px', fill: '#888888' }).setOrigin(0.5);
+            const scoreVal = this.add.text(0, startY + gapY*4, `${stats.score}`, { fontSize: '36px', fill: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
+            
+            const rankText = this.add.text(0, startY + gapY*6, `RANK ${stats.rank}`, { 
+                fontSize: '48px', fill: stats.rank === 'S' ? '#ff00ff' : (stats.rank === 'A' ? '#00ff00' : '#ffffff'), 
+                fontStyle: 'bold', stroke: '#000000', strokeThickness: 6 
+            }).setOrigin(0.5);
+            
             this.tweens.add({
-                targets: actionBtn, scale: 0.9, duration: 50, yoyo: true,
+                targets: rankText, scale: { from: 2, to: 1 }, alpha: { from: 0, to: 1 }, duration: 500, ease: 'Bounce'
+            });
+
+            panel.add([scoreLabel, scoreVal, rankText]);
+        }
+
+        const btnY = panelHeight * 0.4;
+        const btnBg = this.add.rectangle(0, btnY, 200, 60, 0x4444ff).setStrokeStyle(2, 0xffffff);
+        const btnTxt = this.add.text(0, btnY, btnText, { fontSize: '24px', fontStyle: 'bold' }).setOrigin(0.5);
+        
+        const btnContainer = this.add.container(0, 0, [btnBg, btnTxt]);
+        btnBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+            this.tweens.add({
+                targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
                 onComplete: () => {
-                    if (callback) {
-                        console.log("   -> Executing callback...");
-                        callback();
-                    }
-                    this.scene.restart(); 
+                    if (callback) callback();
+                    this.scene.restart();
                 }
             });
         });
+        
+        panel.add(btnContainer);
 
-        const feedbackBtn = this.add.text(width/2, height * 0.7, '💬 피드백 남기기', {
-            fontSize: `${subFontSize * 0.9}px`, fill: '#00ffff', fontStyle: 'bold', backgroundColor: '#00000088', padding: { x: 10, y: 5 }
-        }).setOrigin(0.5).setDepth(3000).setInteractive({ useHandCursor: true });
-
-        feedbackBtn.on('pointerdown', () => {
-            this.tweens.add({
-                targets: feedbackBtn, scale: 0.9, duration: 50, yoyo: true,
-                onComplete: () => { window.open('https://musclecat-studio.com/thread', '_blank'); }
-            });
+        panel.setScale(0);
+        this.tweens.add({
+            targets: panel, scale: 1, duration: 400, ease: 'Back.out'
         });
     }
 
     createDebugStats() {
-        // [Style] 폰트와 배경색 설정
         this.debugStats = this.add.text(10, 10, '', {
             font: '14px monospace', fill: '#00ff00', backgroundColor: '#000000aa', padding: { x: 4, y: 4 }
         }).setDepth(9999).setVisible(false);
@@ -204,7 +243,6 @@ export default class UIScene extends Phaser.Scene {
         if (this.debugStats) this.debugStats.setVisible(true);
     }
 
-    // [Fix] 인자에 mem(메모리) 추가 및 표시 로직 개선
     updateDebugStats(fps, mem) {
         if (this.debugStats && this.debugStats.visible) {
             let text = `FPS: ${Math.round(fps)}`;

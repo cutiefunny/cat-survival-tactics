@@ -83,14 +83,16 @@ export default class BattleScene extends Phaser.Scene {
 
     init(data) {
         let targetIndex = 0;
+        this.hasLevelIndexPassed = false; // [New] 파라미터 전달 여부 플래그
+
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
+            this.hasLevelIndexPassed = true; // [New] 파라미터가 있으면 true
         } else if (window.TACTICS_START_LEVEL !== undefined) {
             targetIndex = window.TACTICS_START_LEVEL;
         }
 
         this.currentLevelIndex = targetIndex;
-        // [Modified] -1일 경우 'No Map'으로 로깅
         const levelName = this.currentLevelIndex === -1 ? "No Map" : (LEVEL_KEYS[this.currentLevelIndex] || 'Unknown');
         console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (${levelName})`);
     }
@@ -150,9 +152,12 @@ export default class BattleScene extends Phaser.Scene {
             if (docSnap.exists()) {
                 const dbData = docSnap.data();
                 config = { ...DEFAULT_CONFIG, ...dbData };
-                if (dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
+                
+                // [Fix] 파라미터로 레벨이 전달되지 않았을 때만 DB 설정 적용
+                if (!this.hasLevelIndexPassed && dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
                     this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
                 }
+
                 if (dbData.aiSettings) {
                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
                      if (dbData.aiSettings.common) {
@@ -171,10 +176,9 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.destroyLoadingText();
         
-        // [Modified] -1 (No Map) 체크 로직 추가
         if (this.currentLevelIndex === -1) {
             console.log("🚫 [BattleScene] No Map Mode Selected.");
-            this.startGame(config, null); // 맵 키 대신 null 전달
+            this.startGame(config, null); 
             return;
         }
 
@@ -189,16 +193,12 @@ export default class BattleScene extends Phaser.Scene {
 
     startGame(config, mapKey) {
         if (!mapKey) {
-            // =========================================================
-            // [New] No Map Mode Setup
-            // =========================================================
             this.mapWidth = 2000;
             this.mapHeight = 2000;
             const tileSize = 32;
 
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
 
-            // 1. 배경용 그리드 그리기 (시각적 가이드)
             const gridGraphics = this.add.graphics();
             gridGraphics.lineStyle(1, 0x333333, 0.5);
             gridGraphics.fillStyle(0x111111, 1);
@@ -214,33 +214,24 @@ export default class BattleScene extends Phaser.Scene {
             }
             gridGraphics.strokePath();
 
-            // 2. 가상의 맵 데이터로 패스파인딩 초기화 (장애물 없음)
-            // PathfindingManager는 tilemap.width(타일 개수)를 참조하므로 계산해서 전달
             const virtualMap = {
                 width: Math.ceil(this.mapWidth / tileSize),
                 height: Math.ceil(this.mapHeight / tileSize),
                 tileWidth: tileSize
             };
             
-            // 장애물 그룹 초기화 (빈 상태)
             this.blockObjectGroup = this.physics.add.staticGroup();
             
-            // 패스파인딩 설정 (장애물 레이어 없음)
             this.pathfindingManager.setup(virtualMap, []);
 
             this.updateCameraBounds(this.scale.width, this.scale.height);
             this.initializeGameVariables(config);
             
-            // 유닛 생성 (맵 없음)
             this.spawnUnits(config, null); 
             
-            // 물리 충돌 설정 (빈 레이어)
             this.setupPhysicsColliders(null, null);
 
         } else {
-            // =========================================================
-            // Existing Map Mode
-            // =========================================================
             const map = this.make.tilemap({ key: mapKey });
             
             const tilesets = [];
@@ -309,7 +300,6 @@ export default class BattleScene extends Phaser.Scene {
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
         }
         
-        // 공통 카메라 팔로우
         if(this.playerUnit && this.playerUnit.active) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
@@ -327,6 +317,9 @@ export default class BattleScene extends Phaser.Scene {
         this.physics.world.timeScale = 1;
         this.time.timeScale = 1;
 
+        this.playerSkillCount = 0;
+        this.battleStartTime = 0;
+
         if (config.showDebugStats) this.uiManager.createDebugStats();
         this.uiManager.createStartButton(() => this.handleStartBattle());
         this.uiManager.createGameMessages();
@@ -339,6 +332,12 @@ export default class BattleScene extends Phaser.Scene {
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
+    }
+
+    incrementSkillCount() {
+        if (this.battleStarted && !this.isGameOver) {
+            this.playerSkillCount++;
+        }
     }
 
     createBlocksDebug() {
@@ -413,7 +412,6 @@ export default class BattleScene extends Phaser.Scene {
             return unit;
         };
 
-        // [Modified] map이 null일 경우(No Map) 안전하게 처리
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -445,7 +443,6 @@ export default class BattleScene extends Phaser.Scene {
             this.blueTeam.add(unit);
         }
 
-        // [Modified] map이 null일 경우(No Map) 안전하게 처리
         let dogsSpawned = false;
         if (map) {
             const dogLayer = map.getObjectLayer('Dogs');
@@ -461,7 +458,6 @@ export default class BattleScene extends Phaser.Scene {
         
         if (!dogsSpawned) {
             console.log("⚠️ No 'Dogs' layer or Map found. Spawning configured count.");
-            // [Modified] No Map 모드 등에서 설정된 redCount 만큼 들개 생성
             for (let i = 0; i < redCount; i++) {
                 const stats = redRoles[i % redRoles.length];
                 const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
@@ -475,7 +471,6 @@ export default class BattleScene extends Phaser.Scene {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
         
-        // [Modified] Layer가 null이면 충돌 설정 생략
         if (wallLayer) {
             this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, wallLayer, onWallCollision);
@@ -569,6 +564,7 @@ export default class BattleScene extends Phaser.Scene {
     startBattle() {
         if (this.battleStarted) return;
         this.battleStarted = true;
+        this.battleStartTime = Date.now();
         this.uiManager.showStartAnimation();
     }
 
@@ -638,7 +634,6 @@ export default class BattleScene extends Phaser.Scene {
         let callback = () => this.restartLevel();
 
         if (isWin) {
-            // [Modified] No Map 모드(-1)일 경우 다음 레벨이 없으므로 그냥 0으로 리셋하거나 재시작
             if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
                 btnText = "Next Level ▶️";
                 callback = () => this.nextLevel();
@@ -649,7 +644,41 @@ export default class BattleScene extends Phaser.Scene {
             }
         }
 
-        this.uiManager.createGameOverUI(message, color, btnText, callback);
+        // [Modified] 스킬 점수 제외 및 점수 계산
+        const endTime = Date.now();
+        const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
+        const survivors = this.blueTeam.countActive();
+        
+        // 1. 생존 점수: 유닛당 500점
+        // 2. 시간 점수: (300초 - 소요시간) * 10점 (최소 0점)
+        const survivorScore = survivors * 500;
+        const timeScore = Math.max(0, (300 - durationSec) * 10);
+        
+        const totalScore = isWin ? (survivorScore + timeScore) : 0;
+        
+        // 랭크 산정
+        let rank = 'F';
+        if (isWin) {
+            if (totalScore >= 3500) rank = 'S';
+            else if (totalScore >= 2500) rank = 'A';
+            else if (totalScore >= 1500) rank = 'B';
+            else rank = 'C';
+        }
+
+        const resultData = {
+            isWin: isWin,
+            title: message,
+            color: color,
+            btnText: btnText,
+            stats: {
+                time: durationSec,
+                survivors: survivors,
+                score: totalScore,
+                rank: rank
+            }
+        };
+
+        this.uiManager.createGameOverUI(resultData, callback);
     }
 
     restartLevel() {
