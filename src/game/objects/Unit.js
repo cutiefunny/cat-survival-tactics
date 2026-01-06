@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { ROLE_TEXTURES } from '../data/UnitData'; 
-import UnitAI from './UnitAI'; // [Modified] 같은 폴더에서 Import
+import UnitAI from './UnitAI'; 
 
 // [Frame Constants]
 const FRAME_IDLE = 0;
@@ -82,6 +82,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.hpBar = scene.add.graphics().setDepth(100);
         this.initVisuals();
 
+        // [Interaction] 플레이어 선택 (PC/Mobile 공통)
         this.on('pointerdown', () => {
             if (this.team === 'blue' && this.scene.battleStarted) {
                 this.scene.selectPlayerUnit(this);
@@ -101,7 +102,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.ai.currentTarget = value;
         }
     }
-    // =================================================================
 
     die() {
         if (this.isDying) return; 
@@ -116,7 +116,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.body.enable = false; 
         }
 
-        // [Fix] 트윈 충돌 방지
         this.scene.tweens.killTweensOf(this); 
         if (this.anims.isPlaying) this.stop(); 
         this.setFrame(FRAME_HIT); 
@@ -235,6 +234,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updatePlayerLogic(delta) {
         this.updatePlayerMovement();
         const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
+        // 수동 조작 중이 아닐 때만 AI 가동 (Auto Battle)
         if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
             this.updateAI(delta);
         }
@@ -277,15 +277,32 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
+    // [Modified] 모바일 가상 조이스틱 입력 처리 및 디버깅 로그 추가
     updatePlayerMovement() {
         this.setVelocity(0);
         if (!this.scene.cursors) return;
-        const cursors = this.scene.cursors; const joyCursors = this.scene.joystickCursors;
+        
+        const cursors = this.scene.cursors; 
+        const joyCursors = this.scene.joystickCursors; // InputManager에서 연결된 가상 커서
+        
         let vx = 0, vy = 0;
+        
+        // 키보드 또는 가상 조이스틱 입력 확인
+        // [Debug] 가상 커서 신호 확인 (이동이 안될 때 주석 해제하여 확인)
+        /*
+        if (joyCursors) {
+            if (joyCursors.left.isDown) console.log("Unit: Joystick Left");
+            if (joyCursors.right.isDown) console.log("Unit: Joystick Right");
+            if (joyCursors.up.isDown) console.log("Unit: Joystick Up");
+            if (joyCursors.down.isDown) console.log("Unit: Joystick Down");
+        }
+        */
+
         if (cursors.left.isDown || this.scene.wasd?.left.isDown || (joyCursors && joyCursors.left.isDown)) vx -= 1;
         if (cursors.right.isDown || this.scene.wasd?.right.isDown || (joyCursors && joyCursors.right.isDown)) vx += 1;
         if (cursors.up.isDown || this.scene.wasd?.up.isDown || (joyCursors && joyCursors.up.isDown)) vy -= 1;
         if (cursors.down.isDown || this.scene.wasd?.down.isDown || (joyCursors && joyCursors.down.isDown)) vy += 1;
+        
         if (vx !== 0 || vy !== 0) {
             this._tempVec.set(vx, vy).normalize().scale(this.moveSpeed);
             this.setVelocity(this._tempVec.x, this._tempVec.y);
@@ -308,7 +325,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     resetVisuals() {
-        // [Bug Fix] 죽는 중이면 비주얼 초기화 금지
         if (this.isDying) return;
 
         this.scale = 1;
@@ -345,7 +361,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     performSkill() {
-        // [Bug Fix] 죽는 중이면 스킬 금지
         if (this.isDying) return; 
 
         this.setTint(0x00ffff);
@@ -507,7 +522,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     triggerAttackVisuals() {
-        // [Bug Fix] 죽는 중이면 공격 모션이 죽음 트윈을 방해하지 못하게 함
         if (this.isDying) return;
 
         this.isAttacking = true;
