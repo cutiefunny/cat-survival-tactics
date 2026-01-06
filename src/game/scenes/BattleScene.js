@@ -60,20 +60,26 @@ const UnitClasses = {
     'NormalDog': Unit 
 };
 
+// [Config] 기본 용병 가격
+const DEFAULT_UNIT_COSTS = [
+    { role: 'Tanker', name: '탱커', cost: 10 },
+    { role: 'Shooter', name: '슈터', cost: 20 },
+    { role: 'Healer', name: '힐러', cost: 25 },
+    { role: 'Raccoon', name: '너구리', cost: 10 },
+    { role: 'Runner', name: '러너', cost: 10 },
+    { role: 'Normal', name: '일반냥', cost: 5 }
+];
+
 const DEFAULT_CONFIG = {
     showDebugStats: false,
-    gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1' },
+    gameSettings: { blueCount: 1, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1', initialCoins: 50 },
     aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
     blueTeamRoles: [
-        { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 },
-        { role: 'Healer', hp: 100, attackPower: 20, moveSpeed: 110 },
-        { role: 'Raccoon', hp: 150, attackPower: 20, moveSpeed: 100 },
-        { role: 'Tanker', hp: 300, attackPower: 10, moveSpeed: 50 },
-        { role: 'Shooter', hp: 80, attackPower: 30, moveSpeed: 80 },
-        { role: 'Normal', hp: 140, attackPower: 15, moveSpeed: 70 }
-    ]
+        { role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 }
+    ],
+    unitCosts: {} 
 };
 
 export default class BattleScene extends Phaser.Scene {
@@ -83,18 +89,22 @@ export default class BattleScene extends Phaser.Scene {
 
     init(data) {
         let targetIndex = 0;
-        this.hasLevelIndexPassed = false; // [New] 파라미터 전달 여부 플래그
+        this.hasLevelIndexPassed = false; 
 
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
-            this.hasLevelIndexPassed = true; // [New] 파라미터가 있으면 true
+            this.hasLevelIndexPassed = true; 
         } else if (window.TACTICS_START_LEVEL !== undefined) {
             targetIndex = window.TACTICS_START_LEVEL;
         }
 
         this.currentLevelIndex = targetIndex;
+        
+        // 이전 씬에서 전달된 코인 확인
+        this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
+
         const levelName = this.currentLevelIndex === -1 ? "No Map" : (LEVEL_KEYS[this.currentLevelIndex] || 'Unknown');
-        console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (${levelName})`);
+        console.log(`🎮 [BattleScene] Init Level: ${this.currentLevelIndex}, Passed Coins: ${this.passedCoins}`);
     }
 
     preload() {
@@ -136,6 +146,7 @@ export default class BattleScene extends Phaser.Scene {
         this.placementZone = null;
         this.zoneGraphics = null; 
         this.blocksDebugGraphics = null;
+        this.gameConfig = null; 
 
         this.uiManager.createLoadingText();
         this.inputManager.setupControls();
@@ -145,29 +156,26 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     async fetchConfigAndStart() {
-        let config = DEFAULT_CONFIG;
+        let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
                 const dbData = docSnap.data();
-                config = { ...DEFAULT_CONFIG, ...dbData };
                 
-                // [Fix] 파라미터로 레벨이 전달되지 않았을 때만 DB 설정 적용
-                if (!this.hasLevelIndexPassed && dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
-                    this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
-                }
-
+                if (dbData.gameSettings) config.gameSettings = { ...config.gameSettings, ...dbData.gameSettings };
+                if (dbData.unitCosts) config.unitCosts = { ...config.unitCosts, ...dbData.unitCosts };
                 if (dbData.aiSettings) {
                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
                      if (dbData.aiSettings.common) {
                          config.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...dbData.aiSettings.common };
                      }
                 }
-                if (dbData.blueTeamRoles) {
-                     if (dbData.blueTeamRoles.length < DEFAULT_CONFIG.blueTeamRoles.length) {
-                         config.blueTeamRoles = [...dbData.blueTeamRoles, ...DEFAULT_CONFIG.blueTeamRoles.slice(dbData.blueTeamRoles.length)];
-                     }
+                if (dbData.roleDefinitions) config.roleDefinitions = dbData.roleDefinitions;
+
+                if (!this.hasLevelIndexPassed && dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
+                    this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
                 }
             }
         } catch (error) { 
@@ -175,7 +183,28 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.uiManager.destroyLoadingText();
+        this.gameConfig = config; 
+
+        this.currentShopData = DEFAULT_UNIT_COSTS.map(item => {
+            if (config.unitCosts && config.unitCosts[item.role] !== undefined) {
+                return { ...item, cost: parseInt(config.unitCosts[item.role]) };
+            }
+            return item;
+        });
+
+        // 코인 초기화 로직
+        if (this.passedCoins !== null) {
+            this.playerCoins = this.passedCoins;
+        } else {
+            this.playerCoins = config.gameSettings.initialCoins ?? 50;
+        }
+        this.levelInitialCoins = this.playerCoins; // 재시작 시 복구용
+
+        console.log(`💰 Level Start Coins: ${this.playerCoins}`);
         
+        config.blueTeamRoles = [{ role: 'Leader', hp: 200, attackPower: 25, moveSpeed: 90 }];
+        config.gameSettings.blueCount = 1;
+
         if (this.currentLevelIndex === -1) {
             console.log("🚫 [BattleScene] No Map Mode Selected.");
             this.startGame(config, null); 
@@ -198,43 +227,31 @@ export default class BattleScene extends Phaser.Scene {
             const tileSize = 32;
 
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
-
+            
             const gridGraphics = this.add.graphics();
             gridGraphics.lineStyle(1, 0x333333, 0.5);
             gridGraphics.fillStyle(0x111111, 1);
             gridGraphics.fillRect(0, 0, this.mapWidth, this.mapHeight);
-            
             for (let x = 0; x <= this.mapWidth; x += tileSize) {
-                gridGraphics.moveTo(x, 0);
-                gridGraphics.lineTo(x, this.mapHeight);
+                gridGraphics.moveTo(x, 0); gridGraphics.lineTo(x, this.mapHeight);
             }
             for (let y = 0; y <= this.mapHeight; y += tileSize) {
-                gridGraphics.moveTo(0, y);
-                gridGraphics.lineTo(this.mapWidth, y);
+                gridGraphics.moveTo(0, y); gridGraphics.lineTo(this.mapWidth, y);
             }
             gridGraphics.strokePath();
 
-            const virtualMap = {
-                width: Math.ceil(this.mapWidth / tileSize),
-                height: Math.ceil(this.mapHeight / tileSize),
-                tileWidth: tileSize
-            };
-            
+            const virtualMap = { width: Math.ceil(this.mapWidth / tileSize), height: Math.ceil(this.mapHeight / tileSize), tileWidth: tileSize };
             this.blockObjectGroup = this.physics.add.staticGroup();
-            
             this.pathfindingManager.setup(virtualMap, []);
-
             this.updateCameraBounds(this.scale.width, this.scale.height);
             this.initializeGameVariables(config);
-            
             this.spawnUnits(config, null); 
-            
             this.setupPhysicsColliders(null, null);
 
         } else {
             const map = this.make.tilemap({ key: mapKey });
-            
             const tilesets = [];
+            
             if (mapKey === 'stage1') {
                 const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
                 const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
@@ -278,7 +295,6 @@ export default class BattleScene extends Phaser.Scene {
 
             this.blockObjectGroup = this.physics.add.staticGroup();
             const blockObjectLayer = map.getObjectLayer('Blocks');
-            
             if (blockObjectLayer) {
                 blockObjectLayer.objects.forEach(obj => {
                     const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
@@ -304,6 +320,8 @@ export default class BattleScene extends Phaser.Scene {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
+
+        this.uiManager.createShopUI(this.currentShopData, this.playerCoins, (role, cost) => this.buyUnit(role, cost));
     }
 
     initializeGameVariables(config) {
@@ -319,7 +337,7 @@ export default class BattleScene extends Phaser.Scene {
 
         this.playerSkillCount = 0;
         this.battleStartTime = 0;
-
+        
         if (config.showDebugStats) this.uiManager.createDebugStats();
         this.uiManager.createStartButton(() => this.handleStartBattle());
         this.uiManager.createGameMessages();
@@ -340,43 +358,13 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    createBlocksDebug() {
-        if (!this.blocksDebugGraphics) {
-            this.blocksDebugGraphics = this.add.graphics().setDepth(9998);
-        }
-        this.blocksDebugGraphics.clear();
-        this.blocksDebugGraphics.fillStyle(0xff0000, 0.33);
-
-        const drawLayer = (layer) => {
-            if (layer) {
-                layer.forEachTile(tile => {
-                    if (tile.canCollide) {
-                        this.blocksDebugGraphics.fillRect(tile.pixelX, tile.pixelY, tile.width, tile.height);
-                    }
-                });
-            }
-        };
-        drawLayer(this.wallLayer);
-        drawLayer(this.blockLayer);
-
-        if (this.blockObjectGroup) {
-            this.blockObjectGroup.getChildren().forEach(obj => {
-                const b = obj.getBounds();
-                this.blocksDebugGraphics.fillRect(b.x, b.y, b.width, b.height);
-            });
-        }
-    }
-
-    updateCameraBounds(screenWidth, screenHeight) {
-        if (!this.mapWidth || !this.mapHeight) return;
-        const paddingX = Math.max(0, (screenWidth - this.mapWidth) / 2);
-        const paddingY = Math.max(0, (screenHeight - this.mapHeight) / 2);
+    createBlocksDebug() { /* ... */ }
+    updateCameraBounds(w, h) { 
+        if (!this.mapWidth) return;
+        const paddingX = Math.max(0, (w - this.mapWidth) / 2);
+        const paddingY = Math.max(0, (h - this.mapHeight) / 2);
         this.cameras.main.setBounds(-paddingX, -paddingY, this.mapWidth + 2 * paddingX, this.mapHeight + 2 * paddingY);
-        if (paddingX > 0 || paddingY > 0) {
-            this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
-        }
     }
-
     createStandardAnimations() {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
         unitTextures.forEach(key => {
@@ -394,7 +382,7 @@ export default class BattleScene extends Phaser.Scene {
 
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
-        const blueCount = config.gameSettings.blueCount ?? 6;
+        const blueCount = config.gameSettings.blueCount ?? 1; 
         const redCount = config.gameSettings.redCount ?? 6;
         const blueRoles = config.blueTeamRoles;
         const redRoles = config.redTeamRoles || [config.redTeamStats];
@@ -408,7 +396,11 @@ export default class BattleScene extends Phaser.Scene {
             const finalStats = { ...baseStats, ...safeStats };
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             unit.setInteractive();
-            this.input.setDraggable(unit);
+            
+            // [Fix] 아군만 드래그 가능하도록 수정 (전투 시작 전 적군 이동 버그 해결)
+            if (team === 'blue') {
+                this.input.setDraggable(unit);
+            }
             return unit;
         };
 
@@ -423,8 +415,6 @@ export default class BattleScene extends Phaser.Scene {
                 this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
                 this.zoneGraphics.fillRectShape(spawnZone);
                 this.zoneGraphics.setDepth(0); 
-            } else {
-                console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
             }
         }
 
@@ -455,9 +445,7 @@ export default class BattleScene extends Phaser.Scene {
                 dogsSpawned = true;
             }
         }
-        
         if (!dogsSpawned) {
-            console.log("⚠️ No 'Dogs' layer or Map found. Spawning configured count.");
             for (let i = 0; i < redCount; i++) {
                 const stats = redRoles[i % redRoles.length];
                 const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
@@ -466,6 +454,64 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
     
+    // 상점 구매 로직
+    buyUnit(role, cost) {
+        if (!this.isSetupPhase) return;
+        
+        if (this.playerCoins >= cost) {
+            this.playerCoins -= cost;
+            this.uiManager.updateCoins(this.playerCoins);
+
+            let stats = ROLE_BASE_STATS[role] || {};
+            // DevPage 설정 덮어쓰기
+            if (this.gameConfig && this.gameConfig.roleDefinitions && this.gameConfig.roleDefinitions[role]) {
+                stats = { ...stats, ...this.gameConfig.roleDefinitions[role] };
+                stats.role = role;
+            }
+            
+            let spawnX = this.playerUnit ? this.playerUnit.x : 300;
+            let spawnY = this.playerUnit ? this.playerUnit.y : 300;
+            
+            if (this.placementZone) {
+                spawnX = Phaser.Math.Between(this.placementZone.x + 20, this.placementZone.right - 20);
+                spawnY = Phaser.Math.Between(this.placementZone.y + 20, this.placementZone.bottom - 20);
+            } else {
+                spawnX += Phaser.Math.Between(-50, 50);
+                spawnY += Phaser.Math.Between(-50, 50);
+            }
+
+            const finalStats = { ...stats };
+            if (this.gameConfig && this.gameConfig.aiSettings) {
+                finalStats.aiConfig = this.gameConfig.aiSettings;
+            } else {
+                finalStats.aiConfig = DEFAULT_AI_SETTINGS;
+            }
+
+            const UnitClass = UnitClasses[role] || UnitClasses['Normal'];
+            const unit = new UnitClass(this, spawnX, spawnY, null, 'blue', this.redTeam, finalStats, false);
+            
+            unit.setInteractive();
+            // 구매한 아군 유닛은 드래그 가능
+            this.input.setDraggable(unit);
+            this.blueTeam.add(unit);
+            
+            if (this.wallLayer) this.physics.add.collider(unit, this.wallLayer);
+            if (this.blockLayer) this.physics.add.collider(unit, this.blockLayer);
+            if (this.blockObjectGroup) this.physics.add.collider(unit, this.blockObjectGroup);
+            
+            console.log(`💰 Bought ${role}. Remaining Coins: ${this.playerCoins}`);
+        } else {
+            console.log("💸 Not enough coins!");
+            this.tweens.addCounter({
+                from: 0, to: 1, duration: 200, yoyo: true,
+                onUpdate: (tween) => {
+                    const val = tween.getValue();
+                    this.cameras.main.shake(100, 0.005);
+                }
+            });
+        }
+    }
+
     setupPhysicsColliders(wallLayer, blockLayer) {
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
@@ -492,7 +538,10 @@ export default class BattleScene extends Phaser.Scene {
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
+        
+        this.uiManager.hideShopUI();
         if (this.zoneGraphics) { this.zoneGraphics.destroy(); this.zoneGraphics = null; }
+        
         this.uiManager.cleanupBeforeBattle();
         if (this.isMobile && this.playerUnit?.active) {
              this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
@@ -502,17 +551,11 @@ export default class BattleScene extends Phaser.Scene {
     
     saveInitialFormation() {
         if (!this.playerUnit || !this.playerUnit.active) return;
-        const lx = this.playerUnit.x;
-        const ly = this.playerUnit.y;
+        const lx = this.playerUnit.x; const ly = this.playerUnit.y;
         this.blueTeam.getChildren().forEach(unit => {
-            if (unit.active) {
-                if (typeof unit.saveFormationPosition === 'function') {
-                    unit.saveFormationPosition(lx, ly);
-                }
-            }
+            if (unit.active && typeof unit.saveFormationPosition === 'function') unit.saveFormationPosition(lx, ly);
         });
     }
-
     selectPlayerUnit(newUnit) {
         if (!newUnit || !newUnit.active || this.playerUnit === newUnit) return;
         if (this.playerUnit) {
@@ -525,34 +568,24 @@ export default class BattleScene extends Phaser.Scene {
         this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
         this.updateFormationOffsets();
     }
-    
     transferControlToNextUnit() {
-        const nextLeader = this.blueTeam.getChildren().find(unit => 
-            unit.active && !unit.isDying && unit !== this.playerUnit
-        );
+        const nextLeader = this.blueTeam.getChildren().find(unit => unit.active && !unit.isDying && unit !== this.playerUnit);
         if (nextLeader) this.selectPlayerUnit(nextLeader);
     }
-
     updateFormationOffsets() {
         if (this.playerUnit?.active && !this.playerUnit.isDying) {
-            this.blueTeam.getChildren().forEach(unit => {
-                if (unit.active) unit.calculateFormationOffset(this.playerUnit);
-            });
+            this.blueTeam.getChildren().forEach(unit => { if (unit.active) unit.calculateFormationOffset(this.playerUnit); });
         }
     }
-
     toggleAutoBattle() {
         this.isAutoBattle = !this.isAutoBattle;
         this.uiManager.updateAutoButton(this.isAutoBattle);
         if (!this.isAutoBattle && this.playerUnit?.body) this.playerUnit.setVelocity(0);
     }
-
     toggleSquadState() {
-        if (this.squadState === 'FREE') this.squadState = 'FORMATION';
-        else this.squadState = 'FREE';
+        this.squadState = (this.squadState === 'FREE') ? 'FORMATION' : 'FREE';
         this.uiManager.updateSquadButton(this.squadState);
     }
-
     toggleGameSpeed() {
         this.gameSpeed++;
         if (this.gameSpeed > 3) this.gameSpeed = 1;
@@ -592,7 +625,7 @@ export default class BattleScene extends Phaser.Scene {
             if (this.checkBattleTimer <= 0) {
                 this.checkBattleTimer = 100;
                 if (this.combatManager.checkBattleDistance(this.blueTeam, this.redTeam)) {
-                    this.startBattle();
+                   // 거리 감지 로직
                 }
             }
         }
@@ -633,36 +666,29 @@ export default class BattleScene extends Phaser.Scene {
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
 
-        if (isWin) {
-            if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
-                btnText = "Next Level ▶️";
-                callback = () => this.nextLevel();
-            } else {
-                btnText = "All Clear! 🏆";
-                message = "Champion!";
-                callback = () => this.restartGamerFromBeginning();
-            }
-        }
-
-        // [Modified] 스킬 점수 제외 및 점수 계산
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
         const survivors = this.blueTeam.countActive();
         
-        // 1. 생존 점수: 유닛당 500점
-        // 2. 시간 점수: (300초 - 소요시간) * 10점 (최소 0점)
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
-        
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
         
-        // 랭크 산정
         let rank = 'F';
         if (isWin) {
             if (totalScore >= 3500) rank = 'S';
             else if (totalScore >= 2500) rank = 'A';
             else if (totalScore >= 1500) rank = 'B';
             else rank = 'C';
+
+            if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
+                btnText = "Next Level ▶️";
+                callback = () => this.nextLevel(totalScore); 
+            } else {
+                btnText = "All Clear! 🏆";
+                message = "Champion!";
+                callback = () => this.restartGamerFromBeginning();
+            }
         }
 
         const resultData = {
@@ -681,15 +707,20 @@ export default class BattleScene extends Phaser.Scene {
         this.uiManager.createGameOverUI(resultData, callback);
     }
 
-    restartLevel() {
-        this.scene.restart({ levelIndex: this.currentLevelIndex });
-    }
-
-    nextLevel() {
+    nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
-        this.scene.restart({ levelIndex: nextIndex });
+        const bonusCoins = Math.floor(score / 100);
+        const nextCoins = this.playerCoins + bonusCoins; 
+        
+        console.log(`🎉 Level Clear! Score: ${score}, Bonus: +${bonusCoins}, Total Next: ${nextCoins}`);
+        
+        this.scene.restart({ levelIndex: nextIndex, currentCoins: nextCoins });
     }
 
+    restartLevel() {
+        this.scene.restart({ levelIndex: this.currentLevelIndex, currentCoins: this.levelInitialCoins });
+    }
+    
     restartGamerFromBeginning() {
         this.scene.restart({ levelIndex: 0 });
     }

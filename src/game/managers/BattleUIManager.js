@@ -39,6 +39,28 @@ export default class BattleUIManager {
             }
         });
     }
+    
+    // [New] 상점 UI 생성 요청
+    createShopUI(unitData, currentCoins, onBuyCallback) {
+        this.scene.time.delayedCall(150, () => {
+            const ui = this.scene.scene.get('UIScene');
+            if (ui && ui.createShopUI) {
+                ui.createShopUI(unitData, currentCoins, onBuyCallback);
+            }
+        });
+    }
+
+    // [New] 코인 업데이트
+    updateCoins(amount) {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.updateCoins) ui.updateCoins(amount);
+    }
+
+    // [New] 상점 숨기기
+    hideShopUI() {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.hideShopUI) ui.hideShopUI();
+    }
 
     updateAutoButton(isAuto) { this.emitUIEvent('auto', isAuto); }
     updateSquadButton(state) { this.emitUIEvent('squad', state); }
@@ -60,7 +82,6 @@ export default class BattleUIManager {
         if (!this.isDebugEnabled) return;
         const ui = this.scene.scene.get('UIScene');
         
-        // [Improvement] FPS와 함께 메모리 정보도 수집하여 전달 시도
         if (ui && ui.updateDebugStats) {
             let memInfo = null;
             if (window.performance && window.performance.memory) {

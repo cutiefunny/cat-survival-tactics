@@ -8,16 +8,30 @@ export default class Healer extends Unit {
         
         this.aggroStackLimit = stats.aggroStackLimit || 10;
         this.healStack = 0;
-        this.healRange = 180; // 치유 사거리 상수화
+        
+        // [Modified] 하드코딩 제거 -> DevPage 설정값(Unit.js에서 this.skillRange로 설정됨) 사용
+        // 만약 설정값이 없으면 기본값 200 사용
+        if (!this.skillRange) this.skillRange = 200;
 
-        console.log(`💚 [Healer] Spawned! Heal CD: ${this.skillMaxCooldown}ms, Aggro Limit: ${this.aggroStackLimit}`);
+        console.log(`💚 [Healer] Spawned! Heal CD: ${this.skillMaxCooldown}ms, Range: ${this.skillRange}, Aggro Limit: ${this.aggroStackLimit}`);
     }
 
-    // [New] 대열 유지 모드: 사거리 내 환자가 있을 때만 제자리 힐
+    // [Fix] 스킬 사용 시도: 성공 여부에 따라 쿨타임 적용
+    tryUseSkill() {
+        if (this.skillTimer <= 0 && this.skillMaxCooldown > 0) {
+            // performSkill이 true를 반환할 때만 쿨타임 리셋
+            const isSuccess = this.performSkill(); 
+            if (isSuccess) {
+                this.skillTimer = this.skillMaxCooldown;
+            }
+        }
+    }
+
+    // 대열 유지 모드 로직
     updateNpcLogic(delta) {
         if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
             // 사거리 내에 치료 가능한 아군이 있는지 확인
-            const targetInRange = this.findLowestHpAllyInRange(this.healRange);
+            const targetInRange = this.findLowestHpAllyInRange(this.skillRange);
             
             if (targetInRange) {
                 this.updateAI(delta);
@@ -37,14 +51,14 @@ export default class Healer extends Unit {
         let bestTarget = null;
 
         if (isFormationMode) {
-            // [Fix] 대열모드: 사거리 내의 아군 중에서만 타겟 선정
+            // 대열모드: 사거리 내의 아군 중에서만 타겟 선정 (자가 치유 포함)
             if (this.hp / this.maxHp <= 0.3) {
-                bestTarget = this; // 자가 치유 우선
+                bestTarget = this; 
             } else {
-                bestTarget = this.findLowestHpAllyInRange(this.healRange);
+                bestTarget = this.findLowestHpAllyInRange(this.skillRange);
             }
         } else {
-            // 일반모드: 전체 아군 중 가장 위급한 대상 (기존 로직)
+            // 일반모드: 전체 아군 중 가장 위급한 대상
             if (this.hp / this.maxHp <= 0.3) {
                 bestTarget = this; 
             } else {
@@ -52,7 +66,7 @@ export default class Healer extends Unit {
             }
         }
 
-        // 타겟 교체 로직 (빈번한 교체 방지)
+        // 타겟 교체 로직
         if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying || this.ai.currentTarget.hp >= this.ai.currentTarget.maxHp) {
             this.ai.currentTarget = bestTarget;
         } else if (bestTarget && bestTarget !== this.ai.currentTarget) {
@@ -64,10 +78,10 @@ export default class Healer extends Unit {
             }
         }
         
-        // 대열모드인데 타겟이 사거리 밖으로 나갔다면 타겟 해제
+        // 대열모드에서 타겟이 벗어나면 해제
         if (isFormationMode && this.ai.currentTarget && this.ai.currentTarget !== this) {
             const dist = Phaser.Math.Distance.Between(this.x, this.y, this.ai.currentTarget.x, this.ai.currentTarget.y);
-            if (dist > this.healRange) {
+            if (dist > this.skillRange) {
                 this.ai.currentTarget = null;
             }
         }
@@ -77,21 +91,20 @@ export default class Healer extends Unit {
             const target = this.ai.currentTarget;
             const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
             
-            // [Fix] 대열 유지 모드면 이동 금지 (제자리 힐)
+            // [대열 유지 모드] 제자리 힐
             if (isFormationMode) {
                 this.setVelocity(0, 0);
-                // 사거리 체크 후 힐
-                if (dist <= this.healRange) {
+                if (dist <= this.skillRange) {
                     this.updateFlipX(); 
                     this.tryUseSkill();
                 }
                 return;
             }
 
-            // --- 이하 일반 모드 이동 로직 ---
+            // [일반 모드] 추적 힐
             const moveBuffer = 30; 
             const isStopped = this.body.speed < 10;
-            const threshold = isStopped ? (this.healRange + moveBuffer) : this.healRange;
+            const threshold = isStopped ? (this.skillRange + moveBuffer) : this.skillRange;
             
             if (dist <= threshold) {
                 this.setVelocity(0, 0);
@@ -102,23 +115,21 @@ export default class Healer extends Unit {
                 this.updateFlipX();
             }
         } else {
-            // 타겟이 없으면
+            // 타겟 없음
             if (isFormationMode) {
-                this.setVelocity(0, 0); // 대열모드면 대기 (updateNpcLogic에서 처리되지만 안전장치)
+                this.setVelocity(0, 0); 
             } else {
-                this.maintainSafePosition(); // 일반모드면 포지셔닝
+                this.maintainSafePosition(); 
             }
         }
     }
 
-    // [New] 사거리 내에서 가장 HP가 낮은 아군 찾기
     findLowestHpAllyInRange(range) {
         const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
         let lowestHpVal = Infinity; 
         let target = null;
         
         for (let ally of allies) {
-            // 살아있고, 치료가 필요하며, 사거리 내에 있는 아군
             if (ally.active && !ally.isDying && ally.hp < ally.maxHp) {
                 const dist = Phaser.Math.Distance.Between(this.x, this.y, ally.x, ally.y);
                 if (dist <= range) {
@@ -196,9 +207,7 @@ export default class Healer extends Unit {
         this.debugGraphic.clear();
         this.debugText.setPosition(this.x, this.y - (this.baseSize / 2) - 50);
 
-        const cooldownSec = Math.max(0, this.skillTimer / 1000).toFixed(1);
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
-        
         const stateStr = (this.ai.currentTarget ? "➕HEAL" : "🛡️SAFE");
 
         this.debugText.setText(`${stateStr}\nHP:${hpPct}%\nStack:${this.healStack}/${this.aggroStackLimit}`);
@@ -210,10 +219,18 @@ export default class Healer extends Unit {
         }
     }
 
+    // [Modified] 힐 성공 여부 반환 (Boolean)
     performSkill() {
         const target = this.ai.currentTarget; 
+        // 타겟이 유효하지 않으면 실패 처리 (쿨타임 소모 안 함)
         if (!target || !target.active || target.hp >= target.maxHp) {
-            return;
+            return false; 
+        }
+        
+        const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
+        // 사거리 체크 (안전장치)
+        if (dist > this.skillRange + 10) { 
+            return false; 
         }
 
         this.isUsingSkill = true;
@@ -243,6 +260,8 @@ export default class Healer extends Unit {
                 this.resetVisuals(); 
             }
         });
+
+        return true; // 힐 성공
     }
 
     triggerAggro() {

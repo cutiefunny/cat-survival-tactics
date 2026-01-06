@@ -14,6 +14,8 @@ export default class UIScene extends Phaser.Scene {
         this.startBtn = null;
         this.msgText = null;
         this.debugStats = null;
+        this.shopContainer = null;
+        this.coinText = null;
         
         const battleScene = this.scene.get('BattleScene');
         if (battleScene) {
@@ -44,6 +46,126 @@ export default class UIScene extends Phaser.Scene {
         this.createSpeedButton();
         
         this.repositionFooterElements();
+    }
+
+    // [Modified] 상점 UI 생성 (모바일 최적화 레이아웃 적용)
+    createShopUI(unitData, currentCoins, onBuyCallback) {
+        if (this.shopContainer) this.shopContainer.destroy();
+
+        const { width } = this.scale;
+        const isMobile = width < 600; 
+        const panelHeight = isMobile ? 60 : 80; // 모바일 패널 높이 축소
+        
+        this.shopContainer = this.add.container(0, 0);
+        
+        // 배경
+        const bg = this.add.rectangle(width/2, panelHeight/2, width, panelHeight, 0x000000, 0.7);
+        const border = this.add.rectangle(width/2, panelHeight, width, 2, 0xffcc00, 0.5);
+        this.shopContainer.add([bg, border]);
+
+        // [Fix] 코인 텍스트: 모바일에서 이모티콘 제거 및 폰트 축소
+        const fontSize = isMobile ? '16px' : '24px';
+        const coinString = isMobile ? `${currentCoins}냥` : `💰 ${currentCoins}냥`;
+        const textX = isMobile ? 10 : 20;
+
+        this.coinText = this.add.text(textX, panelHeight/2, coinString, {
+            fontSize: fontSize, fontStyle: 'bold', fill: '#ffdd00', stroke: '#000000', strokeThickness: 3
+        }).setOrigin(0, 0.5);
+        this.shopContainer.add(this.coinText);
+
+        // [Fix] 유닛 구매 버튼들: 모바일에서 가로폭 대폭 축소
+        let startX = isMobile ? 85 : 180;  // 시작 위치 당김
+        const btnGap = isMobile ? 52 : 90; // 간격 축소
+        const btnW = isMobile ? 48 : 80;   // 버튼 폭 축소
+        const btnH = isMobile ? 40 : 50;   // 버튼 높이 축소
+        
+        unitData.forEach((unit, index) => {
+            const btnX = startX + (index * btnGap);
+            const btnY = panelHeight / 2;
+            
+            const btn = this.add.container(btnX, btnY);
+            
+            // 버튼 배경
+            const btnBg = this.add.rectangle(0, 0, btnW, btnH, 0x333333).setStrokeStyle(1, 0xaaaaaa);
+            
+            // 유닛 이름 & 가격 (폰트 사이즈 축소)
+            const nameSize = isMobile ? '10px' : '12px';
+            const costSize = isMobile ? '11px' : '14px';
+            
+            const nameText = this.add.text(0, isMobile ? -8 : -10, unit.name, { fontSize: nameSize, fill: '#ffffff' }).setOrigin(0.5);
+            const costText = this.add.text(0, isMobile ? 8 : 10, `${unit.cost}냥`, { fontSize: costSize, fill: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
+            
+            btn.add([btnBg, nameText, costText]);
+            
+            btnBg.setInteractive({ useHandCursor: true })
+                .on('pointerdown', () => {
+                    this.tweens.add({ targets: btn, scale: 0.9, duration: 50, yoyo: true });
+                    if(onBuyCallback) onBuyCallback(unit.role, unit.cost);
+                });
+
+            this.shopContainer.add(btn);
+        });
+        
+        this.repositionShopElements();
+    }
+
+    // [Modified] 코인 업데이트 시 모바일 여부 확인
+    updateCoins(amount) {
+        if (this.coinText) {
+            const isMobile = this.scale.width < 600;
+            const coinString = isMobile ? `${amount}냥` : `💰 ${amount}냥`;
+            this.coinText.setText(coinString);
+            this.tweens.add({ targets: this.coinText, scale: 1.2, duration: 100, yoyo: true });
+        }
+    }
+
+    hideShopUI() {
+        if (this.shopContainer) {
+            this.tweens.add({
+                targets: this.shopContainer,
+                y: -100,
+                alpha: 0,
+                duration: 500,
+                onComplete: () => {
+                    this.shopContainer.setVisible(false);
+                }
+            });
+        }
+    }
+    
+    // [Modified] 리사이징 로직 수정: 모바일 레이아웃일 때는 스케일링을 최소화
+    repositionShopElements() {
+        if (!this.shopContainer || !this.shopContainer.visible) return;
+        const { width } = this.scale;
+        
+        let scale = 1;
+        // PC 화면인데 좁은 경우
+        if (width >= 600 && width < 800) {
+            scale = width / 800;
+        } 
+        // 모바일 화면인 경우 (이미 작은 레이아웃을 사용하므로, 아주 좁을 때만 스케일 조정)
+        else if (width < 600) {
+            if (width < 360) scale = width / 360; 
+            else scale = 1; 
+        }
+        
+        this.shopContainer.setScale(scale);
+
+        // 배경 꽉 채우기
+        const effectiveWidth = width / scale;
+        const bg = this.shopContainer.list[0];
+        const border = this.shopContainer.list[1];
+        
+        if (bg) {
+            const panelHeight = bg.height;
+            bg.setPosition(effectiveWidth / 2, panelHeight/2);
+            bg.setSize(effectiveWidth, panelHeight);
+            
+            if (border) {
+                border.setPosition(effectiveWidth / 2, panelHeight);
+                border.setSize(effectiveWidth, 2);
+            }
+        }
     }
 
     createAutoButton() {
@@ -150,7 +272,6 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    // [Modified] 스킬 항목 제거 및 레이아웃 조정
     createGameOverUI(data, callback) {
         const { width, height } = this.scale;
         const isWin = data.isWin;
@@ -175,26 +296,22 @@ export default class UIScene extends Phaser.Scene {
 
         if (isWin && stats.score !== undefined) {
             const startY = -panelHeight * 0.2;
-            const gapY = 50; // 간격을 약간 넓힘
+            const gapY = 50; 
             const labelStyle = { fontSize: '20px', fill: '#aaaaaa' };
             const valStyle = { fontSize: '20px', fill: '#ffffff', fontStyle: 'bold' };
 
-            // 1. 클리어 시간
             const timeStr = `${Math.floor(stats.time / 60)}m ${stats.time % 60}s`;
             const l1 = this.add.text(-panelWidth*0.4, startY, "클리어 시간", labelStyle).setOrigin(0, 0.5);
             const v1 = this.add.text(panelWidth*0.4, startY, timeStr, valStyle).setOrigin(1, 0.5);
             
-            // 2. 생존 유닛
             const l2 = this.add.text(-panelWidth*0.4, startY + gapY, "생존 유닛", labelStyle).setOrigin(0, 0.5);
             const v2 = this.add.text(panelWidth*0.4, startY + gapY, `${stats.survivors}`, valStyle).setOrigin(1, 0.5);
 
             panel.add([l1, v1, l2, v2]);
 
-            // 구분선
             const line = this.add.rectangle(0, startY + gapY*1.8, panelWidth * 0.8, 2, 0x555555);
             panel.add(line);
 
-            // 3. 최종 점수 & 랭크
             const scoreLabel = this.add.text(0, startY + gapY*3, "TOTAL SCORE", { fontSize: '16px', fill: '#888888' }).setOrigin(0.5);
             const scoreVal = this.add.text(0, startY + gapY*4, `${stats.score}`, { fontSize: '36px', fill: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
             
@@ -215,12 +332,18 @@ export default class UIScene extends Phaser.Scene {
         const btnTxt = this.add.text(0, btnY, btnText, { fontSize: '24px', fontStyle: 'bold' }).setOrigin(0.5);
         
         const btnContainer = this.add.container(0, 0, [btnBg, btnTxt]);
+        
+        // Next Level 버튼 클릭 시 코인 애니메이션 후 콜백 실행
         btnBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
             this.tweens.add({
                 targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
                 onComplete: () => {
-                    if (callback) callback();
-                    this.scene.restart();
+                    if (isWin && btnText.includes("Next")) {
+                        this.playCoinAnimation(width/2, height/2 + btnY, callback);
+                    } else {
+                        if (callback) callback();
+                        this.scene.restart();
+                    }
                 }
             });
         });
@@ -231,6 +354,49 @@ export default class UIScene extends Phaser.Scene {
         this.tweens.add({
             targets: panel, scale: 1, duration: 400, ease: 'Back.out'
         });
+    }
+
+    playCoinAnimation(startX, startY, onComplete) {
+        const coinCount = 10; 
+        const targetX = 40;   
+        const targetY = 40;   
+        
+        let completedCoins = 0;
+
+        for (let i = 0; i < coinCount; i++) {
+            const coin = this.add.text(startX, startY, '💰', { fontSize: '32px' }).setOrigin(0.5).setDepth(4000);
+            
+            const scatterX = Phaser.Math.Between(-50, 50);
+            const scatterY = Phaser.Math.Between(-50, 50);
+
+            this.tweens.add({
+                targets: coin,
+                x: startX + scatterX,
+                y: startY + scatterY,
+                scale: 1.2,
+                duration: 300,
+                ease: 'Power2',
+                onComplete: () => {
+                    this.tweens.add({
+                        targets: coin,
+                        x: targetX,
+                        y: targetY,
+                        scale: 0.5,
+                        alpha: 0,
+                        duration: 600,
+                        ease: 'Back.in',
+                        delay: i * 50, 
+                        onComplete: () => {
+                            coin.destroy();
+                            completedCoins++;
+                            if (completedCoins === coinCount) {
+                                if (onComplete) onComplete();
+                            }
+                        }
+                    });
+                }
+            });
+        }
     }
 
     createDebugStats() {
@@ -319,6 +485,10 @@ export default class UIScene extends Phaser.Scene {
         }
         if (this.startBtn) this.startBtn.setPosition(width/2, height/2);
         if (this.msgText) this.msgText.setPosition(width/2, height*0.3);
+        
+        if (this.shopContainer && this.shopContainer.visible) {
+             this.repositionShopElements();
+        }
     }
 
     handleUIUpdate(data) {

@@ -1,8 +1,9 @@
-import { createSignal, onMount } from "solid-js";
+import { createSignal, onMount, For } from "solid-js";
 import { createStore } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
-import { LEVEL_KEYS } from "../game/managers/LevelManager"; // [New] 레벨 리스트 동적 로드
+import { useNavigate } from "@solidjs/router";
+import { LEVEL_KEYS } from "../game/managers/LevelManager";
 
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
@@ -17,10 +18,15 @@ const DEFAULT_ROLE_DEFS = {
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
 };
 
+// [설정] 기본 유닛 가격
+const DEFAULT_UNIT_COSTS = {
+    'Tanker': 10, 'Shooter': 20, 'Healer': 25, 'Raccoon': 10, 'Runner': 10, 'Normal': 5
+};
+
 const DEFAULT_CONFIG = {
   showDebugStats: false, 
-  // [Modified] startLevelIndex 추가 (기본값 0)
-  gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0 },
+  // [Modified] initialCoins 추가
+  gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, initialCoins: 50 },
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
@@ -28,11 +34,13 @@ const DEFAULT_CONFIG = {
     shooter: { attackRange: 250, kiteDistance: 200 } 
   },
   roleDefinitions: DEFAULT_ROLE_DEFS,
+  unitCosts: DEFAULT_UNIT_COSTS,
   redTeamRoles: [],
   blueTeamRoles: []
 };
 
 const DevPage = () => {
+  const navigate = useNavigate();
   const [config, setConfig] = createStore(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
   const [status, setStatus] = createSignal("Loading...");
   const [feedbacks, setFeedbacks] = createSignal([]);
@@ -45,15 +53,17 @@ const DevPage = () => {
 
       if (docSnap.exists()) {
         const data = docSnap.data();
+        // Deep Merge Simulation
         const merged = { ...DEFAULT_CONFIG, ...data };
         
-        // AI 설정 병합
+        if (data.gameSettings) merged.gameSettings = { ...DEFAULT_CONFIG.gameSettings, ...data.gameSettings };
         if (data.aiSettings) {
              merged.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...data.aiSettings };
              if (data.aiSettings.common) {
                  merged.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...data.aiSettings.common };
              }
         }
+        if (data.unitCosts) merged.unitCosts = { ...DEFAULT_UNIT_COSTS, ...data.unitCosts };
         
         // 역할 정의 병합
         if (data.roleDefinitions) {
@@ -73,9 +83,11 @@ const DevPage = () => {
         merged.gameSettings.blueCount = bCount;
         merged.gameSettings.redCount = rCount;
         
-        // [New] startLevelIndex 안전장치
         if (merged.gameSettings.startLevelIndex === undefined) {
             merged.gameSettings.startLevelIndex = 0;
+        }
+        if (merged.gameSettings.initialCoins === undefined) {
+            merged.gameSettings.initialCoins = 50;
         }
 
         merged.blueTeamRoles = syncArrayLength(merged.blueTeamRoles || [], bCount, "Normal", merged.roleDefinitions);
@@ -138,6 +150,9 @@ const DevPage = () => {
     setConfig("gameSettings", teamType === 'blue' ? "blueCount" : "redCount", newCount);
     const targetArrayName = teamType === 'blue' ? "blueTeamRoles" : "redTeamRoles";
     const defaultRole = teamType === 'blue' ? "Normal" : "NormalDog";
+    
+    // createStore의 setConfig에서 현재 상태를 직접 참조하기 위해 JSON 복사본 사용 대신
+    // 불변성 유지를 위해 현재 배열을 가져와서 계산
     const currentList = JSON.parse(JSON.stringify(config[targetArrayName]));
     const updatedList = syncArrayLength(currentList, newCount, defaultRole, config.roleDefinitions);
     setConfig(targetArrayName, updatedList);
@@ -150,6 +165,7 @@ const DevPage = () => {
     setConfig(targetArrayName, index, { role: newRole, ...stats });
   };
 
+  // [Modified] 스탯 변경 시 해당 역할을 가진 모든 유닛의 스탯도 함께 업데이트
   const handleStatChange = (roleName, statKey, value) => {
     setConfig("roleDefinitions", roleName, statKey, value);
     const updateTeam = (teamKey) => {
@@ -161,6 +177,11 @@ const DevPage = () => {
     };
     updateTeam("blueTeamRoles");
     updateTeam("redTeamRoles");
+  };
+
+  // [New] 유닛 가격 변경 핸들러
+  const handleCostChange = (roleName, value) => {
+    setConfig("unitCosts", roleName, value);
   };
 
   const saveConfig = async () => {
@@ -191,7 +212,7 @@ const DevPage = () => {
             <span style={{ minWidth: "25px", color: "#666", fontWeight: "bold" }}>#{index+1}</span>
             <select 
                 value={unit.role} 
-                onChange={(e) => handleRoleChange(teamType, index, e.target.value)}
+                onInput={(e) => handleRoleChange(teamType, index, e.target.value)}
                 style={{ 
                     padding: "5px", borderRadius: "4px", 
                     border: `1px solid ${teamType === 'blue' ? '#446688' : '#884444'}`, 
@@ -200,9 +221,9 @@ const DevPage = () => {
                     flexShrink: 0
                 }}
             >
-                {Object.keys(config.roleDefinitions).map(role => (
-                    <option value={role}>{role}</option>
-                ))}
+                <For each={Object.keys(config.roleDefinitions)}>
+                    {(role) => <option value={role}>{role}</option>}
+                </For>
             </select>
             <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
                 <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
@@ -221,12 +242,7 @@ const DevPage = () => {
 
                 {unit.role === 'Healer' && (
                      <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
-                        😡Stack <input 
-                            type="number" 
-                            value={unit.aggroStackLimit || 10} 
-                            onInput={(e) => handleStatChange(unit.role, "aggroStackLimit", parseInt(e.target.value))} 
-                            style={{ width: "40px", background: "#220000", color: "#faa", border: "1px solid #844", marginLeft: "2px" }} 
-                        />
+                        😡Stack {unit.aggroStackLimit || 10}
                      </span>
                 )}
             </div>
@@ -235,8 +251,12 @@ const DevPage = () => {
   };
 
   return (
+    // [Modified] overflow-y: auto 추가 및 height: 100vh로 화면 높이 고정
     <div style={{ padding: "40px", "background-color": "#1a1a1a", color: "white", "height": "100vh", "overflow-y": "auto", "box-sizing": "border-box", "font-family": "monospace" }}>
-      <h1 style={{ "border-bottom": "2px solid #444", "padding-bottom": "10px" }}>🐱 Tactics Dev Console</h1>
+      <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "border-bottom": "2px solid #444", "padding-bottom": "10px" }}>
+        <h1 style={{ margin: 0 }}>🐱 Tactics Dev Console</h1>
+        <button onClick={() => navigate('/')} style={btnStyle}>⬅ Back to Game</button>
+      </div>
       
       <div style={{ "margin-top": "20px", "font-size": "1.2em", "font-weight": "bold", color: status().includes("Error") || status().includes("Failed") ? "#ff4444" : "#44ff44" }}>
         {status()}
@@ -245,8 +265,8 @@ const DevPage = () => {
       <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "20px", "margin-top": "30px" }}>
         
         {/* --- Global & AI Settings --- */}
-        <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
-          <h2 style={{ color: "#aaa", "margin-top": 0 }}>⚙️ Global Settings</h2>
+        <section style={cardStyle}>
+          <h2 style={sectionHeaderStyle}>⚙️ Global Settings</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <label style={{display: "flex", alignItems: "center", cursor: "pointer", background: "#333", padding: "10px", borderRadius: "5px"}}>
                 <input 
@@ -260,35 +280,40 @@ const DevPage = () => {
                 </span>
             </label>
 
-            {/* [New] Start Level Selection */}
-            <label style={{display: "flex", alignItems: "center", background: "#333", padding: "10px", borderRadius: "5px"}}>
+            <label style={rowStyle}>
                 <span style={{ color: "#aaa", fontWeight: "bold", marginRight: "10px" }}>🚀 Start Level:</span>
                 <select 
                     value={config.gameSettings.startLevelIndex ?? 0}
-                    onChange={(e) => setConfig("gameSettings", "startLevelIndex", parseInt(e.target.value))}
-                    style={{ 
-                        padding: "5px", borderRadius: "4px", border: "1px solid #555", 
-                        background: "#222", color: "white", fontSize: "1em", fontWeight: "bold" 
-                    }}
+                    onInput={(e) => setConfig("gameSettings", "startLevelIndex", parseInt(e.target.value))}
+                    style={inputStyle}
                 >
-                    {/* [Modified] 맵 없음 옵션 추가 */}
                     <option value={-1}>🚫 No Map</option>
-                    {/* LEVEL_KEYS를 사용하여 동적으로 옵션 생성 */}
-                    {LEVEL_KEYS.map((level, idx) => (
-                        <option value={idx}>{idx}: {level}</option>
-                    ))}
+                    <For each={LEVEL_KEYS}>
+                        {(level, idx) => <option value={idx()}>{idx()}: {level}</option>}
+                    </For>
                 </select>
             </label>
 
+            {/* [New] Initial Coins */}
+            <label style={rowStyle}>
+                <span style={{ color: "#ffdd00", fontWeight: "bold", marginRight: "10px" }}>💰 Initial Coins:</span>
+                <input 
+                    type="number" 
+                    value={config.gameSettings.initialCoins}
+                    onInput={(e) => setConfig("gameSettings", "initialCoins", parseInt(e.target.value))}
+                    style={inputStyle}
+                />
+            </label>
+
             <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap", marginTop: "10px" }}>
-                <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
-                <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px" }} /></label>
+                <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px", ...inputStyle }} /></label>
+                <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px", ...inputStyle }} /></label>
             </div>
           </div>
         </section>
 
-        <section style={{ background: "#2a2a2a", padding: "20px", "border-radius": "8px" }}>
-          <h2 style={{ color: "#aaa", "margin-top": 0 }}>🧠 AI Parameters</h2>
+        <section style={cardStyle}>
+          <h2 style={sectionHeaderStyle}>🧠 AI Parameters</h2>
           <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
              <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
                  <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
@@ -298,7 +323,7 @@ const DevPage = () => {
                          <input type="number" step="0.05" min="0" max="1" 
                              value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} 
                              onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} 
-                             style={{ width: "60px", marginTop: "5px" }} 
+                             style={{ width: "60px", marginTop: "5px", ...inputStyle }} 
                          />
                      </label>
                      <label title="HP % regenerated per second when idle">
@@ -306,73 +331,88 @@ const DevPage = () => {
                          <input type="number" step="0.005" min="0" max="0.5" 
                              value={config.aiSettings.common?.hpRegenRate ?? 0.01} 
                              onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} 
-                             style={{ width: "60px", marginTop: "5px" }} 
+                             style={{ width: "60px", marginTop: "5px", ...inputStyle }} 
                          />
                      </label>
                  </div>
              </div>
 
              <div style={{display: "flex", gap: "20px"}}>
-                <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
-                <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px" }} /></label></div>
+                <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
+                <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
              </div>
           </div>
         </section>
 
         {/* --- Class Base Stats & Skills --- */}
         <section style={{ background: "#222", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #444" }}>
-            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Skills</h2>
+            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Cost</h2>
             <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(300px, 1fr))", gap: "15px" }}>
-                {Object.keys(config.roleDefinitions).map(role => (
+                <For each={Object.keys(config.roleDefinitions)}>
+                    {(role) => (
                     <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : role === 'Raccoon' ? '#ff8844' : '#aaa'}` }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
+                        <div style={{display: "flex", "justify-content": "space-between", "margin-bottom": "10px"}}>
+                            <h4 style={{ margin: "0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
+                            {/* [New] Cost Input */}
+                            <label style={{ fontSize: "0.9em", color: "#ffdd00" }}>
+                                💵Cost: 
+                                <input 
+                                    type="number" 
+                                    value={config.unitCosts?.[role] ?? 0} 
+                                    onInput={(e) => handleCostChange(role, parseInt(e.target.value))}
+                                    style={{ width: "50px", marginLeft:"5px", ...inputStyle, borderColor: "#aa8800" }} 
+                                />
+                            </label>
+                        </div>
+                        
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            <label style={statLabelStyle}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={statInputStyle} /></label>
                             
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>
+                            <label style={statLabelStyle}>
                                 {role === 'Healer' ? 'Heal Amt' : 'ATK'}
-                                <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} />
+                                <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} />
                             </label>
                             
-                            <label style={{fontSize: "0.8em", color:"#ccc"}}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={{ width: "100%", background: "#111", color: "white", border: "1px solid #555" }} /></label>
+                            <label style={statLabelStyle}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={statInputStyle} /></label>
                             
-                            <label style={{fontSize: "0.8em", color:"#aaffaa"}}>
-                                {role === 'Healer' ? 'Motion CD (N/A)' : 'ATK CD'}
+                            <label style={{...statLabelStyle, color: "#aaffaa"}}>
+                                {role === 'Healer' ? 'Motion CD' : 'ATK CD'}
                                 <input 
                                     type="number" 
                                     value={config.roleDefinitions[role].attackCooldown || 500} 
                                     onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} 
-                                    style={{ width: "100%", background: "#112211", color: "#afa", border: "1px solid #484" }} 
+                                    style={{ ...statInputStyle, background: "#112211", borderColor: "#484", color: "#afa" }} 
                                 />
                             </label>
                             
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
                                 <>
                                     <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>
-                                    <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.CD<input type="number" value={config.roleDefinitions[role].skillCooldown} onInput={(e) => handleStatChange(role, "skillCooldown", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
-                                    <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Range<input type="number" value={config.roleDefinitions[role].skillRange} onInput={(e) => handleStatChange(role, "skillRange", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
-                                    {config.roleDefinitions[role].skillDuration !== undefined && <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Dur<input type="number" value={config.roleDefinitions[role].skillDuration} onInput={(e) => handleStatChange(role, "skillDuration", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>}
-                                    {config.roleDefinitions[role].skillEffect !== undefined && <label style={{fontSize: "0.8em", color:"#ff88ff"}}>S.Eff(%)<input type="number" value={config.roleDefinitions[role].skillEffect} onInput={(e) => handleStatChange(role, "skillEffect", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>}
+                                    <label style={{...statLabelStyle, color: "#ff88ff"}}>S.CD<input type="number" value={config.roleDefinitions[role].skillCooldown} onInput={(e) => handleStatChange(role, "skillCooldown", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>
+                                    <label style={{...statLabelStyle, color: "#ff88ff"}}>S.Range<input type="number" value={config.roleDefinitions[role].skillRange} onInput={(e) => handleStatChange(role, "skillRange", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>
+                                    {config.roleDefinitions[role].skillDuration !== undefined && <label style={{...statLabelStyle, color: "#ff88ff"}}>S.Dur<input type="number" value={config.roleDefinitions[role].skillDuration} onInput={(e) => handleStatChange(role, "skillDuration", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>}
+                                    {config.roleDefinitions[role].skillEffect !== undefined && <label style={{...statLabelStyle, color: "#ff88ff"}}>S.Eff(%)<input type="number" value={config.roleDefinitions[role].skillEffect} onInput={(e) => handleStatChange(role, "skillEffect", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>}
                                 </>
                             )}
                             
                             {config.roleDefinitions[role].aggroStackLimit !== undefined && (
-                                <label style={{fontSize: "0.8em", color:"#ffaaaa"}}>
+                                <label style={{...statLabelStyle, color: "#ffaaaa"}}>
                                     Aggro Stack
-                                    <input type="number" value={config.roleDefinitions[role].aggroStackLimit} onInput={(e) => handleStatChange(role, "aggroStackLimit", parseInt(e.target.value))} style={{ width: "100%", background: "#220000", color: "#faa", border: "1px solid #844" }} />
+                                    <input type="number" value={config.roleDefinitions[role].aggroStackLimit} onInput={(e) => handleStatChange(role, "aggroStackLimit", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220000", borderColor: "#844", color: "#faa" }} />
                                 </label>
                             )}
 
                             {config.roleDefinitions[role].attackRange !== undefined && (
-                                <label style={{fontSize: "0.8em", color:"#d8f", gridColumn: "span 2", marginTop: "5px"}}>Range<input type="number" value={config.roleDefinitions[role].attackRange} onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))} style={{ width: "100%", background: "#220022", color: "#f8f", border: "1px solid #848" }} /></label>
+                                <label style={{...statLabelStyle, color: "#d8f", gridColumn: "span 2", marginTop: "5px"}}>Range<input type="number" value={config.roleDefinitions[role].attackRange} onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>
                             )}
                         </div>
                     </div>
-                ))}
+                    )}
+                </For>
             </div>
         </section>
 
-        {/* --- 4. Blue Team Composition --- */}
+        {/* --- Blue Team Composition --- */}
         <section style={{ background: "#223344", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
             <h2 style={{ color: "#88ccff", margin: 0 }}>🛡️ Blue Team</h2>
@@ -380,16 +420,18 @@ const DevPage = () => {
                 <input type="number" min="1" max="12" 
                     value={config.gameSettings.blueCount} 
                     onInput={(e) => handleCountChange('blue', parseInt(e.target.value))}
-                    style={{ marginLeft: "10px", width: "50px", padding: "5px" }} 
+                    style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} 
                 />
             </label>
           </div>
           <div style={{ display: "block" }}>
-            {config.blueTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'blue'))}
+            <For each={config.blueTeamRoles}>
+                {(unit, index) => renderUnitRow(unit, index(), 'blue')}
+            </For>
           </div>
         </section>
 
-        {/* --- 5. Red Team Composition --- */}
+        {/* --- Red Team Composition --- */}
         <section style={{ background: "#442222", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
             <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team</h2>
@@ -397,12 +439,14 @@ const DevPage = () => {
                 <input type="number" min="1" max="12"
                     value={config.gameSettings.redCount} 
                     onInput={(e) => handleCountChange('red', parseInt(e.target.value))}
-                    style={{ marginLeft: "10px", width: "50px", padding: "5px" }} 
+                    style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} 
                 />
             </label>
           </div>
           <div style={{ display: "block" }}>
-            {config.redTeamRoles.map((unit, index) => renderUnitRow(unit, index, 'red'))}
+            <For each={config.redTeamRoles}>
+                {(unit, index) => renderUnitRow(unit, index(), 'red')}
+            </For>
           </div>
         </section>
 
@@ -414,7 +458,8 @@ const DevPage = () => {
             </div>
             <div style={{ marginTop: "15px", maxHeight: "300px", overflowY: "auto", background: "#222", padding: "10px" }}>
                 {feedbacks().length === 0 ? <div style={{color: "#888"}}>No feedbacks yet.</div> : (
-                    feedbacks().map(item => (
+                    <For each={feedbacks()}>
+                        {(item) => (
                         <div style={{ 
                             background: "#444", padding: "10px", marginBottom: "8px", borderRadius: "4px",
                             display: "flex", justifyContent: "space-between", alignItems: "center"
@@ -427,7 +472,8 @@ const DevPage = () => {
                                 background: "#ff4444", color: "white", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer"
                             }}>Delete</button>
                         </div>
-                    ))
+                        )}
+                    </For>
                 )}
             </div>
         </section>
@@ -449,5 +495,14 @@ const DevPage = () => {
     </div>
   );
 };
+
+// Styles
+const btnStyle = { padding: '10px 20px', marginRight: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', border: 'none', borderRadius: '5px', background: '#444', color: '#ddd' };
+const cardStyle = { background: "#2a2a2a", padding: "20px", "border-radius": "8px" };
+const sectionHeaderStyle = { color: "#aaa", "margin-top": 0 };
+const inputStyle = { background: "#222", color: "white", border: "1px solid #555", borderRadius: "4px", padding: "4px" };
+const rowStyle = {display: "flex", alignItems: "center", background: "#333", padding: "10px", borderRadius: "5px"};
+const statLabelStyle = {fontSize: "0.8em", color:"#ccc"};
+const statInputStyle = { width: "100%", background: "#111", color: "white", border: "1px solid #555", padding: "4px" };
 
 export default DevPage;
