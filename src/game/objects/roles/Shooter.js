@@ -11,8 +11,9 @@ export default class Shooter extends Unit {
     }
 
     updateAI(delta) {
+        // [Modified] Use this.ai.findNearestEnemy()
         // 1. [생존 최우선] 적과의 거리 체크
-        const nearestThreat = this.findNearestEnemy(); 
+        const nearestThreat = this.ai.findNearestEnemy(); 
         if (nearestThreat) {
             const distSq = Phaser.Math.Distance.Squared(this.x, this.y, nearestThreat.x, nearestThreat.y);
             const kiteDist = this.aiConfig.shooter?.kiteDistance || 200;
@@ -26,12 +27,13 @@ export default class Shooter extends Unit {
             }
         }
 
-        this.thinkTimer -= delta;
+        // [Modified] Use this.ai.thinkTimer
+        this.ai.thinkTimer -= delta;
 
         // 2. 타겟 선정
-        if (this.thinkTimer <= 0) {
+        if (this.ai.thinkTimer <= 0) {
             const { thinkTimeMin, thinkTimeVar } = this.aiConfig.common || { thinkTimeMin: 150, thinkTimeVar: 100 };
-            this.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
+            this.ai.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
             
             this.decideTarget();
         }
@@ -40,8 +42,9 @@ export default class Shooter extends Unit {
         this.executeMovement();
         
         // 4. 시선 처리
-        if (this.currentTarget && this.currentTarget.active) {
-            this.lookAt(this.currentTarget);
+        // [Modified] Use this.ai.currentTarget
+        if (this.ai.currentTarget && this.ai.currentTarget.active) {
+            this.lookAt(this.ai.currentTarget);
         } else {
             super.updateFlipX();
         }
@@ -51,23 +54,24 @@ export default class Shooter extends Unit {
         const chasers = this.findEnemiesTargetingMe();
         
         if (chasers.length > 0) {
-            this.currentTarget = this.getClosestUnit(chasers);
+            // [Modified] Use this.ai.currentTarget
+            this.ai.currentTarget = this.getClosestUnit(chasers);
             this.isFlanking = false; 
         } 
         else {
             const weakest = this.findWeakestEnemy();
             if (weakest) {
-                this.currentTarget = weakest;
+                this.ai.currentTarget = weakest;
                 this.isFlanking = true; 
             } else {
-                this.currentTarget = this.findNearestEnemy();
+                this.ai.currentTarget = this.ai.findNearestEnemy(); // [Modified] Use this.ai
                 this.isFlanking = false;
             }
         }
     }
 
     executeMovement() {
-        const target = this.currentTarget;
+        const target = this.ai.currentTarget; // [Modified]
         if (!target || !target.active) {
             this.setVelocity(0, 0);
             return;
@@ -90,8 +94,6 @@ export default class Shooter extends Unit {
             if (distSq > atkRangeSq) {
                 this.scene.physics.moveToObject(this, target, this.moveSpeed);
 
-                // [FIX] 미세 조절 시 좌우 떨림 방지
-                // 목표와의 수평 거리 차이가 작으면(10px 미만), X축 이동을 생략하고 수직 이동만 수행
                 if (Math.abs(this.x - target.x) < 10) {
                     this.setVelocityX(0);
                 }
@@ -105,7 +107,8 @@ export default class Shooter extends Unit {
         const enemies = this.targetGroup.getChildren();
         const chasers = [];
         for (let enemy of enemies) {
-            if (enemy.active && enemy.currentTarget === this) {
+            // [Modified] Check enemy.ai.currentTarget instead of enemy.currentTarget
+            if (enemy.active && enemy.ai && enemy.ai.currentTarget === this) {
                 chasers.push(enemy);
             }
         }
@@ -123,6 +126,21 @@ export default class Shooter extends Unit {
             }
         }
         return closest;
+    }
+    
+    // Shooter only (Custom AI Helper)
+    findWeakestEnemy() {
+        let weakest = null;
+        let minHp = Infinity;
+        this.targetGroup.getChildren().forEach(enemy => {
+            if(enemy.active && !enemy.isDying && enemy.hp < enemy.maxHp) {
+                if(enemy.hp < minHp) {
+                    minHp = enemy.hp;
+                    weakest = enemy;
+                }
+            }
+        });
+        return weakest;
     }
 
     calculateFlankPosition(target) {
@@ -150,10 +168,7 @@ export default class Shooter extends Unit {
     }
 
     lookAt(target) {
-        // [FIX] 시선 떨림 방지 (Visual Jitter Prevention)
-        // 목표가 내 중심 기준 좌우 5px 이내에 있다면 시선 방향을 바꾸지 않음
         if (Math.abs(target.x - this.x) < 5) return;
-
         const isBlue = this.team === 'blue';
         if (target.x < this.x) this.setFlipX(isBlue ? false : true);
         else this.setFlipX(isBlue ? true : false);

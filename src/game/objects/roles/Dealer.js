@@ -5,24 +5,34 @@ export default class Dealer extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {
         stats.role = 'Dealer';
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
-
     }
 
     updateAI(delta) {
-        this.thinkTimer -= delta;
-        if (this.thinkTimer <= 0) {
+        // 1. 도발 체크
+        this.ai.processAggro(delta);
+        if (this.ai.isProvoked) {
+            // 도발 상태면 안전거리 무시하고 타겟 추적/공격
+            if (this.ai.currentTarget && this.ai.currentTarget.active) {
+                 this.scene.physics.moveToObject(this, this.ai.currentTarget, this.moveSpeed);
+                 this.updateFlipX();
+            }
+            return;
+        }
+
+        // 2. 일반 로직
+        this.ai.thinkTimer -= delta;
+        if (this.ai.thinkTimer <= 0) {
             const { thinkTimeMin, thinkTimeVar } = this.aiConfig.common || { thinkTimeMin: 150, thinkTimeVar: 100 };
-            this.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
-            
+            this.ai.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
             this.decideMove();
         }
 
-        if (this.currentTarget) {
-            if (this.currentTarget.active) { 
-                this.scene.physics.moveToObject(this, this.currentTarget, this.moveSpeed);
+        if (this.ai.currentTarget) {
+            if (this.ai.currentTarget.active) { 
+                this.scene.physics.moveToObject(this, this.ai.currentTarget, this.moveSpeed);
                 this.updateFlipX(); 
-            } else if (this.currentTarget.x !== undefined) { 
-                this.scene.physics.moveTo(this, this.currentTarget.x, this.currentTarget.y, this.moveSpeed);
+            } else if (this.ai.currentTarget.x !== undefined) { 
+                this.scene.physics.moveTo(this, this.ai.currentTarget.x, this.ai.currentTarget.y, this.moveSpeed);
                 this.updateFlipX();
             }
         } else {
@@ -31,13 +41,12 @@ export default class Dealer extends Unit {
     }
 
     decideMove() {
-        const nearestEnemy = this.findNearestEnemy();
+        const nearestEnemy = this.ai.findNearestEnemy();
         if (!nearestEnemy) {
-            this.currentTarget = null;
+            this.ai.currentTarget = null;
             return;
         }
 
-        // [Optimization] 제곱 거리 사용
         const distToEnemySq = Phaser.Math.Distance.Squared(this.x, this.y, nearestEnemy.x, nearestEnemy.y);
         const safeDistance = this.aiConfig.dealer?.safeDistance || 150; 
         const safeDistanceSq = safeDistance * safeDistance;
@@ -46,26 +55,24 @@ export default class Dealer extends Unit {
 
         if (friendlyTanker) {
             const targetOfTanker = this.findEnemyAttackingUnit(friendlyTanker);
-            
             if (targetOfTanker) {
-                this.currentTarget = targetOfTanker;
+                this.ai.currentTarget = targetOfTanker;
             } else {
                 const distToTankerSq = Phaser.Math.Distance.Squared(this.x, this.y, friendlyTanker.x, friendlyTanker.y);
                 const followDistance = this.aiConfig.dealer?.followDistance || 50; 
                 const followDistanceSq = followDistance * followDistance;
-
                 if (distToTankerSq > followDistanceSq) {
-                    this.currentTarget = { x: friendlyTanker.x, y: friendlyTanker.y };
+                    this.ai.currentTarget = { x: friendlyTanker.x, y: friendlyTanker.y };
                 } else {
-                    this.currentTarget = null; 
+                    this.ai.currentTarget = null; 
                 }
             }
         } else {
             if (distToEnemySq < safeDistanceSq) {
                 this.fleeFrom(nearestEnemy);
-                this.currentTarget = null; 
+                this.ai.currentTarget = null; 
             } else {
-                this.currentTarget = nearestEnemy;
+                this.ai.currentTarget = nearestEnemy;
             }
         }
     }

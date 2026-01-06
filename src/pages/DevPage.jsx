@@ -271,6 +271,8 @@ const DevPage = () => {
                         background: "#222", color: "white", fontSize: "1em", fontWeight: "bold" 
                     }}
                 >
+                    {/* [Modified] 맵 없음 옵션 추가 */}
+                    <option value={-1}>🚫 No Map</option>
                     {/* LEVEL_KEYS를 사용하여 동적으로 옵션 생성 */}
                     {LEVEL_KEYS.map((level, idx) => (
                         <option value={idx}>{idx}: {level}</option>

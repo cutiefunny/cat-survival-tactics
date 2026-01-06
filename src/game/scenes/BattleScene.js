@@ -15,7 +15,7 @@ import Raccoon from '../objects/roles/Raccoon';
 import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
-import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; // 동적 레벨 매니저 유지
+import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; 
 
 // [Managers & Systems]
 import BattleUIManager from '../managers/BattleUIManager';
@@ -33,7 +33,7 @@ import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
 import tilesetParkImg from '../../assets/tilesets/park.png'; 
 
-// [New Assets - Street Tilesets]
+// [Assets - Street Tilesets]
 import tilesetStreet1Img from '../../assets/tilesets/street1.png';
 import tilesetStreet2Img from '../../assets/tilesets/street2.png';
 import tilesetStreet3Img from '../../assets/tilesets/street3.png';
@@ -90,7 +90,8 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.currentLevelIndex = targetIndex;
-        const levelName = LEVEL_KEYS[this.currentLevelIndex] || 'Unknown';
+        // [Modified] -1일 경우 'No Map'으로 로깅
+        const levelName = this.currentLevelIndex === -1 ? "No Map" : (LEVEL_KEYS[this.currentLevelIndex] || 'Unknown');
         console.log(`🎮 [BattleScene] Initializing Level Index: ${this.currentLevelIndex} (${levelName})`);
     }
 
@@ -107,7 +108,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
         
-        // LevelManager를 통해 모든 레벨 데이터를 로드
         LEVEL_KEYS.forEach(key => {
             console.log(`🗺️ Preloading Map: ${key}`);
             this.load.tilemapTiledJSON(key, LEVEL_DATA[key]);
@@ -119,7 +119,6 @@ export default class BattleScene extends Phaser.Scene {
         this.load.image('tiles_city2', tilesetCity2Img);
         this.load.image('tiles_park', tilesetParkImg);
         
-        // [New] Street Tilesets Preload
         this.load.image('tiles_street1', tilesetStreet1Img);
         this.load.image('tiles_street2', tilesetStreet2Img);
         this.load.image('tiles_street3', tilesetStreet3Img);
@@ -172,6 +171,13 @@ export default class BattleScene extends Phaser.Scene {
 
         this.uiManager.destroyLoadingText();
         
+        // [Modified] -1 (No Map) 체크 로직 추가
+        if (this.currentLevelIndex === -1) {
+            console.log("🚫 [BattleScene] No Map Mode Selected.");
+            this.startGame(config, null); // 맵 키 대신 null 전달
+            return;
+        }
+
         if (this.currentLevelIndex >= LEVEL_KEYS.length) this.currentLevelIndex = 0;
         
         const targetMapKey = LEVEL_KEYS[this.currentLevelIndex];
@@ -182,79 +188,135 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     startGame(config, mapKey) {
-        const map = this.make.tilemap({ key: mapKey });
-        
-        const tilesets = [];
+        if (!mapKey) {
+            // =========================================================
+            // [New] No Map Mode Setup
+            // =========================================================
+            this.mapWidth = 2000;
+            this.mapHeight = 2000;
+            const tileSize = 32;
 
-        if (mapKey === 'stage1') {
-            const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
-            const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
-            if (t1) tilesets.push(t1);
-            if (t2) tilesets.push(t2);
+            this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
+
+            // 1. 배경용 그리드 그리기 (시각적 가이드)
+            const gridGraphics = this.add.graphics();
+            gridGraphics.lineStyle(1, 0x333333, 0.5);
+            gridGraphics.fillStyle(0x111111, 1);
+            gridGraphics.fillRect(0, 0, this.mapWidth, this.mapHeight);
+            
+            for (let x = 0; x <= this.mapWidth; x += tileSize) {
+                gridGraphics.moveTo(x, 0);
+                gridGraphics.lineTo(x, this.mapHeight);
+            }
+            for (let y = 0; y <= this.mapHeight; y += tileSize) {
+                gridGraphics.moveTo(0, y);
+                gridGraphics.lineTo(this.mapWidth, y);
+            }
+            gridGraphics.strokePath();
+
+            // 2. 가상의 맵 데이터로 패스파인딩 초기화 (장애물 없음)
+            // PathfindingManager는 tilemap.width(타일 개수)를 참조하므로 계산해서 전달
+            const virtualMap = {
+                width: Math.ceil(this.mapWidth / tileSize),
+                height: Math.ceil(this.mapHeight / tileSize),
+                tileWidth: tileSize
+            };
+            
+            // 장애물 그룹 초기화 (빈 상태)
+            this.blockObjectGroup = this.physics.add.staticGroup();
+            
+            // 패스파인딩 설정 (장애물 레이어 없음)
+            this.pathfindingManager.setup(virtualMap, []);
+
+            this.updateCameraBounds(this.scale.width, this.scale.height);
+            this.initializeGameVariables(config);
+            
+            // 유닛 생성 (맵 없음)
+            this.spawnUnits(config, null); 
+            
+            // 물리 충돌 설정 (빈 레이어)
+            this.setupPhysicsColliders(null, null);
 
         } else {
-            // [Modified] 타일셋 자동 감지 및 매핑 로직 확장
+            // =========================================================
+            // Existing Map Mode
+            // =========================================================
+            const map = this.make.tilemap({ key: mapKey });
             
-            // 1. 기본 매핑 시도 (기존 City 타일셋)
-            const tCity1 = map.addTilesetImage('City', 'tiles_city');
-            const tCity2 = map.addTilesetImage('City2', 'tiles_city2');
-            if (tCity1) tilesets.push(tCity1);
-            if (tCity2) tilesets.push(tCity2);
+            const tilesets = [];
+            if (mapKey === 'stage1') {
+                const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
+                const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
+                if (t1) tilesets.push(t1);
+                if (t2) tilesets.push(t2);
+            } else {
+                const tCity1 = map.addTilesetImage('City', 'tiles_city');
+                const tCity2 = map.addTilesetImage('City2', 'tiles_city2');
+                if (tCity1) tilesets.push(tCity1);
+                if (tCity2) tilesets.push(tCity2);
 
-            // 2. 추가 타일셋 자동 감지
-            map.tilesets.forEach(ts => {
-                // 이미 로드된 타일셋은 건너뜀
-                if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
+                map.tilesets.forEach(ts => {
+                    if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
+                    let imgKey = null;
+                    const name = ts.name;
+                    if (name.includes('Park')) imgKey = 'tiles_park';
+                    else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
+                    else if (name.includes('street2') || name === 'Street2') imgKey = 'tiles_street2';
+                    else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
+                    else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
+                    else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
+                    else if (name.includes('City')) imgKey = 'tiles_city';
 
-                let imgKey = null;
-                const name = ts.name;
+                    if (imgKey) {
+                        const t = map.addTilesetImage(ts.name, imgKey);
+                        if (t) tilesets.push(t);
+                    }
+                });
+            }
 
-                // 이름 기반 매칭 규칙
-                if (name.includes('Park')) imgKey = 'tiles_park';
-                else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
-                else if (name.includes('street2') || name === 'Street2') imgKey = 'tiles_street2';
-                else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
-                else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
-                else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
-                else if (name.includes('City')) imgKey = 'tiles_city';
+            const validTilesets = tilesets.filter(t => t);
+            
+            const groundLayer = map.createLayer('Ground', validTilesets, 0, 0);
+            this.wallLayer = map.createLayer('Walls', validTilesets, 0, 0);
+            this.blockLayer = map.createLayer('Blocks', validTilesets, 0, 0);
 
-                if (imgKey) {
-                    const t = map.addTilesetImage(ts.name, imgKey);
-                    if (t) tilesets.push(t);
-                }
-            });
+            if (this.wallLayer) this.wallLayer.setCollisionByExclusion([-1]);
+            if (this.blockLayer) this.blockLayer.setCollisionByExclusion([-1]);
+            
+            this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+
+            this.blockObjectGroup = this.physics.add.staticGroup();
+            const blockObjectLayer = map.getObjectLayer('Blocks');
+            
+            if (blockObjectLayer) {
+                blockObjectLayer.objects.forEach(obj => {
+                    const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
+                    this.physics.add.existing(rect, true); 
+                    rect.setVisible(false); 
+                    this.blockObjectGroup.add(rect);
+                });
+            }
+
+            const obstacleLayers = [this.wallLayer, this.blockLayer].filter(l => l !== null);
+            this.pathfindingManager.setup(map, obstacleLayers);
+
+            this.mapWidth = map.widthInPixels;
+            this.mapHeight = map.heightInPixels;
+            this.updateCameraBounds(this.scale.width, this.scale.height);
+
+            this.initializeGameVariables(config);
+            this.spawnUnits(config, map);
+            this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
         }
-
-        const validTilesets = tilesets.filter(t => t);
         
-        const groundLayer = map.createLayer('Ground', validTilesets, 0, 0);
-        this.wallLayer = map.createLayer('Walls', validTilesets, 0, 0);
-        this.blockLayer = map.createLayer('Blocks', validTilesets, 0, 0);
-
-        if (this.wallLayer) this.wallLayer.setCollisionByExclusion([-1]);
-        if (this.blockLayer) this.blockLayer.setCollisionByExclusion([-1]);
-        
-        this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-
-        this.blockObjectGroup = this.physics.add.staticGroup();
-        const blockObjectLayer = map.getObjectLayer('Blocks');
-        
-        if (blockObjectLayer) {
-            blockObjectLayer.objects.forEach(obj => {
-                const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
-                this.physics.add.existing(rect, true); 
-                rect.setVisible(false); 
-                this.blockObjectGroup.add(rect);
-            });
+        // 공통 카메라 팔로우
+        if(this.playerUnit && this.playerUnit.active) {
+            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+            this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
+    }
 
-        const obstacleLayers = [this.wallLayer, this.blockLayer].filter(l => l !== null);
-        this.pathfindingManager.setup(map, obstacleLayers);
-
-        this.mapWidth = map.widthInPixels;
-        this.mapHeight = map.heightInPixels;
-        this.updateCameraBounds(this.scale.width, this.scale.height);
-
+    initializeGameVariables(config) {
         this.isGameOver = false;
         this.battleStarted = false;
         this.isSetupPhase = true;
@@ -277,15 +339,6 @@ export default class BattleScene extends Phaser.Scene {
 
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
-        
-        this.spawnUnits(config, map);
-
-        if(this.playerUnit && this.playerUnit.active) {
-            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-            this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
-        }
-
-        this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
     }
 
     createBlocksDebug() {
@@ -360,18 +413,21 @@ export default class BattleScene extends Phaser.Scene {
             return unit;
         };
 
-        const catsLayer = map.getObjectLayer('Cats');
+        // [Modified] map이 null일 경우(No Map) 안전하게 처리
         let spawnZone = null;
-        if (catsLayer && catsLayer.objects.length > 0) {
-            const obj = catsLayer.objects[0];
-            spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
-            this.placementZone = spawnZone; 
-            this.zoneGraphics = this.add.graphics();
-            this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
-            this.zoneGraphics.fillRectShape(spawnZone);
-            this.zoneGraphics.setDepth(0); 
-        } else {
-            console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
+        if (map) {
+            const catsLayer = map.getObjectLayer('Cats');
+            if (catsLayer && catsLayer.objects.length > 0) {
+                const obj = catsLayer.objects[0];
+                spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
+                this.placementZone = spawnZone; 
+                this.zoneGraphics = this.add.graphics();
+                this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
+                this.zoneGraphics.fillRectShape(spawnZone);
+                this.zoneGraphics.setDepth(0); 
+            } else {
+                console.warn("⚠️ 'Cats' layer not found. Using default spawn.");
+            }
         }
 
         for (let i = 0; i < blueCount; i++) {
@@ -389,15 +445,23 @@ export default class BattleScene extends Phaser.Scene {
             this.blueTeam.add(unit);
         }
 
-        const dogLayer = map.getObjectLayer('Dogs');
-        if (dogLayer && dogLayer.objects.length > 0) {
-            dogLayer.objects.forEach((obj, index) => {
-                const stats = redRoles[index % redRoles.length];
-                const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
-                this.redTeam.add(unit);
-            });
-        } else {
-            console.log("⚠️ No 'Dogs' layer found. Using default spawn logic.");
+        // [Modified] map이 null일 경우(No Map) 안전하게 처리
+        let dogsSpawned = false;
+        if (map) {
+            const dogLayer = map.getObjectLayer('Dogs');
+            if (dogLayer && dogLayer.objects.length > 0) {
+                dogLayer.objects.forEach((obj, index) => {
+                    const stats = redRoles[index % redRoles.length];
+                    const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
+                    this.redTeam.add(unit);
+                });
+                dogsSpawned = true;
+            }
+        }
+        
+        if (!dogsSpawned) {
+            console.log("⚠️ No 'Dogs' layer or Map found. Spawning configured count.");
+            // [Modified] No Map 모드 등에서 설정된 redCount 만큼 들개 생성
             for (let i = 0; i < redCount; i++) {
                 const stats = redRoles[i % redRoles.length];
                 const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
@@ -411,6 +475,7 @@ export default class BattleScene extends Phaser.Scene {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
         
+        // [Modified] Layer가 null이면 충돌 설정 생략
         if (wallLayer) {
             this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision);
             this.physics.add.collider(this.redTeam, wallLayer, onWallCollision);
@@ -573,8 +638,8 @@ export default class BattleScene extends Phaser.Scene {
         let callback = () => this.restartLevel();
 
         if (isWin) {
-            // 현재 레벨 인덱스가 전체 레벨 수보다 작으면 다음 레벨로 진행
-            if (this.currentLevelIndex < LEVEL_KEYS.length - 1) {
+            // [Modified] No Map 모드(-1)일 경우 다음 레벨이 없으므로 그냥 0으로 리셋하거나 재시작
+            if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
                 btnText = "Next Level ▶️";
                 callback = () => this.nextLevel();
             } else {
