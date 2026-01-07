@@ -82,10 +82,16 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.hpBar = scene.add.graphics().setDepth(100);
         this.initVisuals();
 
-        // [Interaction] 플레이어 선택 (PC/Mobile 공통)
+        // [Interaction] 플레이어 선택 및 스킬 발동 (PC/Mobile 공통)
         this.on('pointerdown', () => {
             if (this.team === 'blue' && this.scene.battleStarted) {
-                this.scene.selectPlayerUnit(this);
+                // 이미 선택된 유닛(PlayerUnit)을 다시 터치하면 스킬 발동
+                if (this.scene.playerUnit === this) {
+                    this.tryUseSkill();
+                } else {
+                    // 다른 유닛이라면 해당 유닛 선택
+                    this.scene.selectPlayerUnit(this);
+                }
             }
         });
     }
@@ -109,6 +115,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
+
+        // [New] 적군(red) 사망 시 코인 드랍
+        if (this.team === 'red' && this.scene && typeof this.scene.animateCoinDrop === 'function') {
+            const dropAmount = 10; // 몬스터 처치 시 획득할 골드량
+            this.scene.animateCoinDrop(this.x, this.y, dropAmount);
+        }
 
         if (this.body) {
             this.setVelocity(0, 0);
@@ -286,17 +298,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const joyCursors = this.scene.joystickCursors; // InputManager에서 연결된 가상 커서
         
         let vx = 0, vy = 0;
-        
-        // 키보드 또는 가상 조이스틱 입력 확인
-        // [Debug] 가상 커서 신호 확인 (이동이 안될 때 주석 해제하여 확인)
-        /*
-        if (joyCursors) {
-            if (joyCursors.left.isDown) console.log("Unit: Joystick Left");
-            if (joyCursors.right.isDown) console.log("Unit: Joystick Right");
-            if (joyCursors.up.isDown) console.log("Unit: Joystick Up");
-            if (joyCursors.down.isDown) console.log("Unit: Joystick Down");
-        }
-        */
 
         if (cursors.left.isDown || this.scene.wasd?.left.isDown || (joyCursors && joyCursors.left.isDown)) vx -= 1;
         if (cursors.right.isDown || this.scene.wasd?.right.isDown || (joyCursors && joyCursors.right.isDown)) vx += 1;

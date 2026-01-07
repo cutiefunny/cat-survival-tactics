@@ -512,6 +512,88 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
+    // [New Function] 코인 드랍 애니메이션 & 획득 처리
+    animateCoinDrop(startX, startY, amount) {
+        // 1. 코인 스프라이트 생성
+        const coin = this.add.graphics();
+        coin.fillStyle(0xFFD700, 1); // Gold Color
+        coin.fillCircle(0, 0, 8);
+        coin.lineStyle(2, 0xFFFFFF, 1);
+        coin.strokeCircle(0, 0, 8);
+        
+        // [Fix] 월드 좌표 -> 화면 좌표 수동 변환
+        // 카메라가 비추는 영역(Scroll)과 확대배율(Zoom)을 고려하여 화면상 위치를 계산합니다.
+        const camera = this.cameras.main;
+        const screenX = (startX - camera.scrollX) * camera.zoom;
+        const screenY = (startY - camera.scrollY) * camera.zoom;
+
+        coin.setScrollFactor(0); // UI처럼 화면에 고정 (카메라 이동에 영향받지 않음)
+        coin.setPosition(screenX, screenY);
+        coin.setDepth(1000); 
+
+        // 2. 목표 지점 (UI 코인 아이콘 위치)
+        const targetPos = this.getCoinUiPosition(); 
+        
+        // 3. 애니메이션
+        this.tweens.add({
+            targets: coin,
+            x: targetPos.x,
+            y: targetPos.y,
+            scale: { from: 1, to: 0.5 },
+            duration: 800,
+            ease: 'Back.easeIn',
+            onComplete: () => {
+                // 4. 도착 후 처리
+                coin.destroy();
+                this.playerCoins += amount;
+                if(this.uiManager) {
+                    this.uiManager.updateCoins(this.playerCoins);
+                }
+                
+                // 5. 획득 금액 표시 (Floating Text)
+                this.showFloatingCoinText(targetPos.x, targetPos.y, amount);
+            }
+        });
+    }
+
+    // [New Function] UI 코인 위치 획득
+    getCoinUiPosition() {
+        // BattleUIManager의 코인 텍스트 위치를 가져오거나, 없으면 기본값 반환
+        // 보통 우측 상단이나 좌측 상단. 여기서는 상점 UI 근처라고 가정.
+        // BattleUIManager가 코인 위치를 제공하지 않을 경우를 대비한 하드코딩 좌표
+        if (this.uiManager && typeof this.uiManager.getCoinPosition === 'function') {
+            return this.uiManager.getCoinPosition();
+        }
+        // 기본값: 화면 우측 상단 (UI 레이아웃에 맞춰 조정 필요)
+        return { x: this.scale.width - 80, y: 50 };
+    }
+
+    // [New Function] 획득 금액 부양 텍스트
+    showFloatingCoinText(x, y, amount) {
+        const text = this.add.text(x, y, `+${amount}`, {
+            fontFamily: 'Arial',
+            fontSize: '24px',
+            color: '#FFD700',
+            stroke: '#000000',
+            strokeThickness: 3,
+            fontWeight: 'bold'
+        });
+        text.setOrigin(0.5);
+        text.setScrollFactor(0); // UI처럼 화면에 고정
+        text.setDepth(2000);
+
+        this.tweens.add({
+            targets: text,
+            y: y - 50, // 위로 둥둥
+            alpha: 0,
+            duration: 1000,
+            ease: 'Power2',
+            onComplete: () => {
+                text.destroy();
+            }
+        });
+    }
+
     setupPhysicsColliders(wallLayer, blockLayer) {
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
