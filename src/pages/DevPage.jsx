@@ -5,17 +5,17 @@ import { db } from "../firebaseConfig";
 import { useNavigate } from "@solidjs/router";
 import { LEVEL_KEYS } from "../game/managers/LevelManager";
 
-// [설정] 역할별 기본 스탯 정의
+// [설정] 역할별 기본 스탯 정의 (defense 추가)
 const DEFAULT_ROLE_DEFS = {
-  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
-  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, attackCooldown: 400 },
-  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, attackCooldown: 600 },
-  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
-  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, attackRange: 250, attackCooldown: 500 },
-  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10 },
-  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, attackCooldown: 400, skillCooldown: 8000 },
-  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 },
-  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, attackCooldown: 500 }
+  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
+  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400 },
+  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600 },
+  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
+  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500 },
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10 },
+  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000 },
+  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500 },
+  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500 }
 };
 
 // [설정] 기본 유닛 가격
@@ -230,6 +230,9 @@ const DevPage = () => {
                 
                 <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
                 
+                {/* [New] Defense Icon Display */}
+                <span title="Defense" style={{whiteSpace: "nowrap"}}>🛡️ <span style={{color: "#aaaaff"}}>{unit.defense ?? 0}</span></span>
+                
                 <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
                 
                 <span title="Action Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
@@ -373,6 +376,9 @@ const DevPage = () => {
                                 <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} />
                             </label>
                             
+                            {/* [New] Defense Input */}
+                            <label style={statLabelStyle}>DEF<input type="number" value={config.roleDefinitions[role].defense ?? 0} onInput={(e) => handleStatChange(role, "defense", parseInt(e.target.value))} style={statInputStyle} /></label>
+
                             <label style={statLabelStyle}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={statInputStyle} /></label>
                             
                             <label style={{...statLabelStyle, color: "#aaffaa"}}>

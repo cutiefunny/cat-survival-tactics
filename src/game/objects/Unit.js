@@ -32,6 +32,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.baseAttackPower = stats.attackPower;
         this.attackPower = this.baseAttackPower;
         this.moveSpeed = stats.moveSpeed;
+        
+        // [New] 방어력 추가 (기본값 0)
+        this.defense = stats.defense || 0;
+
         this.attackRange = stats.attackRange || 50;
         this.aiConfig = stats.aiConfig || {}; 
 
@@ -287,10 +291,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.ai.pathUpdateTimer -= 50; 
             }
         }
-        // [New] AI에게 충돌 정보 위임
-        if (this.ai) {
-            this.ai.onWallCollision(tile);
-        }
     }
 
     // [Modified] 모바일 가상 조이스틱 입력 처리 및 디버깅 로그 추가
@@ -391,7 +391,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
     takeDamage(amount) {
         if (!this.scene.battleStarted || this.isDying) return; 
-        this.hp -= amount;
+        
+        // [New] 방어력 적용 (최소 1 데미지 보장)
+        const damage = Math.max(1, amount - this.defense);
+        
+        this.hp -= damage;
         this.onTakeDamage(); 
         
         this.isTakingDamage = true;
