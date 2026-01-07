@@ -26,6 +26,9 @@ export default class InputManager {
         };
         // Unit.js가 참조하는 joystickCursors를 가상 커서로 연결
         this.scene.joystickCursors = this.virtualCursors;
+        
+        // [New] 최소 줌 레벨 (화면 Fit용)
+        this.minZoom = 0.3; 
     }
 
     setupControls() {
@@ -77,7 +80,8 @@ export default class InputManager {
             if (!this.scene.isMobile || pointer.type === 'mouse') {
                 const currentZoom = this.scene.cameras.main.zoom;
                 let newZoom = currentZoom - (deltaY * 0.001);
-                newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
+                // PC는 최소 줌 제한을 좀 더 자유롭게 (또는 동일하게 적용 가능)
+                newZoom = Phaser.Math.Clamp(newZoom, this.minZoom, 2.5);
                 this.scene.cameras.main.setZoom(newZoom);
             }
         });
@@ -197,7 +201,8 @@ export default class InputManager {
         const dist = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
         if (this.prevPinchDistance > 0) {
             const diff = dist - this.prevPinchDistance;
-            const newZoom = Phaser.Math.Clamp(this.scene.cameras.main.zoom + (diff * 0.002), 0.3, 2.5);
+            // [Fix] 최소 줌 레벨(minZoom)을 적용하여 축소 제한
+            const newZoom = Phaser.Math.Clamp(this.scene.cameras.main.zoom + (diff * 0.002), this.minZoom, 2.5);
             this.scene.cameras.main.setZoom(newZoom);
         }
         this.prevPinchDistance = dist;
@@ -230,18 +235,48 @@ export default class InputManager {
         
         this.scene.isMobile = isMobile;
 
+        // [New] 화면 너비와 맵 너비를 비교하여 Fit Width 줌 레벨 계산
+        const calculateFitZoom = () => {
+            if (!this.scene.mapWidth) return 0.8; // 맵 로드 전 기본값
+            const screenWidth = this.scene.scale.width;
+            // 여백 없이 꽉 채우려면: screenWidth / mapWidth
+            // 약간의 여유를 두고 싶다면 분자에 0.9 곱하기 등 가능
+            return screenWidth / this.scene.mapWidth;
+        };
+
         if (isMobile) {
             console.log("📱 Mobile Device Detected.");
-            this.scene.cameras.main.setZoom(0.8);
+            
+            // 맵 로드 후 실행되어야 정확함. 안전하게 초기값 설정 후, 리사이즈 이벤트에서 갱신
+            // (보통 create 시점엔 mapWidth가 설정되어 있음)
+            if (this.scene.mapWidth) {
+                this.minZoom = calculateFitZoom();
+                // 초기 줌을 Fit Width 상태(최소 줌)로 설정하여 전체 맵이 보이게 함 (또는 적당히 확대)
+                // 여기서는 '최소로 축소했을 때 꽉 차게'가 목표이므로 minZoom 설정이 핵심.
+                // 시작 줌은 minZoom으로 하거나, 플레이어 중심의 0.8 등으로 설정 가능.
+                // 요청사항: "최소로 축소했을 때" -> minZoom 값 설정이 중요함.
+                
+                // 일단 초기 줌은 너무 작아지지 않게 0.5와 minZoom 중 큰 값 또는 minZoom 사용
+                this.scene.cameras.main.setZoom(Math.max(this.minZoom, 0.6));
+            }
+
             this.scene.scale.on('resize', this.handleResize, this);
         } else {
             console.log("💻 PC Device Detected.");
-            // PC에서도 편의를 위해 약간 줌아웃 할 수 있음 (선택사항)
+            this.minZoom = 0.3; // PC는 더 넓게 보기 허용
         }
     }
 
     handleResize(gameSize) {
-        // 모바일 리사이즈 대응
+        // [New] 리사이즈 시 minZoom 재계산
+        if (this.scene.isMobile && this.scene.mapWidth) {
+            this.minZoom = gameSize.width / this.scene.mapWidth;
+            
+            // 현재 줌이 새로운 minZoom보다 작으면 보정
+            if (this.scene.cameras.main.zoom < this.minZoom) {
+                this.scene.cameras.main.setZoom(this.minZoom);
+            }
+        }
     }
     
     destroy() {

@@ -17,7 +17,7 @@ export default class Shooter extends Unit {
             if (nearest && nearest.active && !nearest.isDying) {
                 const dist = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
                 
-                // 적이 공격 사거리 안에 들어왔다면? -> 전투 로직(updateAI) 실행
+                // 적이 공격 사거리 안에 들어왔다면? -> AI 로직(updateAI)으로 넘겨서 공격 처리
                 if (dist <= this.attackRange) {
                     this.updateAI(delta);
                     return;
@@ -32,8 +32,13 @@ export default class Shooter extends Unit {
     updateAI(delta) {
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
+        // [Fix 1] 현재 타겟이 없거나 죽었다면, 멍하니 기다리지 말고 즉시 생각(Targeting)하게 함
+        if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying) {
+            this.ai.thinkTimer = 0;
+        }
+
         // 1. [생존 최우선] 적과의 거리 체크 (Kiting)
-        // [Fix] 대열유지 모드일 때는 카이팅(도망) 금지 -> 대열 고수
+        // 대열유지 모드일 때는 카이팅(도망) 금지 -> 대열 고수
         if (!isFormationMode) {
             const nearestThreat = this.ai.findNearestEnemy(); 
             if (nearestThreat) {
@@ -73,6 +78,7 @@ export default class Shooter extends Unit {
     }
 
     decideTargetSmart() {
+        // 1. 나를 노리는 적(Chasers) 우선 처리
         const chasers = this.findEnemiesTargetingMe();
         if (chasers.length > 0) {
             this.ai.currentTarget = this.getClosestUnit(chasers);
@@ -80,29 +86,42 @@ export default class Shooter extends Unit {
             return;
         }
 
-        // 전략적 타겟팅
-        this.ai.currentTarget = this.ai.findStrategicTarget({
+        // 2. 전략적 타겟 탐색 (Healer, Shooter 등 우선순위)
+        let strategicTarget = this.ai.findStrategicTarget({
             distance: 1.0,
             lowHp: 3.0, 
             rolePriority: { 'Healer': 500, 'Shooter': 200 }
         });
 
-        // 대열 유지 모드일 때, 타겟이 사거리 밖이면 '가장 가까운 사거리 내 적'으로 변경
-        if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
-            const target = this.ai.currentTarget;
-            if (target) {
-                const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-                if (dist > this.attackRange) {
-                    const nearest = this.ai.findNearestEnemy();
-                    if (nearest) {
-                        const d2 = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
-                        if (d2 <= this.attackRange) {
-                            this.ai.currentTarget = nearest;
-                        }
+        // [Fix 2] 기회주의적 사격 (Opportunistic Fire)
+        // 전략적 타겟이 사거리 밖이거나 없을 때, 내 바로 근처(사거리 내)에 적이 있다면 그 놈을 쏜다.
+        // 이는 Formation 모드뿐만 아니라 일반 전투에서도 "눈앞의 적을 무시하는" 문제를 해결함.
+        const nearest = this.ai.findNearestEnemy();
+        
+        if (nearest && nearest.active && !nearest.isDying) {
+            const distToNearest = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
+            
+            // 가장 가까운 적이 사거리 내에 있음
+            if (distToNearest <= this.attackRange) {
+                let shouldSwitch = false;
+
+                if (!strategicTarget) {
+                    shouldSwitch = true; // 타겟이 아예 없으면 가까운 놈 선택
+                } else {
+                    const distToStrategic = Phaser.Math.Distance.Between(this.x, this.y, strategicTarget.x, strategicTarget.y);
+                    // 전략적 타겟이 사거리 밖이라면, 사거리 안의 가까운 적을 우선함
+                    if (distToStrategic > this.attackRange) {
+                        shouldSwitch = true;
                     }
+                }
+
+                if (shouldSwitch) {
+                    strategicTarget = nearest;
                 }
             }
         }
+
+        this.ai.currentTarget = strategicTarget;
     }
 
     executeMovement() {
@@ -112,7 +131,7 @@ export default class Shooter extends Unit {
             return;
         }
 
-        // [Fix] 대열 유지 모드라면? -> 적 추격도 안 하고, 뒷걸음질도 안 함. 제자리 사수.
+        // 대열 유지 모드라면? -> 적 추격도 안 하고, 뒷걸음질도 안 함. 제자리 사수.
         if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
             this.setVelocity(0, 0);
             return;

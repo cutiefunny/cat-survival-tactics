@@ -232,6 +232,37 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
+    // [Modified] NPC 로직 수정: 적군(Red)은 정찰(Roaming) 체크 후 AI 실행
+    updateNpcLogic(delta) {
+        if (!this.scene.battleStarted) {
+            this.ai.followLeader();
+            return;
+        }
+
+        if (this.team === 'blue') {
+            if (this.ai.isLowHpFleeing) {
+                this.updateAI(delta);
+            } else {
+                switch (this.scene.squadState) {
+                    case 'FORMATION': this.ai.followLeader(); break;
+                    case 'FLEE': this.ai.runAway(delta); break;
+                    case 'FREE': default: this.updateAI(delta); break;
+                }
+            }
+        } else {
+            // [Red Team Logic]
+            // updateRoaming이 true를 반환하면(전투 모드), 구체적인 전투 AI(updateAI)를 실행
+            // false를 반환하면(정찰 모드), 전투 AI를 건너뜀 (배회 중)
+            if (this.ai.updateRoaming(delta)) {
+                this.updateAI(delta);
+            }
+        }
+    }
+
+    updateAI(delta) {
+        this.ai.update(delta);
+    }
+
     handleDebugUpdates(delta) {
         if (!this.debugText) this.createDebugObjects();
         this.updateDebugVisuals();
@@ -274,10 +305,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         } else {
             this.updateAI(delta);
         }
-    }
-
-    updateAI(delta) {
-        this.ai.update(delta);
     }
 
     isTargeted() {
