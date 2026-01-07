@@ -152,10 +152,11 @@ export default class BattleScene extends Phaser.Scene {
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
-        // [New] 개발자용 디버그 토글 키 (Backtick / ` 키) 설정
-        // 이 코드가 있어야 ` 키로 디버그 모드를 켜고 끌 수 있습니다.d
-        this.input.keyboard.on('keydown-D', () => {
-            this.toggleDebugMode();
+
+        this.input.keyboard.on('keydown-D', (event) => {
+            if (event.shiftKey) {
+                this.toggleDebugMode();
+            }
         });
 
         this.fetchConfigAndStart();

@@ -14,6 +14,9 @@ export default class InputManager {
         this.controlPointerId = -1;
         this.dragOrigin = { x: 0, y: 0 };
 
+        // [New] 입력 상태 저장소 (드래그와 키보드 입력을 분리하여 저장 후 병합)
+        this.dragState = { up: false, down: false, left: false, right: false };
+
         // [New] 가상 커서 (Unit.js 호환용 - 조이스틱 신호 시뮬레이션)
         this.virtualCursors = {
             up: { isDown: false },
@@ -38,12 +41,26 @@ export default class InputManager {
         
         this.spaceKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-        // 이벤트 리스너 등록 (메서드 분리)
+        // [New] PC 단축키 설정 (Q, E, R)
+        this.scene.input.keyboard.on('keydown-Q', () => {
+            if (this.scene.toggleAutoBattle) this.scene.toggleAutoBattle();
+        });
+        this.scene.input.keyboard.on('keydown-E', () => {
+            if (this.scene.toggleSquadState) this.scene.toggleSquadState();
+        });
+        this.scene.input.keyboard.on('keydown-R', () => {
+            if (this.scene.toggleGameSpeed) this.scene.toggleGameSpeed();
+        });
+
+        // 이벤트 리스너 등록
         this.scene.input.on('pointerdown', (pointer) => this.handlePointerDown(pointer));
         this.scene.input.on('pointermove', (pointer) => this.handlePointerMove(pointer));
         this.scene.input.on('pointerup', (pointer) => this.handlePointerUp(pointer));
         
-        // [Fix] 배치 단계 드래그 이벤트 (전투 중에는 무시하도록 처리)
+        // [New] 매 프레임 입력 상태 업데이트 (WASD + 드래그 통합)
+        this.scene.events.on('update', this.processInputs, this);
+
+        // [Fix] 배치 단계 드래그 이벤트
         this.scene.input.on('dragstart', () => { 
             if (this.scene.isSetupPhase) {
                 this.isDraggingUnit = true; 
@@ -56,7 +73,8 @@ export default class InputManager {
 
         // PC 휠 줌
         this.scene.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
-            if (!this.scene.isMobile) {
+            // PC 모드거나 마우스 휠이 있는 경우 줌 동작 허용
+            if (!this.scene.isMobile || pointer.type === 'mouse') {
                 const currentZoom = this.scene.cameras.main.zoom;
                 let newZoom = currentZoom - (deltaY * 0.001);
                 newZoom = Phaser.Math.Clamp(newZoom, 0.3, 2.5);
@@ -65,17 +83,26 @@ export default class InputManager {
         });
     }
 
-    // [로직 1] 터치 시작: 유닛을 누르면 제어권 획득
+    // [New] 입력 통합 처리 메서드 (Update Loop에서 호출)
+    processInputs() {
+        if (!this.scene.wasd) return;
+
+        // 드래그 입력(dragState)과 WASD 입력(Key)을 OR 연산으로 통합
+        this.virtualCursors.up.isDown = this.dragState.up || this.scene.wasd.up.isDown;
+        this.virtualCursors.down.isDown = this.dragState.down || this.scene.wasd.down.isDown;
+        this.virtualCursors.left.isDown = this.dragState.left || this.scene.wasd.left.isDown;
+        this.virtualCursors.right.isDown = this.dragState.right || this.scene.wasd.right.isDown;
+    }
+
+    // [로직 1] 터치/클릭 시작: 유닛을 누르면 제어권 획득
     handlePointerDown(pointer) {
-        if (!this.scene.isMobile) return;
+        // [Modified] PC여도 마우스 좌클릭이면 허용 (모바일 체크 제거)
+        // pointer.button === 0 : 마우스 좌클릭 (터치는 보통 0)
         
-        // [Fix] 전투 중이라면 배치 드래그 상태 강제 해제 (안전장치)
+        // [Fix] 전투 중이라면 배치 드래그 상태 강제 해제
         if (!this.scene.isSetupPhase) {
             this.isDraggingUnit = false;
         }
-
-        // [Debug] 터치 시작 로그
-        // console.log(`[Input] Pointer Down: ID=${pointer.id}, Phase=${this.scene.isSetupPhase ? 'SETUP' : 'BATTLE'}, IsDragging=${this.isDraggingUnit}`);
 
         if (this.isDraggingUnit) return; 
 
@@ -83,64 +110,51 @@ export default class InputManager {
         if (this.scene.playerUnit && this.scene.playerUnit.active) {
             const unit = this.scene.playerUnit;
             
-            // [Improvement] 사각형 Bounds 대신 거리(Radius) 기반 체크로 변경
-            // 유닛 중심점과 터치 포인트 사이의 거리 계산 (Zoom 고려하여 World 좌표 사용)
+            // 유닛 중심점과 터치 포인트 사이의 거리 계산
             const dist = Phaser.Math.Distance.Between(pointer.worldX, pointer.worldY, unit.x, unit.y);
-            const hitThreshold = 80; // 터치 인식 반경 (픽셀 단위, 넉넉하게 설정)
+            const hitThreshold = 80; 
 
+            // 범위 내 클릭 시 조작 시작
             if (dist <= hitThreshold) {
                 this.isControllingUnit = true;
                 this.controlPointerId = pointer.id;
-                this.dragOrigin = { x: pointer.x, y: pointer.y }; // 화면 터치 지점을 기준점으로 설정
-
-                console.log(`✅ [Input] Control STARTED. Dist: ${Math.floor(dist)}px (Threshold: ${hitThreshold})`);
+                this.dragOrigin = { x: pointer.x, y: pointer.y }; 
 
                 // 조작 시작 시 카메라가 유닛을 다시 따라가도록 설정
                 this.scene.cameras.main.startFollow(unit, true, 0.1, 0.1);
-            } else {
-                console.log(`❌ [Input] Missed Unit. Dist: ${Math.floor(dist)}px > ${hitThreshold}`);
             }
-        } else {
-            console.log(`⚠️ [Input] No Active Player Unit`);
         }
     }
 
     // [로직 2] 드래그: 기준점(dragOrigin) 대비 이동 방향 계산
     handlePointerMove(pointer) {
-        // 1. [PC] 마우스 휠 클릭 이동
+        // 1. [PC] 마우스 휠 클릭(Middle Button)으로 카메라 패닝
         const isMiddleBtn = (pointer.button === 1) || (pointer.middleButtonDown && pointer.middleButtonDown());
-        if (!this.scene.isMobile && pointer.isDown && isMiddleBtn) {
+        if (pointer.isDown && isMiddleBtn) {
             this.panCamera(pointer);
             return;
         }
 
-        // 2. [Mobile] 터치 제어
-        if (this.scene.isMobile) {
-            const p1 = this.scene.input.pointer1;
-            const p2 = this.scene.input.pointer2;
+        // 2. [Mobile] 핀치 줌 (멀티터치)
+        if (this.scene.isMobile && this.scene.input.pointer1.isDown && this.scene.input.pointer2.isDown) {
+             this.handlePinchZoom(this.scene.input.pointer1, this.scene.input.pointer2);
+             return;
+        }
+        this.prevPinchDistance = 0;
 
-            // A) 멀티터치 -> 핀치 줌
-            if (p1.isDown && p2.isDown) {
-                this.handlePinchZoom(p1, p2);
-                return;
-            } 
-            this.prevPinchDistance = 0;
-
-            // B) 유닛 조작 중 (드래그로 이동 방향 결정)
-            if (this.isControllingUnit && pointer.id === this.controlPointerId) {
-                this.updateUnitMovement(pointer);
-            }
-            // C) 카메라 패닝 (유닛 조작 중이 아닐 때만)
-            else if (pointer.isDown && !this.isDraggingUnit && !this.isControllingUnit) {
-                this.panCamera(pointer);
-            }
+        // 3. [Common] 유닛 조작 (PC 좌클릭 드래그 or 모바일 터치 드래그)
+        if (this.isControllingUnit && pointer.id === this.controlPointerId) {
+            this.updateUnitMovement(pointer);
+        }
+        // 4. [Mobile] 배경 드래그 시 카메라 패닝 (유닛 조작 아닐 때)
+        else if (this.scene.isMobile && pointer.isDown && !this.isDraggingUnit && !this.isControllingUnit) {
+            this.panCamera(pointer);
         }
     }
 
-    // [로직 3] 터치 종료: 이동 멈춤
+    // [로직 3] 터치/클릭 종료
     handlePointerUp(pointer) {
         if (this.isControllingUnit && pointer.id === this.controlPointerId) {
-            console.log(`🛑 [Input] Control ENDED. PointerID: ${pointer.id}`);
             this.stopUnitMovement();
         }
     }
@@ -148,29 +162,28 @@ export default class InputManager {
     updateUnitMovement(pointer) {
         const dx = pointer.x - this.dragOrigin.x;
         const dy = pointer.y - this.dragOrigin.y;
-        const threshold = 15; // 민감도 (픽셀)
+        const threshold = 15; // 민감도
 
-        // 초기화
-        this.virtualCursors.left.isDown = false;
-        this.virtualCursors.right.isDown = false;
-        this.virtualCursors.up.isDown = false;
-        this.virtualCursors.down.isDown = false;
-
-        // 방향 판정
-        if (dx < -threshold) this.virtualCursors.left.isDown = true;
-        else if (dx > threshold) this.virtualCursors.right.isDown = true;
-        
-        if (dy < -threshold) this.virtualCursors.up.isDown = true;
-        else if (dy > threshold) this.virtualCursors.down.isDown = true;
+        // [Modified] 직접 virtualCursors를 덮어쓰지 않고 dragStatus만 업데이트
+        // (processInputs에서 WASD와 합쳐짐)
+        this.dragState.left = dx < -threshold;
+        this.dragState.right = dx > threshold;
+        this.dragState.up = dy < -threshold;
+        this.dragState.down = dy > threshold;
     }
 
     stopUnitMovement() {
         this.isControllingUnit = false;
         this.controlPointerId = -1;
-        this.virtualCursors.left.isDown = false;
-        this.virtualCursors.right.isDown = false;
-        this.virtualCursors.up.isDown = false;
-        this.virtualCursors.down.isDown = false;
+        
+        // 드래그 상태 초기화
+        this.dragState.left = false;
+        this.dragState.right = false;
+        this.dragState.up = false;
+        this.dragState.down = false;
+        
+        // 즉시 반영을 위해 processInputs 호출 (선택사항)
+        this.processInputs();
     }
 
     panCamera(pointer) {
@@ -191,7 +204,6 @@ export default class InputManager {
     }
 
     handlePlacementDrag(pointer, gameObject, dragX, dragY) {
-        // [Fix] isSetupPhase 체크 강화
         if (this.scene.isSetupPhase) {
             let targetX = dragX;
             let targetY = dragY;
@@ -224,6 +236,7 @@ export default class InputManager {
             this.scene.scale.on('resize', this.handleResize, this);
         } else {
             console.log("💻 PC Device Detected.");
+            // PC에서도 편의를 위해 약간 줌아웃 할 수 있음 (선택사항)
         }
     }
 
@@ -241,6 +254,14 @@ export default class InputManager {
             this.scene.input.off('pointerdown'); 
             this.scene.input.off('pointerup');
             
+            // [New] 이벤트 리스너 해제
+            this.scene.events.off('update', this.processInputs, this);
+            if (this.scene.input.keyboard) {
+                this.scene.input.keyboard.off('keydown-Q');
+                this.scene.input.keyboard.off('keydown-E');
+                this.scene.input.keyboard.off('keydown-R');
+            }
+
             this.scene.cursors = null;
             this.scene.wasd = null;
             this.scene.joystickCursors = null; 

@@ -48,47 +48,42 @@ export default class UIScene extends Phaser.Scene {
         this.repositionFooterElements();
     }
 
-    // [Modified] 상점 UI 생성 (모바일 최적화 레이아웃 적용)
+    // [Modified] 상점 UI 생성 (요청사항 반영)
     createShopUI(unitData, currentCoins, onBuyCallback) {
         if (this.shopContainer) this.shopContainer.destroy();
 
         const { width } = this.scale;
         const isMobile = width < 600; 
-        const panelHeight = isMobile ? 60 : 80; // 모바일 패널 높이 축소
+        const panelHeight = isMobile ? 60 : 80; 
         
         this.shopContainer = this.add.container(0, 0);
         
-        // 배경
+        // 1. 배경 및 테두리 (인덱스 0, 1)
         const bg = this.add.rectangle(width/2, panelHeight/2, width, panelHeight, 0x000000, 0.7);
         const border = this.add.rectangle(width/2, panelHeight, width, 2, 0xffcc00, 0.5);
         this.shopContainer.add([bg, border]);
 
-        // [Fix] 코인 텍스트: 모바일에서 이모티콘 제거 및 폰트 축소
+        // 2. 코인 텍스트 (인덱스 2) - [New] 우측 정렬
         const fontSize = isMobile ? '16px' : '24px';
         const coinString = isMobile ? `${currentCoins}냥` : `💰 ${currentCoins}냥`;
-        const textX = isMobile ? 10 : 20;
-
-        this.coinText = this.add.text(textX, panelHeight/2, coinString, {
+        
+        // 초기 생성 위치는 일단 0으로 잡고 reposition에서 배치
+        this.coinText = this.add.text(0, panelHeight/2, coinString, {
             fontSize: fontSize, fontStyle: 'bold', fill: '#ffdd00', stroke: '#000000', strokeThickness: 3
-        }).setOrigin(0, 0.5);
+        }).setOrigin(1, 0.5); // Origin을 우측 중앙으로 설정
         this.shopContainer.add(this.coinText);
 
-        // [Fix] 유닛 구매 버튼들: 모바일에서 가로폭 대폭 축소
-        let startX = isMobile ? 85 : 180;  // 시작 위치 당김
-        const btnGap = isMobile ? 52 : 90; // 간격 축소
-        const btnW = isMobile ? 48 : 80;   // 버튼 폭 축소
-        const btnH = isMobile ? 40 : 50;   // 버튼 높이 축소
+        // 3. 유닛 구매 버튼들 (인덱스 3~)
+        const btnW = isMobile ? 40 : 80;   // [New] 모바일 버튼 폭 축소 (48 -> 40)
+        const btnH = isMobile ? 40 : 50;
         
         unitData.forEach((unit, index) => {
-            const btnX = startX + (index * btnGap);
-            const btnY = panelHeight / 2;
-            
-            const btn = this.add.container(btnX, btnY);
+            const btn = this.add.container(0, panelHeight / 2);
             
             // 버튼 배경
             const btnBg = this.add.rectangle(0, 0, btnW, btnH, 0x333333).setStrokeStyle(1, 0xaaaaaa);
             
-            // 유닛 이름 & 가격 (폰트 사이즈 축소)
+            // 유닛 이름 & 가격
             const nameSize = isMobile ? '10px' : '12px';
             const costSize = isMobile ? '11px' : '14px';
             
@@ -106,10 +101,80 @@ export default class UIScene extends Phaser.Scene {
             this.shopContainer.add(btn);
         });
         
+        // 레이아웃 적용
         this.repositionShopElements();
     }
 
-    // [Modified] 코인 업데이트 시 모바일 여부 확인
+    // [Modified] 리사이징 및 레이아웃 배치 로직
+    repositionShopElements() {
+        if (!this.shopContainer || !this.shopContainer.visible) return;
+        const { width } = this.scale;
+        const isMobile = width < 600;
+        
+        // 1. 스케일링 계산
+        let scale = 1;
+        if (width >= 600 && width < 800) {
+            scale = width / 800;
+        } else if (width < 600) {
+            if (width < 360) scale = width / 360; 
+            else scale = 1; 
+        }
+        this.shopContainer.setScale(scale);
+
+        // 컨테이너 내부의 유효 너비 (스케일 역보정)
+        const effectiveWidth = width / scale;
+        const bg = this.shopContainer.list[0];
+        const border = this.shopContainer.list[1];
+        const panelHeight = bg ? bg.height : (isMobile ? 60 : 80);
+
+        // 2. 배경 꽉 채우기
+        if (bg) {
+            bg.setPosition(effectiveWidth / 2, panelHeight/2);
+            bg.setSize(effectiveWidth, panelHeight);
+        }
+        if (border) {
+            border.setPosition(effectiveWidth / 2, panelHeight);
+            border.setSize(effectiveWidth, 2);
+        }
+
+        // 3. 코인 텍스트 우측 정렬 배치
+        if (this.coinText) {
+            const padding = isMobile ? 10 : 20;
+            // effectiveWidth(우측 끝)에서 padding만큼 안쪽으로
+            this.coinText.setPosition(effectiveWidth - padding, panelHeight / 2);
+        }
+
+        // 4. 유닛 버튼 배치 (PC: 가운데 정렬, 모바일: 좌측 정렬)
+        // 버튼들은 인덱스 3부터 시작
+        const buttons = this.shopContainer.list.slice(3);
+        if (buttons.length > 0) {
+            const btnW = isMobile ? 40 : 80;
+            const btnGap = isMobile ? 45 : 90; // 간격 조정
+            
+            let startX;
+
+            if (isMobile) {
+                // [Mobile] 좌측 정렬 (패딩 + 버튼 절반너비)
+                startX = 10 + (btnW / 2);
+            } else {
+                // [PC] 가운데 정렬
+                const totalGroupWidth = (buttons.length - 1) * btnGap;
+                startX = (effectiveWidth / 2) - (totalGroupWidth / 2);
+            }
+
+            buttons.forEach((btn, index) => {
+                btn.setPosition(startX + (index * btnGap), panelHeight / 2);
+                
+                // (선택사항) 버튼 내부 사이즈도 모바일/PC 전환 시 업데이트하려면 여기서 처리
+                const btnBg = btn.list[0];
+                const btnH = isMobile ? 40 : 50;
+                if (btnBg) {
+                    btnBg.setSize(btnW, btnH);
+                }
+            });
+        }
+    }
+
     updateCoins(amount) {
         if (this.coinText) {
             const isMobile = this.scale.width < 600;
@@ -133,41 +198,6 @@ export default class UIScene extends Phaser.Scene {
         }
     }
     
-    // [Modified] 리사이징 로직 수정: 모바일 레이아웃일 때는 스케일링을 최소화
-    repositionShopElements() {
-        if (!this.shopContainer || !this.shopContainer.visible) return;
-        const { width } = this.scale;
-        
-        let scale = 1;
-        // PC 화면인데 좁은 경우
-        if (width >= 600 && width < 800) {
-            scale = width / 800;
-        } 
-        // 모바일 화면인 경우 (이미 작은 레이아웃을 사용하므로, 아주 좁을 때만 스케일 조정)
-        else if (width < 600) {
-            if (width < 360) scale = width / 360; 
-            else scale = 1; 
-        }
-        
-        this.shopContainer.setScale(scale);
-
-        // 배경 꽉 채우기
-        const effectiveWidth = width / scale;
-        const bg = this.shopContainer.list[0];
-        const border = this.shopContainer.list[1];
-        
-        if (bg) {
-            const panelHeight = bg.height;
-            bg.setPosition(effectiveWidth / 2, panelHeight/2);
-            bg.setSize(effectiveWidth, panelHeight);
-            
-            if (border) {
-                border.setPosition(effectiveWidth / 2, panelHeight);
-                border.setSize(effectiveWidth, 2);
-            }
-        }
-    }
-
     createAutoButton() {
         this.autoBtn = this.add.container(0, 0);
         this.autoBtn.setSize(120, 50);
@@ -272,6 +302,7 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
+    // [Modified] 피드백 버튼 추가 및 레이아웃 조정 (기존 유지)
     createGameOverUI(data, callback) {
         const { width, height } = this.scale;
         const isWin = data.isWin;
@@ -283,7 +314,7 @@ export default class UIScene extends Phaser.Scene {
         const overlay = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.85).setDepth(2999).setInteractive();
 
         const panelWidth = Math.min(400, width * 0.9);
-        const panelHeight = Math.min(500, height * 0.8);
+        const panelHeight = Math.min(600, height * 0.9); 
         const panel = this.add.container(width/2, height/2).setDepth(3000);
 
         const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x222222).setStrokeStyle(4, 0xffffff);
@@ -295,8 +326,8 @@ export default class UIScene extends Phaser.Scene {
         panel.add(titleText);
 
         if (isWin && stats.score !== undefined) {
-            const startY = -panelHeight * 0.2;
-            const gapY = 50; 
+            const startY = -panelHeight * 0.25;
+            const gapY = 40; 
             const labelStyle = { fontSize: '20px', fill: '#aaaaaa' };
             const valStyle = { fontSize: '20px', fill: '#ffffff', fontStyle: 'bold' };
 
@@ -327,13 +358,12 @@ export default class UIScene extends Phaser.Scene {
             panel.add([scoreLabel, scoreVal, rankText]);
         }
 
-        const btnY = panelHeight * 0.4;
-        const btnBg = this.add.rectangle(0, btnY, 200, 60, 0x4444ff).setStrokeStyle(2, 0xffffff);
-        const btnTxt = this.add.text(0, btnY, btnText, { fontSize: '24px', fontStyle: 'bold' }).setOrigin(0.5);
+        const btnY = panelHeight * 0.3; 
+        const btnBg = this.add.rectangle(0, btnY, 200, 50, 0x4444ff).setStrokeStyle(2, 0xffffff);
+        const btnTxt = this.add.text(0, btnY, btnText, { fontSize: '22px', fontStyle: 'bold' }).setOrigin(0.5);
         
         const btnContainer = this.add.container(0, 0, [btnBg, btnTxt]);
         
-        // Next Level 버튼 클릭 시 코인 애니메이션 후 콜백 실행
         btnBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
             this.tweens.add({
                 targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
@@ -349,6 +379,19 @@ export default class UIScene extends Phaser.Scene {
         });
         
         panel.add(btnContainer);
+
+        const feedbackY = btnY + 70; 
+        const fbBg = this.add.rectangle(0, feedbackY, 200, 40, 0x333333).setStrokeStyle(1, 0xaaaaaa);
+        const fbTxt = this.add.text(0, feedbackY, "피드백 남기기", { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
+        
+        const fbContainer = this.add.container(0, 0, [fbBg, fbTxt]);
+        
+        fbBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+            this.tweens.add({ targets: fbContainer, scale: 0.9, duration: 50, yoyo: true });
+            window.open('https://musclecat-studio.com/thread', '_blank');
+        });
+
+        panel.add(fbContainer);
 
         panel.setScale(0);
         this.tweens.add({
