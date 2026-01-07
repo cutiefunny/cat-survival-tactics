@@ -71,7 +71,7 @@ const DEFAULT_UNIT_COSTS = [
 ];
 
 const DEFAULT_CONFIG = {
-    showDebugStats: false, // 기본값은 꺼짐 (Config나 키 입력으로 켬)
+    showDebugStats: false, 
     gameSettings: { blueCount: 1, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1', initialCoins: 50 },
     aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
@@ -554,7 +554,7 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    // [New Function] 코인 드랍 애니메이션 & 획득 처리 (수정됨: 제자리 페이드아웃)
+    // [Rolled Back & Modified] 몬스터 사망 시 코인 드랍 (기존 방식: 제자리 페이드아웃)
     animateCoinDrop(startX, startY, amount) {
         // 1. 코인 스프라이트 생성 (World Space)
         const coin = this.add.graphics();
@@ -587,7 +587,7 @@ export default class BattleScene extends Phaser.Scene {
         this.showFloatingCoinText(startX, startY, amount);
     }
 
-    // [New Function] 획득 금액 부양 텍스트 (수정됨: World 좌표계 사용)
+    // [New Function] 획득 금액 부양 텍스트 (World Space)
     showFloatingCoinText(x, y, amount) {
         const text = this.add.text(x, y, `+${amount}`, {
             fontFamily: 'Arial',
@@ -598,7 +598,6 @@ export default class BattleScene extends Phaser.Scene {
             fontWeight: 'bold'
         });
         text.setOrigin(0.5);
-        // text.setScrollFactor(0); // 삭제: 월드 좌표를 따르도록 함
         text.setDepth(2000);
 
         this.tweens.add({
@@ -814,9 +813,17 @@ export default class BattleScene extends Phaser.Scene {
         const bonusCoins = Math.floor(score / 100);
         const nextCoins = this.playerCoins + bonusCoins; 
         
-        console.log(`🎉 Level Clear! Score: ${score}, Bonus: +${bonusCoins}, Total Next: ${nextCoins}`);
+        console.log(`🎉 [nextLevel] Score: ${score}, BonusCoins: ${bonusCoins}, NextCoins: ${nextCoins}`);
         
-        this.scene.restart({ levelIndex: nextIndex, currentCoins: nextCoins });
+        // [Modified] 애니메이션 완료 후 씬 재시작 (UI Animation 사용)
+        // 화면 중앙(Screen Space) 좌표 계산
+        const centerX = this.scale.width / 2;
+        const centerY = this.scale.height / 2;
+
+        this.uiManager.playCoinAnimation(centerX, centerY, bonusCoins, () => {
+            console.log("➡️ [nextLevel] Callback Triggered - Restarting Scene...");
+            this.scene.restart({ levelIndex: nextIndex, currentCoins: nextCoins });
+        });
     }
 
     restartLevel() {

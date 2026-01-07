@@ -48,7 +48,7 @@ export default class UIScene extends Phaser.Scene {
         this.repositionFooterElements();
     }
 
-    // [Modified] 상점 UI 생성 (요청사항 반영)
+    // [Modified] 상점 UI 생성
     createShopUI(unitData, currentCoins, onBuyCallback) {
         if (this.shopContainer) this.shopContainer.destroy();
 
@@ -58,32 +58,26 @@ export default class UIScene extends Phaser.Scene {
         
         this.shopContainer = this.add.container(0, 0);
         
-        // 1. 배경 및 테두리 (인덱스 0, 1)
         const bg = this.add.rectangle(width/2, panelHeight/2, width, panelHeight, 0x000000, 0.7);
         const border = this.add.rectangle(width/2, panelHeight, width, 2, 0xffcc00, 0.5);
         this.shopContainer.add([bg, border]);
 
-        // 2. 코인 텍스트 (인덱스 2) - [New] 우측 정렬
         const fontSize = isMobile ? '16px' : '24px';
         const coinString = isMobile ? `${currentCoins}냥` : `💰 ${currentCoins}냥`;
         
-        // 초기 생성 위치는 일단 0으로 잡고 reposition에서 배치
         this.coinText = this.add.text(0, panelHeight/2, coinString, {
             fontSize: fontSize, fontStyle: 'bold', fill: '#ffdd00', stroke: '#000000', strokeThickness: 3
-        }).setOrigin(1, 0.5); // Origin을 우측 중앙으로 설정
+        }).setOrigin(1, 0.5); 
         this.shopContainer.add(this.coinText);
 
-        // 3. 유닛 구매 버튼들 (인덱스 3~)
-        const btnW = isMobile ? 40 : 80;   // [New] 모바일 버튼 폭 축소 (48 -> 40)
+        const btnW = isMobile ? 40 : 80;   
         const btnH = isMobile ? 40 : 50;
         
         unitData.forEach((unit, index) => {
             const btn = this.add.container(0, panelHeight / 2);
             
-            // 버튼 배경
             const btnBg = this.add.rectangle(0, 0, btnW, btnH, 0x333333).setStrokeStyle(1, 0xaaaaaa);
             
-            // 유닛 이름 & 가격
             const nameSize = isMobile ? '10px' : '12px';
             const costSize = isMobile ? '11px' : '14px';
             
@@ -101,17 +95,14 @@ export default class UIScene extends Phaser.Scene {
             this.shopContainer.add(btn);
         });
         
-        // 레이아웃 적용
         this.repositionShopElements();
     }
 
-    // [Modified] 리사이징 및 레이아웃 배치 로직
     repositionShopElements() {
         if (!this.shopContainer || !this.shopContainer.visible) return;
         const { width } = this.scale;
         const isMobile = width < 600;
         
-        // 1. 스케일링 계산
         let scale = 1;
         if (width >= 600 && width < 800) {
             scale = width / 800;
@@ -121,13 +112,11 @@ export default class UIScene extends Phaser.Scene {
         }
         this.shopContainer.setScale(scale);
 
-        // 컨테이너 내부의 유효 너비 (스케일 역보정)
         const effectiveWidth = width / scale;
         const bg = this.shopContainer.list[0];
         const border = this.shopContainer.list[1];
         const panelHeight = bg ? bg.height : (isMobile ? 60 : 80);
 
-        // 2. 배경 꽉 채우기
         if (bg) {
             bg.setPosition(effectiveWidth / 2, panelHeight/2);
             bg.setSize(effectiveWidth, panelHeight);
@@ -137,35 +126,27 @@ export default class UIScene extends Phaser.Scene {
             border.setSize(effectiveWidth, 2);
         }
 
-        // 3. 코인 텍스트 우측 정렬 배치
         if (this.coinText) {
             const padding = isMobile ? 10 : 20;
-            // effectiveWidth(우측 끝)에서 padding만큼 안쪽으로
             this.coinText.setPosition(effectiveWidth - padding, panelHeight / 2);
         }
 
-        // 4. 유닛 버튼 배치 (PC: 가운데 정렬, 모바일: 좌측 정렬)
-        // 버튼들은 인덱스 3부터 시작
         const buttons = this.shopContainer.list.slice(3);
         if (buttons.length > 0) {
             const btnW = isMobile ? 40 : 80;
-            const btnGap = isMobile ? 45 : 90; // 간격 조정
+            const btnGap = isMobile ? 45 : 90; 
             
             let startX;
 
             if (isMobile) {
-                // [Mobile] 좌측 정렬 (패딩 + 버튼 절반너비)
                 startX = 10 + (btnW / 2);
             } else {
-                // [PC] 가운데 정렬
                 const totalGroupWidth = (buttons.length - 1) * btnGap;
                 startX = (effectiveWidth / 2) - (totalGroupWidth / 2);
             }
 
             buttons.forEach((btn, index) => {
                 btn.setPosition(startX + (index * btnGap), panelHeight / 2);
-                
-                // (선택사항) 버튼 내부 사이즈도 모바일/PC 전환 시 업데이트하려면 여기서 처리
                 const btnBg = btn.list[0];
                 const btnH = isMobile ? 40 : 50;
                 if (btnBg) {
@@ -302,7 +283,6 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    // [Modified] 피드백 버튼 추가 및 레이아웃 조정 (기존 유지)
     createGameOverUI(data, callback) {
         const { width, height } = this.scale;
         const isWin = data.isWin;
@@ -369,7 +349,8 @@ export default class UIScene extends Phaser.Scene {
                 targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
                 onComplete: () => {
                     if (isWin && btnText.includes("Next")) {
-                        this.playCoinAnimation(width/2, height/2 + btnY, callback);
+                        // [Fix] BattleScene에서 호출하던 로직을 여기서 처리하도록 변경
+                        if (callback) callback();
                     } else {
                         if (callback) callback();
                         this.scene.restart();
@@ -399,18 +380,38 @@ export default class UIScene extends Phaser.Scene {
         });
     }
 
-    playCoinAnimation(startX, startY, onComplete) {
+    // [New] 코인 획득 애니메이션 (우측 상단 UI 방향)
+    playCoinAnimation(startX, startY, amount, onComplete) {
         const coinCount = 10; 
-        const targetX = 40;   
-        const targetY = 40;   
         
+        // 목표 지점: 우측 상단 UI의 코인 텍스트 위치 (대략적인 값, scale 고려)
+        const targetX = this.scale.width - 50;   
+        const targetY = 50; 
+        
+        // 1. 획득 금액 텍스트 (화면 중앙 시작)
+        if (amount > 0) {
+            const amountText = this.add.text(startX, startY, `+${amount}냥`, { 
+                fontSize: '64px', color: '#ffd700', stroke: '#000000', strokeThickness: 4, fontStyle: 'bold' 
+            }).setOrigin(0.5).setDepth(4001);
+
+            this.tweens.add({
+                targets: amountText,
+                y: startY - 80,
+                alpha: 0,
+                duration: 1500,
+                ease: 'Power2',
+                onComplete: () => amountText.destroy()
+            });
+        }
+
         let completedCoins = 0;
 
         for (let i = 0; i < coinCount; i++) {
             const coin = this.add.text(startX, startY, '💰', { fontSize: '32px' }).setOrigin(0.5).setDepth(4000);
             
-            const scatterX = Phaser.Math.Between(-50, 50);
-            const scatterY = Phaser.Math.Between(-50, 50);
+            // 흩뿌려지는 효과
+            const scatterX = Phaser.Math.Between(-60, 60);
+            const scatterY = Phaser.Math.Between(-60, 60);
 
             this.tweens.add({
                 targets: coin,
@@ -420,13 +421,14 @@ export default class UIScene extends Phaser.Scene {
                 duration: 300,
                 ease: 'Power2',
                 onComplete: () => {
+                    // 우측 상단으로 날아가기
                     this.tweens.add({
                         targets: coin,
                         x: targetX,
                         y: targetY,
                         scale: 0.5,
                         alpha: 0,
-                        duration: 600,
+                        duration: 800,
                         ease: 'Back.in',
                         delay: i * 50, 
                         onComplete: () => {

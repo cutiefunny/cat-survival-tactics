@@ -25,12 +25,9 @@ export default class BattleUIManager {
 
     createDebugStats() { 
         this.isDebugEnabled = true;
-        // [Fix] 타이밍 문제 해결을 위해 delayedCall 제거
-        // updateDebugStats 루프에서 UI가 준비되면 자동으로 켜지도록 변경
         this.updateDebugStatsVisibility();
     }
     
-    // [New] 명시적으로 끄는 기능 추가
     destroyDebugStats() {
         this.isDebugEnabled = false;
         const ui = this.scene.scene.get('UIScene');
@@ -39,11 +36,9 @@ export default class BattleUIManager {
         }
     }
 
-    // [New] 디버그 표시 상태 동기화
     updateDebugStatsVisibility() {
         if (!this.isDebugEnabled) return;
         const ui = this.scene.scene.get('UIScene');
-        // UI 씬이 준비되었고 텍스트 객체가 있는데 꺼져있다면 켠다
         if (ui && ui.debugStats && !ui.debugStats.visible) {
             ui.showDebugStats();
         }
@@ -86,6 +81,16 @@ export default class BattleUIManager {
         if (ui && ui.showStartAnimation) ui.showStartAnimation();
     }
 
+    // [New] 코인 획득 애니메이션 호출
+    playCoinAnimation(startX, startY, amount, onComplete) {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.playCoinAnimation) {
+            ui.playCoinAnimation(startX, startY, amount, onComplete);
+        } else {
+            if (onComplete) onComplete();
+        }
+    }
+
     createGameOverUI(message, color, btnText, callback) {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.createGameOverUI) {
@@ -98,7 +103,6 @@ export default class BattleUIManager {
         
         const ui = this.scene.scene.get('UIScene');
         
-        // [Fix] 매 프레임 체크하여 UI 씬 로딩 완료 시점에 즉시 표시 (Race Condition 해결)
         if (ui && ui.debugStats) {
             if (!ui.debugStats.visible) {
                 ui.showDebugStats();
