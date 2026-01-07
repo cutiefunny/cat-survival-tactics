@@ -71,7 +71,7 @@ const DEFAULT_UNIT_COSTS = [
 ];
 
 const DEFAULT_CONFIG = {
-    showDebugStats: false,
+    showDebugStats: false, // 기본값은 꺼짐 (Config나 키 입력으로 켬)
     gameSettings: { blueCount: 1, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1', initialCoins: 50 },
     aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
@@ -152,7 +152,30 @@ export default class BattleScene extends Phaser.Scene {
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
+        // [New] 개발자용 디버그 토글 키 (Backtick / ` 키) 설정
+        // 이 코드가 있어야 ` 키로 디버그 모드를 켜고 끌 수 있습니다.d
+        this.input.keyboard.on('keydown-D', () => {
+            this.toggleDebugMode();
+        });
+
         this.fetchConfigAndStart();
+    }
+
+    // [New] 디버그 모드 토글 함수
+    toggleDebugMode() {
+        if (this.uiManager.isDebugEnabled) {
+            // 디버그 끄기
+            this.uiManager.destroyDebugStats();
+            if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
+            console.log("🐛 Debug Mode OFF");
+        } else {
+            // 디버그 켜기
+            this.uiManager.createDebugStats();
+            // blocksDebugGraphics가 아직 없으면 생성
+            if (!this.blocksDebugGraphics) this.createBlocksDebug();
+            if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(true);
+            console.log("🐛 Debug Mode ON");
+        }
     }
 
     async fetchConfigAndStart() {
@@ -164,6 +187,9 @@ export default class BattleScene extends Phaser.Scene {
             if (docSnap.exists()) {
                 const dbData = docSnap.data();
                 
+                // DB 설정이 있으면 덮어씀
+                if (dbData.showDebugStats !== undefined) config.showDebugStats = dbData.showDebugStats;
+
                 if (dbData.gameSettings) config.gameSettings = { ...config.gameSettings, ...dbData.gameSettings };
                 if (dbData.unitCosts) config.unitCosts = { ...config.unitCosts, ...dbData.unitCosts };
                 if (dbData.aiSettings) {
@@ -358,7 +384,22 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    createBlocksDebug() { /* ... */ }
+    // [Fix] 이전에 빈 함수여서 발생했던 오류 해결
+    createBlocksDebug() {
+        this.blocksDebugGraphics = this.add.graphics().setDepth(1000);
+        
+        // 블록(충돌체) 시각화
+        if (this.blockObjectGroup) {
+            this.blocksDebugGraphics.lineStyle(2, 0xff0000, 0.5);
+            this.blockObjectGroup.children.iterate((child) => {
+                const { x, y, width, height } = child;
+                // StaticBody의 경우 중심좌표가 아닌 Top-Left 기준일 수 있으므로 조정
+                // Phaser Rectangle Game Object는 중심좌표 기준
+                this.blocksDebugGraphics.strokeRect(x - width/2, y - height/2, width, height);
+            });
+        }
+    }
+
     updateCameraBounds(w, h) { 
         if (!this.mapWidth) return;
         const paddingX = Math.max(0, (w - this.mapWidth) / 2);
@@ -689,7 +730,8 @@ export default class BattleScene extends Phaser.Scene {
         
         if (this.uiManager.isDebugEnabled) {
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
-            this.blocksDebugGraphics.setVisible(true);
+            // [Fix] 안전 체크 추가
+            if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(true);
         } else {
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
         }

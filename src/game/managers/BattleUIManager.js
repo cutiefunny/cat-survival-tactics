@@ -25,10 +25,28 @@ export default class BattleUIManager {
 
     createDebugStats() { 
         this.isDebugEnabled = true;
-        this.scene.time.delayedCall(100, () => {
-            const ui = this.scene.scene.get('UIScene');
-            if (ui && ui.showDebugStats) ui.showDebugStats();
-        });
+        // [Fix] 타이밍 문제 해결을 위해 delayedCall 제거
+        // updateDebugStats 루프에서 UI가 준비되면 자동으로 켜지도록 변경
+        this.updateDebugStatsVisibility();
+    }
+    
+    // [New] 명시적으로 끄는 기능 추가
+    destroyDebugStats() {
+        this.isDebugEnabled = false;
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.debugStats) {
+            ui.debugStats.setVisible(false);
+        }
+    }
+
+    // [New] 디버그 표시 상태 동기화
+    updateDebugStatsVisibility() {
+        if (!this.isDebugEnabled) return;
+        const ui = this.scene.scene.get('UIScene');
+        // UI 씬이 준비되었고 텍스트 객체가 있는데 꺼져있다면 켠다
+        if (ui && ui.debugStats && !ui.debugStats.visible) {
+            ui.showDebugStats();
+        }
     }
 
     createStartButton(callback) {
@@ -40,7 +58,6 @@ export default class BattleUIManager {
         });
     }
     
-    // [New] 상점 UI 생성 요청
     createShopUI(unitData, currentCoins, onBuyCallback) {
         this.scene.time.delayedCall(150, () => {
             const ui = this.scene.scene.get('UIScene');
@@ -50,13 +67,11 @@ export default class BattleUIManager {
         });
     }
 
-    // [New] 코인 업데이트
     updateCoins(amount) {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.updateCoins) ui.updateCoins(amount);
     }
 
-    // [New] 상점 숨기기
     hideShopUI() {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.hideShopUI) ui.hideShopUI();
@@ -80,14 +95,22 @@ export default class BattleUIManager {
 
     updateDebugStats(loop) {
         if (!this.isDebugEnabled) return;
+        
         const ui = this.scene.scene.get('UIScene');
         
-        if (ui && ui.updateDebugStats) {
-            let memInfo = null;
-            if (window.performance && window.performance.memory) {
-                memInfo = Math.round(window.performance.memory.usedJSHeapSize / 1024 / 1024);
+        // [Fix] 매 프레임 체크하여 UI 씬 로딩 완료 시점에 즉시 표시 (Race Condition 해결)
+        if (ui && ui.debugStats) {
+            if (!ui.debugStats.visible) {
+                ui.showDebugStats();
             }
-            ui.updateDebugStats(loop.actualFps, memInfo);
+            
+            if (ui.updateDebugStats) {
+                let memInfo = null;
+                if (window.performance && window.performance.memory) {
+                    memInfo = Math.round(window.performance.memory.usedJSHeapSize / 1024 / 1024);
+                }
+                ui.updateDebugStats(loop.actualFps, memInfo);
+            }
         }
     }
     
