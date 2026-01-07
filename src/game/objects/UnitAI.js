@@ -27,6 +27,10 @@ export default class UnitAI {
         this.lastTargetChangeTime = 0;
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
+
+        // [Wall Collision Handling] 벽 충돌 제어 변수
+        this.wallCollisionTimer = 0;
+        this.wallCollisionVector = new Phaser.Math.Vector2();
     }
 
     processAggro(delta) {
@@ -39,7 +43,86 @@ export default class UnitAI {
         return this.provokedTimer > 0 && this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
     }
 
+    // [Modified] 벽 충돌 처리 로직 개선
+    onWallCollision(obstacle) {
+        // 1. 충돌한 장애물의 중심 좌표 계산
+        let ox, oy;
+        if (obstacle.pixelX !== undefined) { 
+            // Tilemaps.Tile
+            ox = obstacle.pixelX + obstacle.width / 2;
+            oy = obstacle.pixelY + obstacle.height / 2;
+        } else {
+            // GameObject (Rectangle 등)
+            ox = obstacle.x;
+            oy = obstacle.y;
+        }
+
+        const dx = this.unit.x - ox;
+        const dy = this.unit.y - oy;
+
+        // 2. 현재 충돌에 대한 반동(회피) 벡터 계산 (공격대상 방향 고려하여 90도 또는 270도 회전)
+        const newCollisionDir = new Phaser.Math.Vector2();
+        
+        if (Math.abs(dx) > Math.abs(dy)) {
+            // 수평 충돌 -> 수직 방향(90도 또는 270도)으로 회피
+            const option1 = new Phaser.Math.Vector2(0, 1);
+            const option2 = new Phaser.Math.Vector2(0, -1);
+            
+            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+                const distToTarget1 = Phaser.Math.Distance.Squared(this.unit.x + option1.x * 50, this.unit.y + option1.y * 50, this.currentTarget.x, this.currentTarget.y);
+                const distToTarget2 = Phaser.Math.Distance.Squared(this.unit.x + option2.x * 50, this.unit.y + option2.y * 50, this.currentTarget.x, this.currentTarget.y);
+                newCollisionDir.copy(distToTarget1 < distToTarget2 ? option1 : option2);
+            } else {
+                newCollisionDir.set(0, Math.sign(dy) || 1);
+            }
+        } else {
+            // 수직 충돌 -> 수평 방향(90도 또는 270도)으로 회피
+            const option1 = new Phaser.Math.Vector2(1, 0);
+            const option2 = new Phaser.Math.Vector2(-1, 0);
+            
+            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+                const distToTarget1 = Phaser.Math.Distance.Squared(this.unit.x + option1.x * 50, this.unit.y + option1.y * 50, this.currentTarget.x, this.currentTarget.y);
+                const distToTarget2 = Phaser.Math.Distance.Squared(this.unit.x + option2.x * 50, this.unit.y + option2.y * 50, this.currentTarget.x, this.currentTarget.y);
+                newCollisionDir.copy(distToTarget1 < distToTarget2 ? option1 : option2);
+            } else {
+                newCollisionDir.set(Math.sign(dx) || 1, 0);
+            }
+        }
+        
+        if (newCollisionDir.lengthSq() === 0) newCollisionDir.set(1, 0);
+
+        // 3. 이미 벽 회피 동작 중인지 확인
+        if (this.wallCollisionTimer > 0) {
+            // 같은 벽(같은 방향)에 계속 닿아있는 경우는 무시 (계속 밀어내는 중이므로)
+            // 내적(Dot Product) 값이 1에 가까우면 같은 방향, 0이나 음수면 다른 벽(코너 등)
+            if (this.wallCollisionVector.dot(newCollisionDir) > 0.5) {
+                return; 
+            }
+
+            // [New Logic] 다른 벽(또 다른 장애물)에 막힘 -> 이동 방향 반전
+            this.wallCollisionVector.negate();
+            return;
+        }
+
+        // 4. 최초 충돌 시 설정
+        this.wallCollisionVector.copy(newCollisionDir);
+        // 0.5초(500ms) 동안 강제 이동
+        this.wallCollisionTimer = 500;
+    }
+
     update(delta) {
+        // [New] 벽 충돌 반동 처리 (최우선 순위)
+        if (this.wallCollisionTimer > 0) {
+            this.wallCollisionTimer -= delta;
+            // 유닛의 이동 속도로 설정된 방향(반대 혹은 반전된 방향)으로 이동
+            this.unit.setVelocity(
+                this.wallCollisionVector.x * this.unit.moveSpeed, 
+                this.wallCollisionVector.y * this.unit.moveSpeed
+            );
+            this.unit.updateFlipX(); 
+            return; // 다른 AI 로직 수행하지 않음
+        }
+
         this.processAggro(delta);
 
         const unit = this.unit;
@@ -67,7 +150,6 @@ export default class UnitAI {
                 }
                 
                 // 적이 안전 거리보다 가까우면 도망, 아니면 멈춰서 쉼 (Regen 발동 조건 충족)
-                // 벽에 막혀서 거리가 안 벌어지면 어쩔 수 없지만, 넓은 곳에서는 멈추게 됨
                 const safeDist = 350;
 
                 if (distToThreat < safeDist) {

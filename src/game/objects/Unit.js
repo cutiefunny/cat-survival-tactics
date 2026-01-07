@@ -287,6 +287,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.ai.pathUpdateTimer -= 50; 
             }
         }
+        // [New] AI에게 충돌 정보 위임
+        if (this.ai) {
+            this.ai.onWallCollision(tile);
+        }
     }
 
     // [Modified] 모바일 가상 조이스틱 입력 처리 및 디버깅 로그 추가
