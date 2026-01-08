@@ -5,34 +5,20 @@
     "difficulty": 1
   },
   "territories": {
-    "10": {
+    "2": {
       "mapId": "level1",
       "name": "길거리",
-      "difficulty": 1,
-      "description": "A small outpost guarding the border."
-    },
-    "9": {
-      "mapId": "level3",
-      "name": "무대륙",
-      "difficulty": 2,
-      "description": "Spooky trees block the path."
+      "difficulty": 1
     },
     "3": {
-      "mapId": "level2",
-      "name": "Abandoned Village",
-      "difficulty": 2,
-      "description": "Nobody lives here anymore."
-    },
-    "4": {
       "mapId": "level3",
-      "name": "Red Castle",
-      "difficulty": 3,
-      "description": "The final boss awaits."
+      "name": "무대륙",
+      "difficulty": 2
     },
-    "5": {
-      "mapId": "level1",
-      "name": "Training Ground",
-      "difficulty": 1
+    "10": {
+      "mapId": "level2",
+      "name": "공원",
+      "difficulty": 2
     }
   }
 }

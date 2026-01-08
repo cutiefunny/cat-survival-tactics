@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import sangsuMap from '../../assets/maps/sangsu.json'; 
+import sangsuMap from '../../assets/maps/sangsu_map.json'; 
 import territoryConfig from '../data/TerritoryConfig.json'; 
 import { LEVEL_KEYS } from '../managers/LevelManager'; 
 
@@ -16,7 +16,7 @@ export default class StrategyScene extends Phaser.Scene {
 
     preload() {
         this.load.tilemapTiledJSON('strategy_map', sangsuMap);
-        this.load.image('sangsu_tiles', 'src/assets/tilesets/sangsu.png');
+        this.load.image('sangsu_tiles', 'src/assets/tilesets/sangsu_map.jpg');
     }
 
     create() {
@@ -24,7 +24,6 @@ export default class StrategyScene extends Phaser.Scene {
         this.cameras.main.setBackgroundColor('#111');
 
         const map = this.make.tilemap({ key: 'strategy_map' });
-        // Tiled의 첫 번째 타일셋을 가져와 이미지 연결
         const tilesetName = map.tilesets[0].name;
         const tileset = map.addTilesetImage(tilesetName, 'sangsu_tiles');
 
@@ -34,28 +33,27 @@ export default class StrategyScene extends Phaser.Scene {
             });
         }
 
-        // 1. UI 먼저 생성 (statusText가 있어야 결과 메시지를 띄울 수 있음)
+        // 1. UI 생성
         this.createUI();
 
-        // 2. 데이터 로드
+        // 2. 데이터 로드 및 파싱
         if (!this.registry.get('worldMapData')) {
             this.parseMapData(map);
         }
         this.mapNodes = this.registry.get('worldMapData');
 
-        // [Fix] 3. 전투 결과 '먼저' 처리 (데이터 업데이트)
-        // 화면을 그리기 전에 소유권(owner) 정보를 갱신해야 파란색으로 나옵니다.
+        // 3. 전투 결과 데이터 업데이트
         if (this.battleResultData) {
             this.handleBattleResult(this.battleResultData);
             this.battleResultData = null;
         }
 
-        // 4. 시각화 (업데이트된 데이터로 그리기)
+        // 4. 시각화
         this.graphicsLayer = this.add.graphics();
         this.drawConnections();
         this.createTerritoryNodes();
 
-        // 5. 카메라 및 컨트롤 설정
+        // 5. 카메라 설정
         this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
         this.cameras.main.centerOn(map.widthInPixels / 2, map.heightInPixels / 2);
         this.cameras.main.setZoom(1);
@@ -99,6 +97,7 @@ export default class StrategyScene extends Phaser.Scene {
             ];
         }
 
+        // 시작 지점(왼쪽 아래) 설정
         if (nodes.length > 0) {
             let startNode = nodes.reduce((prev, curr) => {
                 const prevScore = prev.y - prev.x;
@@ -109,6 +108,7 @@ export default class StrategyScene extends Phaser.Scene {
             startNode.name = "Main Base";
         }
 
+        // 거리 기반 자동 연결
         nodes.forEach(node => {
             const others = nodes.filter(n => n.id !== node.id).map(n => ({
                 id: n.id,
@@ -171,14 +171,14 @@ export default class StrategyScene extends Phaser.Scene {
         this.statusText.setText(`⚔️ TARGET: ${node.name}${desc}\nPress [BATTLE START] to invade!`);
         
         this.nodeContainer.getChildren().forEach(c => {
-            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.6);
+            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
         });
-        circleObj.setAlpha(1);
+        circleObj.setAlpha(1.0);
         
         if (this.selectionTween) this.selectionTween.stop();
         this.selectionTween = this.tweens.add({
             targets: circleObj,
-            scale: { from: 1, to: 1.2 },
+            scale: { from: 1, to: 1.3 },
             yoyo: true,
             repeat: -1,
             duration: 600
@@ -220,27 +220,33 @@ export default class StrategyScene extends Phaser.Scene {
         this.mapNodes.forEach(node => {
             const color = node.owner === 'player' ? 0x4488ff : 0xff4444;
             
-            const shadow = this.add.ellipse(node.x, node.y + 15, 40, 10, 0x000000, 0.5);
-            const circle = this.add.circle(node.x, node.y, 25, color)
+            const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3);
+            const circle = this.add.circle(node.x, node.y, 13, color)
                 .setInteractive({ useHandCursor: true })
-                .setStrokeStyle(3, 0xffffff);
+                .setStrokeStyle(2, 0xffffff);
+            
+            circle.setAlpha(0.5);
 
             circle.nodeData = node;
             
-            const label = this.add.text(node.x, node.y - 40, node.name, { fontSize: '14px', backgroundColor: '#00000088', padding: { x: 4, y: 2 }, align: 'center' }).setOrigin(0.5);
+            // [Modified] 텍스트 라벨 생성 부분을 주석 처리하여 숨김
+            /*
+            const label = this.add.text(node.x, node.y - 25, node.name, { fontSize: '12px', backgroundColor: '#00000088', padding: { x: 4, y: 2 }, align: 'center' }).setOrigin(0.5);
+            */
 
             circle.on('pointerdown', () => this.selectTerritory(circle));
 
             this.nodeContainer.add(shadow);
             this.nodeContainer.add(circle);
-            this.nodeContainer.add(label);
+            // this.nodeContainer.add(label); // 라벨 추가 제외
         });
     }
 
     drawConnections() {
         if (!this.mapNodes) return;
         this.graphicsLayer.clear();
-        this.graphicsLayer.lineStyle(4, 0xffffff, 0.5);
+        
+        this.graphicsLayer.lineStyle(2, 0x888888, 0.5);
 
         this.mapNodes.forEach(node => {
             node.connectedTo.forEach(targetId => {
@@ -260,7 +266,6 @@ export default class StrategyScene extends Phaser.Scene {
             const node = this.mapNodes.find(n => n.id === targetNodeId);
             if (node) {
                 node.owner = 'player';
-                // 데이터 업데이트 (이미 렌더링 전이라면 createTerritoryNodes에서 이 값을 참조함)
                 this.registry.set('worldMapData', this.mapNodes);
             }
             this.statusText.setText("🏆 VICTORY! Territory Captured!");
