@@ -4,9 +4,6 @@ import territoryConfig from '../data/TerritoryConfig.json';
 import { LEVEL_KEYS } from '../managers/LevelManager'; 
 import leaderImg from '../../assets/units/leader.png';
 import dogImg from '../../assets/units/dog.png';
-
-// [Fix] 타일셋 이미지도 import로 불러옵니다.
-// 이렇게 하면 빌드 시 Vite가 정확한 경로(예: /assets/sangsu_map.12345.jpg)로 변환해줍니다.
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 
 export default class StrategyScene extends Phaser.Scene {
@@ -22,59 +19,23 @@ export default class StrategyScene extends Phaser.Scene {
 
     preload() {
         this.load.tilemapTiledJSON('strategy_map', sangsuMap);
-        
-        // [Fix] 하드코딩된 문자열 'src/assets/...' 대신 import한 변수를 사용합니다.
         this.load.image('sangsu_tiles', sangsuTilesImg);
         
-        // 리더 스프라이트 시트
-        this.load.spritesheet('leader_token', leaderImg, { 
-            frameWidth: 100, 
-            frameHeight: 100 
-        });
-
-        // 들개 스프라이트 시트
-        this.load.spritesheet('dog_token', dogImg, { 
-            frameWidth: 100, 
-            frameHeight: 100 
-        });
+        this.load.spritesheet('leader_token', leaderImg, { frameWidth: 100, frameHeight: 100 });
+        this.load.spritesheet('dog_token', dogImg, { frameWidth: 100, frameHeight: 100 });
     }
 
-    // ... (create 메서드 및 나머지 코드는 기존과 동일하므로 수정할 필요 없습니다) ...
-    
     create() {
         this.scene.stop('UIScene');
         this.cameras.main.setBackgroundColor('#111');
 
-        // ... (애니메이션 정의 코드) ...
-        if (!this.anims.exists('leader_idle')) {
-            this.anims.create({
-                key: 'leader_idle',
-                frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }),
-                frameRate: 1,
-                repeat: -1
-            });
-        }
-        if (!this.anims.exists('leader_walk')) {
-            this.anims.create({
-                key: 'leader_walk',
-                frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }),
-                frameRate: 6,
-                repeat: -1
-            });
-        }
-        if (!this.anims.exists('dog_idle')) {
-            this.anims.create({
-                key: 'dog_idle',
-                frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }),
-                frameRate: 1,
-                repeat: -1
-            });
-        }
+        this.input.addPointer(1);
 
+        this.createAnimations();
+
+        // --- 게임 월드 생성 ---
         const map = this.make.tilemap({ key: 'strategy_map' });
         const tilesetName = map.tilesets[0].name;
-        
-        // preload에서 'sangsu_tiles'라는 키로 이미지를 로드했으므로 여기는 그대로 두면 됩니다.
         const tileset = map.addTilesetImage(tilesetName, 'sangsu_tiles');
 
         if (tileset) {
@@ -82,10 +43,6 @@ export default class StrategyScene extends Phaser.Scene {
                 map.createLayer(layerData.name, tileset, 0, 0);
             });
         }
-
-        // ... (이하 기존 코드 동일) ...
-        
-        this.createUI();
 
         if (!this.registry.get('worldMapData')) {
             this.parseMapData(map);
@@ -100,80 +57,157 @@ export default class StrategyScene extends Phaser.Scene {
         this.graphicsLayer = this.add.graphics();
         this.drawConnections();
         this.createTerritoryNodes();
-
         this.createPlayerToken();
         this.createEnemyTokens();
 
+        // --- 카메라 및 UI 설정 ---
+        this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+        this.uiCamera.ignore(this.children.list);
+        
+        this.createUI(); // UI 생성
+        
+        this.cameras.main.ignore(this.uiContainer); // 메인 카메라는 UI 무시
+
         this.mapWidth = map.widthInPixels;
         this.mapHeight = map.heightInPixels;
+        
         this.updateCameraLayout();
-        this.scale.on('resize', this.updateCameraLayout, this);
+
+        this.scale.on('resize', (gameSize, baseSize, displaySize, previousWidth, previousHeight) => {
+            this.updateCameraLayout();
+            this.resizeUI();
+        }, this);
+
         this.setupCameraControls();
 
-        this.createEndTurnButton();
         this.selectedTargetId = null;
+        this.prevPinchDistance = 0;
     }
-    
-    // ... (나머지 메서드들: createEnemyTokens, createPlayerToken, updateCameraLayout, setupCameraControls, parseMapData, createUI, createTerritoryNodes, drawConnections, selectTerritory, createEndTurnButton, startBattle, handleBattleResult 등은 수정 없음) ...
-    
-    createEnemyTokens() {
-        const dogNode = this.mapNodes.find(n => n.id === 20);
-        if (dogNode) {
-            const dogObj = this.add.sprite(dogNode.x, dogNode.y, 'dog_token');
-            dogObj.setDisplaySize(50, 50);
-            dogObj.setOrigin(0.5, 0.8);
-            dogObj.setFlipX(false); 
-            dogObj.play('dog_idle');
-            this.tweens.add({
-                targets: dogObj,
-                scaleY: { from: dogObj.scaleY, to: dogObj.scaleY * 0.95 },
-                yoyo: true,
-                repeat: -1,
-                duration: 900,
-                ease: 'Sine.easeInOut'
-            });
+
+    createAnimations() {
+        if (!this.anims.exists('leader_idle')) {
+            this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 });
+        }
+        if (!this.anims.exists('leader_walk')) {
+            this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 });
+        }
+        if (!this.anims.exists('dog_idle')) {
+            this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 });
         }
     }
 
-    createPlayerToken() {
-        let leaderNodeId = this.registry.get('leaderPosition');
-        if (leaderNodeId === undefined) {
-            const base = this.mapNodes.find(n => n.name === "Main Base") || this.mapNodes.find(n => n.owner === 'player');
-            leaderNodeId = base ? base.id : this.mapNodes[0].id;
-            this.registry.set('leaderPosition', leaderNodeId);
+    createUI() {
+        this.uiContainer = this.add.container(0, 0);
+        this.uiContainer.setScrollFactor(0); 
+        this.drawUIElements();
+    }
+
+    drawUIElements() {
+        if (this.uiContainer.list.length > 0) {
+            this.uiContainer.removeAll(true);
         }
-        const currentNode = this.mapNodes.find(n => n.id === leaderNodeId);
-        this.leaderObj = this.add.sprite(currentNode.x, currentNode.y, 'leader_token');
-        this.leaderObj.setFlipX(true);
-        this.leaderObj.setDisplaySize(60, 60); 
-        this.leaderObj.setOrigin(0.5, 0.8);
-        this.leaderObj.play('leader_idle');
-        this.tweens.add({
-            targets: this.leaderObj,
-            scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 },
-            yoyo: true,
-            repeat: -1,
-            duration: 900,
-            ease: 'Sine.easeInOut'
+
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const headerH = 60;
+        const footerH = 80;
+
+        // --- Header ---
+        const headerBg = this.add.rectangle(0, 0, w, headerH, 0x000000, 0.85).setOrigin(0, 0);
+        
+        // [Modified] Title Text 숨김 처리
+        /*
+        const titleText = this.add.text(20, headerH/2, '🗺️ STRATEGY', { 
+            fontSize: '24px', fontStyle: 'bold', color: '#ffffff' 
+        }).setOrigin(0, 0.5);
+        */
+
+        const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
+        this.statusText = this.add.text(w - 20, headerH/2, currentStatusMsg, { 
+            fontSize: '16px', color: '#dddddd', align: 'right' 
+        }).setOrigin(1, 0.5);
+
+        // --- Footer ---
+        const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
+
+        const btn = this.add.text(w/2, h - footerH/2, '턴 종료', {
+            fontSize: '24px',
+            fontStyle: 'bold',
+            backgroundColor: '#cc0000',
+            padding: { x: 40, y: 15 },
+            color: '#ffffff',
+            align: 'center'
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+        btn.on('pointerover', () => btn.setBackgroundColor('#ff4444'));
+        btn.on('pointerout', () => btn.setBackgroundColor('#cc0000'));
+        btn.on('pointerdown', () => {
+            if (this.selectedTargetId !== null) {
+                this.startBattle();
+            } else {
+                this.statusText.setText("⚠️ 공격할 영토를 먼저 선택하세요!");
+                this.tweens.add({ targets: this.statusText, alpha: 0.2, duration: 100, yoyo: true, repeat: 2 });
+            }
         });
+
+        // [Modified] titleText 제외하고 추가
+        this.uiContainer.add([headerBg, footerBg, /* titleText, */ this.statusText, btn]);
+    }
+
+    resizeUI() {
+        this.uiCamera.setViewport(0, 0, this.scale.width, this.scale.height);
+        this.drawUIElements();
+    }
+
+    update(time, delta) {
+        if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+            const distance = Phaser.Math.Distance.Between(
+                this.input.pointer1.x, this.input.pointer1.y,
+                this.input.pointer2.x, this.input.pointer2.y
+            );
+
+            if (this.prevPinchDistance > 0) {
+                const distanceDiff = (distance - this.prevPinchDistance) * 0.005; 
+                const newZoom = this.cameras.main.zoom + distanceDiff;
+                const clampedZoom = Phaser.Math.Clamp(newZoom, this.minZoom, 3);
+                
+                this.cameras.main.setZoom(clampedZoom);
+                this.updateCameraLayout(); 
+            }
+            this.prevPinchDistance = distance;
+        } else {
+            this.prevPinchDistance = 0;
+        }
     }
 
     updateCameraLayout() {
         const screenWidth = this.scale.width;
         const screenHeight = this.scale.height;
         const isPC = this.sys.game.device.os.desktop;
+
         const zoomFitWidth = screenWidth / this.mapWidth;
         const zoomFitHeight = screenHeight / this.mapHeight;
+
         this.minZoom = isPC ? zoomFitHeight : zoomFitWidth;
+
         if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) {
             this.cameras.main.setZoom(this.minZoom);
         }
+
         const currentZoom = this.cameras.main.zoom;
         const displayWidth = screenWidth / currentZoom;
         const displayHeight = screenHeight / currentZoom;
+
         const offsetX = Math.max(0, (displayWidth - this.mapWidth) / 2);
         const offsetY = Math.max(0, (displayHeight - this.mapHeight) / 2);
-        this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(this.mapWidth, displayWidth), Math.max(this.mapHeight, displayHeight));
+
+        this.cameras.main.setBounds(
+            -offsetX, -offsetY,
+            Math.max(this.mapWidth, displayWidth),
+            Math.max(this.mapHeight, displayHeight)
+        );
         this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
     }
 
@@ -184,7 +218,10 @@ export default class StrategyScene extends Phaser.Scene {
             this.cameras.main.setZoom(clampedZoom);
             this.updateCameraLayout(); 
         });
+        
         this.input.on('pointermove', (pointer) => {
+            if (this.input.pointer1.isDown && this.input.pointer2.isDown) return;
+
             if (pointer.isDown) {
                 this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom;
                 this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
@@ -241,9 +278,38 @@ export default class StrategyScene extends Phaser.Scene {
         this.registry.set('worldMapData', nodes);
     }
 
-    createUI() {
-        this.add.text(20, 20, '🗺️ STRATEGY MAP', { fontSize: '32px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 4 }).setScrollFactor(0);
-        this.statusText = this.add.text(20, 60, 'Choose a territory to invade.', { fontSize: '18px', color: '#eeeeee', stroke: '#000000', strokeThickness: 2 }).setScrollFactor(0);
+    createEnemyTokens() {
+        const dogNode = this.mapNodes.find(n => n.id === 20);
+        if (dogNode) {
+            const dogObj = this.add.sprite(dogNode.x, dogNode.y, 'dog_token');
+            dogObj.setDisplaySize(50, 50);
+            dogObj.setOrigin(0.5, 0.8);
+            dogObj.setFlipX(false); 
+            dogObj.play('dog_idle');
+            this.tweens.add({
+                targets: dogObj, scaleY: { from: dogObj.scaleY, to: dogObj.scaleY * 0.95 },
+                yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut'
+            });
+        }
+    }
+
+    createPlayerToken() {
+        let leaderNodeId = this.registry.get('leaderPosition');
+        if (leaderNodeId === undefined) {
+            const base = this.mapNodes.find(n => n.name === "Main Base") || this.mapNodes.find(n => n.owner === 'player');
+            leaderNodeId = base ? base.id : this.mapNodes[0].id;
+            this.registry.set('leaderPosition', leaderNodeId);
+        }
+        const currentNode = this.mapNodes.find(n => n.id === leaderNodeId);
+        this.leaderObj = this.add.sprite(currentNode.x, currentNode.y, 'leader_token');
+        this.leaderObj.setFlipX(true);
+        this.leaderObj.setDisplaySize(60, 60); 
+        this.leaderObj.setOrigin(0.5, 0.8);
+        this.leaderObj.play('leader_idle');
+        this.tweens.add({
+            targets: this.leaderObj, scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 },
+            yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut'
+        });
     }
 
     createTerritoryNodes() {
@@ -278,7 +344,7 @@ export default class StrategyScene extends Phaser.Scene {
     selectTerritory(circleObj) {
         const node = circleObj.nodeData;
         if (node.owner === 'player') {
-            this.statusText.setText(`Defense Mode: ${node.name} (Your Territory)`);
+            this.statusText.setText(`방어 모드: ${node.name} (아군 영토)`);
             return;
         }
         const canInvade = node.connectedTo.some(id => {
@@ -286,13 +352,14 @@ export default class StrategyScene extends Phaser.Scene {
             return neighbor.owner === 'player';
         });
         if (!canInvade) {
-            this.statusText.setText("🚫 Too far to invade!");
+            this.statusText.setText("🚫 너무 멉니다! 인접한 영토를 먼저 점령하세요.");
             this.tweens.add({ targets: circleObj, x: circleObj.x + 5, duration: 50, yoyo: true, repeat: 3 });
             return;
         }
         this.selectedTargetId = node.id;
-        const desc = node.desc ? `\n"${node.desc}"` : "";
-        this.statusText.setText(`⚔️ TARGET: ${node.name}${desc}\nPress [BATTLE START] to invade!`);
+        const desc = node.desc ? ` - ${node.desc}` : "";
+        this.statusText.setText(`🎯 목표 설정: ${node.name}${desc}`);
+        
         this.nodeContainer.getChildren().forEach(c => {
             if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
         });
@@ -300,20 +367,6 @@ export default class StrategyScene extends Phaser.Scene {
         if (this.selectionTween) this.selectionTween.stop();
         this.selectionTween = this.tweens.add({
             targets: circleObj, scale: { from: 1, to: 1.3 }, yoyo: true, repeat: -1, duration: 600
-        });
-    }
-
-    createEndTurnButton() {
-        const btn = this.add.text(this.cameras.main.width - 20, this.cameras.main.height - 20, '⚔️ BATTLE START', {
-            fontSize: '24px', backgroundColor: '#cc0000', padding: { x: 20, y: 10 }, fontStyle: 'bold'
-        }).setOrigin(1, 1).setInteractive({ useHandCursor: true }).setScrollFactor(0);
-
-        btn.on('pointerdown', () => {
-            if (this.selectedTargetId !== null) {
-                this.startBattle();
-            } else {
-                this.statusText.setText("⚠️ Please select a red territory first!");
-            }
         });
     }
 
@@ -362,9 +415,9 @@ export default class StrategyScene extends Phaser.Scene {
                 this.registry.set('worldMapData', this.mapNodes);
                 this.registry.set('leaderPosition', targetNodeId);
             }
-            this.statusText.setText("🏆 VICTORY! Territory Captured!");
+            this.statusText.setText("🏆 승리! 영토를 점령했습니다!");
         } else {
-            this.statusText.setText("🏳️ DEFEAT... Retreating to base.");
+            this.statusText.setText("🏳️ 패배... 본부로 후퇴합니다.");
         }
     }
 }
