@@ -15,6 +15,16 @@
       "name": "무대륙",
       "difficulty": 2
     },
+    "4": {
+      "mapId": "level4",
+      "name": "상점가",
+      "difficulty": 2
+    },
+    "5": {
+      "mapId": "level4",
+      "name": "상점가2",
+      "difficulty": 2
+    },
     "10": {
       "mapId": "level2",
       "name": "공원",

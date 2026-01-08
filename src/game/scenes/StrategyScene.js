@@ -45,7 +45,6 @@ export default class StrategyScene extends Phaser.Scene {
             });
         }
 
-        // DB 설정 로드 (비동기) -> 이후 initializeGameWorld 호출
         this.fetchStrategyConfig(map);
     }
 
@@ -67,7 +66,6 @@ export default class StrategyScene extends Phaser.Scene {
     }
 
     initializeGameWorld(map, dbArmyData) {
-        // [Init] 턴 상태 변수 초기화
         this.hasMoved = false;
         this.previousLeaderId = null;
 
@@ -100,18 +98,14 @@ export default class StrategyScene extends Phaser.Scene {
         this.createPlayerToken();
         this.createEnemyTokens();
 
-        // UI 카메라 설정
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
         this.uiCamera.ignore(this.children.list);
         
-        // [Important] UI 생성 함수 호출
         this.createUI();
-        
         if (battleResultMessage) {
             this.statusText.setText(battleResultMessage);
         }
         
-        // 초기 UI 상태 업데이트
         this.updateUIState();
 
         this.cameras.main.ignore(this.uiContainer);
@@ -131,14 +125,12 @@ export default class StrategyScene extends Phaser.Scene {
         this.prevPinchDistance = 0;
     }
 
-    // [Fix] 누락되었던 createUI 메서드 정의
     createUI() {
         this.uiContainer = this.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
         this.drawUIElements();
     }
 
-    // [Fix] UI 요소 그리기 메서드
     drawUIElements() {
         if (this.uiContainer.list.length > 0) {
             this.uiContainer.removeAll(true);
@@ -158,7 +150,6 @@ export default class StrategyScene extends Phaser.Scene {
 
         const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
 
-        // 취소(Undo) 버튼
         this.undoBtn = this.add.text(w/2 - 120, h - footerH/2, '취소', {
             fontSize: '24px', fontStyle: 'bold', backgroundColor: '#666666', padding: { x: 30, y: 15 }, color: '#ffffff', align: 'center'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
@@ -167,7 +158,6 @@ export default class StrategyScene extends Phaser.Scene {
         this.undoBtn.on('pointerout', () => this.undoBtn.setBackgroundColor('#666666'));
         this.undoBtn.on('pointerdown', () => this.undoMove());
 
-        // 턴 종료 버튼
         this.endTurnBtn = this.add.text(w/2 + 40, h - footerH/2, '턴 종료', {
             fontSize: '24px', fontStyle: 'bold', backgroundColor: '#cc0000', padding: { x: 40, y: 15 }, color: '#ffffff', align: 'center'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
@@ -494,18 +484,28 @@ export default class StrategyScene extends Phaser.Scene {
         this.registry.set('worldMapData', nodes);
     }
 
+    // [Modified] 군대 규모에 따른 크기 조절 로직 적용
     createEnemyTokens() {
         if (!this.mapNodes) return;
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
                 const textureKey = node.army.type === 'dog' ? 'dog_token' : 'dog_token';
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                enemyObj.setDisplaySize(50, 50);
+                
+                // [New] Dynamic Scale Logic
+                const armyCount = node.army.count || 1;
+                // Base: 5 units = 50px. +/- 5px per unit. Min 30px, Max 90px.
+                let finalSize = 50 + (armyCount - 5) * 5;
+                finalSize = Phaser.Math.Clamp(finalSize, 30, 90);
+
+                enemyObj.setDisplaySize(finalSize, finalSize);
                 enemyObj.setOrigin(0.5, 0.8);
                 enemyObj.setFlipX(false); 
+                
                 if (node.army.type === 'dog' || !node.army.type) { 
                     enemyObj.play('dog_idle');
                 }
+                
                 this.tweens.add({
                     targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 },
                     yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut'
@@ -566,6 +566,5 @@ export default class StrategyScene extends Phaser.Scene {
     }
 
     handleBattleResult(data) {
-        // create 메서드에서 처리하므로 비워둠
     }
 }

@@ -25,6 +25,7 @@ import PathfindingManager from '../systems/PathfindingManager';
 
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
+import level4Data from '../../assets/maps/level4.json'; // [New] Level 4 Import
 
 // [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
@@ -32,6 +33,7 @@ import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
 import tilesetParkImg from '../../assets/tilesets/park.png'; 
+import tilesetCarImg from '../../assets/tilesets/car.png'; // [New] Car Tileset Import
 
 // [Assets - Street Tilesets]
 import tilesetStreet1Img from '../../assets/tilesets/street1.png';
@@ -126,6 +128,7 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
+        this.load.tilemapTiledJSON('level4', level4Data); // [New] Level 4 Preload
         
         LEVEL_KEYS.forEach(key => {
             console.log(`🗺️ Preloading Map: ${key}`);
@@ -137,6 +140,7 @@ export default class BattleScene extends Phaser.Scene {
         this.load.image('tiles_city', tilesetCity1Img);
         this.load.image('tiles_city2', tilesetCity2Img);
         this.load.image('tiles_park', tilesetParkImg);
+        this.load.image('tiles_car', tilesetCarImg); // [New] Car Tileset Preload
         
         this.load.image('tiles_street1', tilesetStreet1Img);
         this.load.image('tiles_street2', tilesetStreet2Img);
@@ -300,6 +304,7 @@ export default class BattleScene extends Phaser.Scene {
                     else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
                     else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
                     else if (name.includes('City')) imgKey = 'tiles_city';
+                    else if (name.includes('Car') || name === 'car') imgKey = 'tiles_car'; // [New] Car mapping
 
                     if (imgKey) {
                         const t = map.addTilesetImage(ts.name, imgKey);
