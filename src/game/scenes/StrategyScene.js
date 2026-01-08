@@ -4,6 +4,7 @@ import territoryConfig from '../data/TerritoryConfig.json';
 import { LEVEL_KEYS } from '../managers/LevelManager'; 
 import leaderImg from '../../assets/units/leader.png';
 import dogImg from '../../assets/units/dog.png';
+import runnerImg from '../../assets/units/runner.png'; 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 
 import { doc, getDoc } from "firebase/firestore";
@@ -26,6 +27,7 @@ export default class StrategyScene extends Phaser.Scene {
         
         this.load.spritesheet('leader_token', leaderImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('dog_token', dogImg, { frameWidth: 100, frameHeight: 100 });
+        this.load.spritesheet('runner_token', runnerImg, { frameWidth: 100, frameHeight: 100 });
     }
 
     create() {
@@ -241,6 +243,19 @@ export default class StrategyScene extends Phaser.Scene {
         const currentLeaderId = this.registry.get('leaderPosition');
         const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
 
+        if (node.owner === 'neutral') {
+            this.statusText.setText("⛔ 아직 지나갈 수 없다! 여기는 합정파의 영역이다냥!");
+            this.tweens.add({
+                targets: circleObj,
+                x: circleObj.x + 5,
+                duration: 50,
+                yoyo: true,
+                repeat: 3
+            });
+            this.cameras.main.shake(100, 0.005);
+            return;
+        }
+
         if (this.hasMoved) {
             this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요.");
             this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 });
@@ -352,6 +367,9 @@ export default class StrategyScene extends Phaser.Scene {
         if (!this.anims.exists('dog_idle')) {
             this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 });
         }
+        if (!this.anims.exists('runner_idle')) {
+            this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 });
+        }
     }
 
     update(time, delta) {
@@ -422,6 +440,18 @@ export default class StrategyScene extends Phaser.Scene {
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
                 
+                if (obj.id === 6) {
+                    return {
+                        id: obj.id, x: obj.x, y: obj.y,
+                        name: "???",
+                        owner: 'neutral', 
+                        connectedTo: [], 
+                        levelIndex: 0, 
+                        desc: "Locked Path",
+                        army: { type: 'runner', count: 1 } 
+                    };
+                }
+
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : 'enemy';
 
@@ -484,27 +514,32 @@ export default class StrategyScene extends Phaser.Scene {
         this.registry.set('worldMapData', nodes);
     }
 
-    // [Modified] 군대 규모에 따른 크기 조절 로직 적용
     createEnemyTokens() {
         if (!this.mapNodes) return;
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
-                const textureKey = node.army.type === 'dog' ? 'dog_token' : 'dog_token';
+                let textureKey = 'dog_token';
+                if (node.army.type === 'runner') textureKey = 'runner_token';
+                else if (node.army.type === 'dog') textureKey = 'dog_token';
+
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 
-                // [New] Dynamic Scale Logic
-                const armyCount = node.army.count || 1;
-                // Base: 5 units = 50px. +/- 5px per unit. Min 30px, Max 90px.
-                let finalSize = 50 + (armyCount - 5) * 5;
-                finalSize = Phaser.Math.Clamp(finalSize, 30, 90);
+                // [Modified] 크기 결정 (중립군은 표준 60으로 고정)
+                let finalSize = 60;
+                if (node.owner === 'neutral') {
+                    finalSize = 60; // 중립군 (표준 크기)
+                } else {
+                    const armyCount = node.army.count || 1;
+                    finalSize = 50 + (armyCount - 5) * 5;
+                    finalSize = Phaser.Math.Clamp(finalSize, 30, 90);
+                }
 
                 enemyObj.setDisplaySize(finalSize, finalSize);
                 enemyObj.setOrigin(0.5, 0.8);
                 enemyObj.setFlipX(false); 
                 
-                if (node.army.type === 'dog' || !node.army.type) { 
-                    enemyObj.play('dog_idle');
-                }
+                if (node.army.type === 'runner') enemyObj.play('runner_idle');
+                else enemyObj.play('dog_idle');
                 
                 this.tweens.add({
                     targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 },
@@ -540,7 +575,10 @@ export default class StrategyScene extends Phaser.Scene {
         if (!this.mapNodes) return;
         this.nodeContainer = this.add.group();
         this.mapNodes.forEach(node => {
-            const color = node.owner === 'player' ? 0x4488ff : 0xff4444;
+            let color = 0xff4444; 
+            if (node.owner === 'player') color = 0x4488ff; 
+            else if (node.owner === 'neutral') color = 0x888888; 
+            
             const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3);
             const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
             circle.setAlpha(0.5);
