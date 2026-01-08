@@ -1,5 +1,5 @@
 import { createSignal, onMount, For } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import { useNavigate } from "@solidjs/router";
@@ -35,7 +35,9 @@ const DEFAULT_CONFIG = {
   roleDefinitions: DEFAULT_ROLE_DEFS,
   unitCosts: DEFAULT_UNIT_COSTS,
   redTeamRoles: [],
-  blueTeamRoles: []
+  blueTeamRoles: [],
+  // [New] 주둔군 설정 초기값
+  territoryArmies: {} 
 };
 
 const DevPage = () => {
@@ -43,6 +45,9 @@ const DevPage = () => {
   const [config, setConfig] = createStore(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
   const [status, setStatus] = createSignal("Loading...");
   const [feedbacks, setFeedbacks] = createSignal([]);
+  
+  // [New] 주둔군 추가를 위한 임시 입력 상태
+  const [newArmyNodeId, setNewArmyNodeId] = createSignal("");
 
   onMount(async () => {
     // 1. 설정 로드
@@ -64,6 +69,11 @@ const DevPage = () => {
         }
         if (data.unitCosts) merged.unitCosts = { ...DEFAULT_UNIT_COSTS, ...data.unitCosts };
         
+        // [New] 주둔군 설정 병합
+        if (data.territoryArmies) {
+            merged.territoryArmies = { ...DEFAULT_CONFIG.territoryArmies, ...data.territoryArmies };
+        }
+
         // 역할 정의 병합
         if (data.roleDefinitions) {
             Object.keys(DEFAULT_ROLE_DEFS).forEach(role => {
@@ -179,10 +189,40 @@ const DevPage = () => {
     setConfig("unitCosts", roleName, value);
   };
 
+  // [New] 주둔군 추가 핸들러
+  const handleAddTerritoryArmy = () => {
+      const id = newArmyNodeId();
+      if (!id) return;
+      if (config.territoryArmies && config.territoryArmies[id]) {
+          alert(`Node ${id} already exists!`);
+          return;
+      }
+      // 기본값 추가 (NormalDog 3마리)
+      setConfig("territoryArmies", id, { type: "NormalDog", count: 3 });
+      setNewArmyNodeId("");
+  };
+
+  // [New] 주둔군 삭제 핸들러
+  const handleDeleteTerritoryArmy = (id) => {
+      // SolidJS Store에서 key 삭제는 undefined로 설정
+      setConfig("territoryArmies", id, undefined);
+  };
+
   const saveConfig = async () => {
     setStatus("Saving...");
     try {
+      // Store Proxy 객체를 일반 JSON 객체로 변환
       const cleanConfig = JSON.parse(JSON.stringify(config));
+      
+      // undefined 필드 제거 (Firestore 오류 방지)
+      if (cleanConfig.territoryArmies) {
+          Object.keys(cleanConfig.territoryArmies).forEach(key => {
+              if (cleanConfig.territoryArmies[key] === undefined) {
+                  delete cleanConfig.territoryArmies[key];
+              }
+          });
+      }
+
       await setDoc(doc(db, "settings", "tacticsConfig"), cleanConfig);
       setStatus("Saved Successfully! 🎉");
     } catch (err) {
@@ -237,15 +277,14 @@ const DevPage = () => {
                     </span>
                 )}
 
-                {/* [New] Kill Reward Display in List */}
                 <span title="Kill Reward" style={{whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
                     💰 <span style={{color: "#ffd700"}}>{unit.killReward ?? 10}</span>
                 </span>
 
                 {unit.role === 'Healer' && (
-                     <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
+                      <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
                         😡Stack {unit.aggroStackLimit || 10}
-                     </span>
+                      </span>
                 )}
             </div>
         </div>
@@ -312,6 +351,7 @@ const DevPage = () => {
           </div>
         </section>
 
+        {/* --- AI Parameters --- */}
         <section style={cardStyle}>
           <h2 style={sectionHeaderStyle}>🧠 AI Parameters</h2>
           <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
@@ -342,6 +382,60 @@ const DevPage = () => {
                 <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
              </div>
           </div>
+        </section>
+
+        {/* --- [New] Territory Armies Configuration --- */}
+        <section style={{ ...cardStyle, gridColumn: "span 2", border: "1px solid #ff5555" }}>
+            <h2 style={{ color: "#ff5555", marginTop: 0 }}>🏰 Territory Garrisons (Strategy Map)</h2>
+            <div style={{ marginBottom: "15px", background: "#332222", padding: "10px", borderRadius: "5px", display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontWeight: "bold" }}>Add Garrison to Node ID:</span>
+                <input 
+                    type="text" 
+                    placeholder="Node ID (e.g. 2)" 
+                    value={newArmyNodeId()} 
+                    onInput={(e) => setNewArmyNodeId(e.target.value)}
+                    style={{ ...inputStyle, width: "120px" }}
+                />
+                <button onClick={handleAddTerritoryArmy} style={{ ...btnStyle, background: "#cc4444", color: "white" }}>Add Node</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+                <For each={Object.keys(config.territoryArmies || {})}>
+                    {(nodeId) => (
+                        <div style={{ background: "#443333", padding: "10px", borderRadius: "5px", border: "1px solid #664444", display: "flex", flexDirection: "column", gap: "5px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <strong style={{ color: "#ffaaaa", fontSize: "1.1em" }}>Node {nodeId}</strong>
+                                <button onClick={() => handleDeleteTerritoryArmy(nodeId)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "1.2em" }}>❌</button>
+                            </div>
+                            
+                            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                                <label style={{ fontSize: "0.9em", color: "#ccc" }}>Type:</label>
+                                <select 
+                                    value={config.territoryArmies[nodeId].type} 
+                                    onInput={(e) => setConfig("territoryArmies", nodeId, "type", e.target.value)}
+                                    style={{ ...inputStyle, flex: 1 }}
+                                >
+                                    <For each={Object.keys(config.roleDefinitions)}>
+                                        {(role) => <option value={role}>{role}</option>}
+                                    </For>
+                                </select>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                                <label style={{ fontSize: "0.9em", color: "#ccc" }}>Count:</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    value={config.territoryArmies[nodeId].count} 
+                                    onInput={(e) => setConfig("territoryArmies", nodeId, "count", parseInt(e.target.value))}
+                                    style={{ ...inputStyle, width: "60px" }} 
+                                />
+                            </div>
+                        </div>
+                    )}
+                </For>
+                {Object.keys(config.territoryArmies || {}).length === 0 && <div style={{ color: "#888", fontStyle: "italic" }}>No garrisons configured.</div>}
+            </div>
         </section>
 
         {/* --- Class Base Stats & Skills --- */}
@@ -386,7 +480,6 @@ const DevPage = () => {
                                 />
                             </label>
 
-                            {/* [New] Kill Reward Input */}
                             <label style={{...statLabelStyle, color: "#ffd700"}}>
                                 Kill Reward
                                 <input 
@@ -446,7 +539,7 @@ const DevPage = () => {
         {/* --- Red Team Composition --- */}
         <section style={{ background: "#442222", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
-            <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team</h2>
+            <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team (Default)</h2>
             <label>Count: 
                 <input type="number" min="1" max="12"
                     value={config.gameSettings.redCount} 

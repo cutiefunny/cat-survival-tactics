@@ -88,13 +88,15 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     init(data) {
-        // [Existing Code]
         let targetIndex = 0;
         this.hasLevelIndexPassed = false; 
 
-        // [New] 전략 모드 데이터 수신
+        // 전략 모드 데이터 수신
         this.isStrategyMode = data && data.isStrategyMode;
         this.targetNodeId = data ? data.targetNodeId : null;
+        
+        // [New] 주둔군(Army) 데이터 수신
+        this.armyConfig = data ? data.armyConfig : null;
 
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
@@ -107,6 +109,9 @@ export default class BattleScene extends Phaser.Scene {
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
         
         console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}`);
+        if (this.armyConfig) {
+            console.log(`⚔️ Garrison Army Detected:`, this.armyConfig);
+        }
     }
 
     preload() {
@@ -154,7 +159,6 @@ export default class BattleScene extends Phaser.Scene {
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
-
         this.input.keyboard.on('keydown-D', (event) => {
             if (event.shiftKey) {
                 this.toggleDebugMode();
@@ -164,17 +168,13 @@ export default class BattleScene extends Phaser.Scene {
         this.fetchConfigAndStart();
     }
 
-    // [New] 디버그 모드 토글 함수
     toggleDebugMode() {
         if (this.uiManager.isDebugEnabled) {
-            // 디버그 끄기
             this.uiManager.destroyDebugStats();
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
             console.log("🐛 Debug Mode OFF");
         } else {
-            // 디버그 켜기
             this.uiManager.createDebugStats();
-            // blocksDebugGraphics가 아직 없으면 생성
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(true);
             console.log("🐛 Debug Mode ON");
@@ -190,16 +190,14 @@ export default class BattleScene extends Phaser.Scene {
             if (docSnap.exists()) {
                 const dbData = docSnap.data();
                 
-                // DB 설정이 있으면 덮어씀
                 if (dbData.showDebugStats !== undefined) config.showDebugStats = dbData.showDebugStats;
-
                 if (dbData.gameSettings) config.gameSettings = { ...config.gameSettings, ...dbData.gameSettings };
                 if (dbData.unitCosts) config.unitCosts = { ...config.unitCosts, ...dbData.unitCosts };
                 if (dbData.aiSettings) {
-                     config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
-                     if (dbData.aiSettings.common) {
-                         config.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...dbData.aiSettings.common };
-                     }
+                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
+                      if (dbData.aiSettings.common) {
+                          config.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...dbData.aiSettings.common };
+                      }
                 }
                 if (dbData.roleDefinitions) config.roleDefinitions = dbData.roleDefinitions;
 
@@ -221,13 +219,12 @@ export default class BattleScene extends Phaser.Scene {
             return item;
         });
 
-        // 코인 초기화 로직
         if (this.passedCoins !== null) {
             this.playerCoins = this.passedCoins;
         } else {
             this.playerCoins = config.gameSettings.initialCoins ?? 50;
         }
-        this.levelInitialCoins = this.playerCoins; // 재시작 시 복구용
+        this.levelInitialCoins = this.playerCoins;
 
         console.log(`💰 Level Start Coins: ${this.playerCoins}`);
         
@@ -387,17 +384,13 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    // [Fix] 이전에 빈 함수여서 발생했던 오류 해결
     createBlocksDebug() {
         this.blocksDebugGraphics = this.add.graphics().setDepth(1000);
         
-        // 블록(충돌체) 시각화
         if (this.blockObjectGroup) {
             this.blocksDebugGraphics.lineStyle(2, 0xff0000, 0.5);
             this.blockObjectGroup.children.iterate((child) => {
                 const { x, y, width, height } = child;
-                // StaticBody의 경우 중심좌표가 아닌 Top-Left 기준일 수 있으므로 조정
-                // Phaser Rectangle Game Object는 중심좌표 기준
                 this.blocksDebugGraphics.strokeRect(x - width/2, y - height/2, width, height);
             });
         }
@@ -409,6 +402,7 @@ export default class BattleScene extends Phaser.Scene {
         const paddingY = Math.max(0, (h - this.mapHeight) / 2);
         this.cameras.main.setBounds(-paddingX, -paddingY, this.mapWidth + 2 * paddingX, this.mapHeight + 2 * paddingY);
     }
+
     createStandardAnimations() {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
         unitTextures.forEach(key => {
@@ -429,7 +423,7 @@ export default class BattleScene extends Phaser.Scene {
         const blueCount = config.gameSettings.blueCount ?? 1; 
         const redCount = config.gameSettings.redCount ?? 6;
         const blueRoles = config.blueTeamRoles;
-        const redRoles = config.redTeamRoles || [config.redTeamStats];
+        const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
         
         const createUnit = (x, y, team, target, stats, isLeader) => {
             stats.aiConfig = config.aiSettings;
@@ -440,14 +434,13 @@ export default class BattleScene extends Phaser.Scene {
             const finalStats = { ...baseStats, ...safeStats };
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             unit.setInteractive();
-            
-            // [Fix] 아군만 드래그 가능하도록 수정 (전투 시작 전 적군 이동 버그 해결)
             if (team === 'blue') {
                 this.input.setDraggable(unit);
             }
             return unit;
         };
 
+        // --- Blue Team Spawn ---
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -477,28 +470,88 @@ export default class BattleScene extends Phaser.Scene {
             this.blueTeam.add(unit);
         }
 
+        // --- Red Team Spawn (Modified Logic) ---
         let dogsSpawned = false;
+
+        // 적 스폰 영역(Area)을 찾기 위한 헬퍼 변수
+        let redSpawnArea = null;
+
         if (map) {
             const dogLayer = map.getObjectLayer('Dogs');
             if (dogLayer && dogLayer.objects.length > 0) {
-                dogLayer.objects.forEach((obj, index) => {
-                    const stats = redRoles[index % redRoles.length];
-                    const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
-                    this.redTeam.add(unit);
-                });
+                // 면(Rectangle) 형태의 Object가 있는지 확인
+                // Tiled에서 Object를 영역으로 그리면 width, height가 0보다 큼
+                const areaObj = dogLayer.objects.find(obj => obj.width > 0 && obj.height > 0);
+                if (areaObj) {
+                    redSpawnArea = new Phaser.Geom.Rectangle(areaObj.x, areaObj.y, areaObj.width, areaObj.height);
+                }
+            }
+        }
+
+        // [Case 1] Garrison Army (Priority 1) - 주둔군이 있을 때
+        if (this.armyConfig) {
+            const count = this.armyConfig.count || 1;
+            const armyStats = defaultRedRoles[0] || config.redTeamStats; 
+            
+            for (let i = 0; i < count; i++) {
+                let spawnX, spawnY;
+
+                if (redSpawnArea) {
+                    // Dogs 레이어에 설정된 영역이 있다면 그 안에서 랜덤 생성
+                    spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
+                    spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
+                } else {
+                    // 영역이 없으면 기존대로 우측 끝 fallback
+                    spawnX = (this.mapWidth || 2000) - 250 + Phaser.Math.Between(-30, 30);
+                    spawnY = startY + (i * spawnGap);
+                }
+
+                const unit = createUnit(spawnX, spawnY, 'red', this.blueTeam, armyStats, false);
+                this.redTeam.add(unit);
+            }
+            dogsSpawned = true;
+            console.log(`⚔️ [BattleScene] Spawning Garrison Army (${count}) inside ${redSpawnArea ? 'Area' : 'Fallback Zone'}`);
+        }
+
+        // [Case 2] Map Object Layer (Priority 2) - 주둔군이 없을 때
+        if (!dogsSpawned && map) {
+            const dogLayer = map.getObjectLayer('Dogs');
+            if (dogLayer && dogLayer.objects.length > 0) {
+                // 1. 영역(Area)이 정의되어 있다면 -> 그 영역 안에 Default Red Count만큼 랜덤 생성
+                if (redSpawnArea) {
+                    for (let i = 0; i < redCount; i++) {
+                        const stats = defaultRedRoles[i % defaultRedRoles.length];
+                        const spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
+                        const spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
+                        const unit = createUnit(spawnX, spawnY, 'red', this.blueTeam, stats, false);
+                        this.redTeam.add(unit);
+                    }
+                    console.log(`🗺️ [BattleScene] Spawning ${redCount} Enemies in Map Area`);
+                } 
+                // 2. 점(Point)들만 있다면 -> 각 점 위치에 1:1 생성
+                else {
+                    dogLayer.objects.forEach((obj, index) => {
+                        const stats = defaultRedRoles[index % defaultRedRoles.length];
+                        const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
+                        this.redTeam.add(unit);
+                    });
+                    console.log(`🗺️ [BattleScene] Spawning Map Object Enemies (Points)`);
+                }
                 dogsSpawned = true;
             }
         }
+
+        // [Case 3] Fallback Default (Priority 3)
         if (!dogsSpawned) {
             for (let i = 0; i < redCount; i++) {
-                const stats = redRoles[i % redRoles.length];
+                const stats = defaultRedRoles[i % defaultRedRoles.length];
                 const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
                 this.redTeam.add(unit);
             }
+            console.log(`⚠️ [BattleScene] Spawning Fallback Enemies`);
         }
     }
     
-    // 상점 구매 로직
     buyUnit(role, cost) {
         if (!this.isSetupPhase) return;
         
@@ -507,7 +560,6 @@ export default class BattleScene extends Phaser.Scene {
             this.uiManager.updateCoins(this.playerCoins);
 
             let stats = ROLE_BASE_STATS[role] || {};
-            // DevPage 설정 덮어쓰기
             if (this.gameConfig && this.gameConfig.roleDefinitions && this.gameConfig.roleDefinitions[role]) {
                 stats = { ...stats, ...this.gameConfig.roleDefinitions[role] };
                 stats.role = role;
@@ -535,7 +587,6 @@ export default class BattleScene extends Phaser.Scene {
             const unit = new UnitClass(this, spawnX, spawnY, null, 'blue', this.redTeam, finalStats, false);
             
             unit.setInteractive();
-            // 구매한 아군 유닛은 드래그 가능
             this.input.setDraggable(unit);
             this.blueTeam.add(unit);
             
@@ -556,27 +607,23 @@ export default class BattleScene extends Phaser.Scene {
         }
     }
 
-    // [Rolled Back & Modified] 몬스터 사망 시 코인 드랍 (기존 방식: 제자리 페이드아웃)
     animateCoinDrop(startX, startY, amount) {
-        // 1. 코인 스프라이트 생성 (World Space)
         const coin = this.add.graphics();
-        coin.fillStyle(0xFFD700, 1); // Gold Color
+        coin.fillStyle(0xFFD700, 1); 
         coin.fillCircle(0, 0, 8);
         coin.lineStyle(2, 0xFFFFFF, 1);
         coin.strokeCircle(0, 0, 8);
         
         coin.setPosition(startX, startY);
-        coin.setDepth(900); // 유닛 위쪽 레이어
+        coin.setDepth(900); 
 
-        // 2. 애니메이션 (위로 떠오르며 페이드아웃)
         this.tweens.add({
             targets: coin,
-            y: startY - 60, // 살짝 위로 이동
-            alpha: 0,       // 점점 투명해짐
+            y: startY - 60, 
+            alpha: 0, 
             duration: 800,
             ease: 'Power1',
             onComplete: () => {
-                // 4. 도착 후 처리
                 coin.destroy();
                 this.playerCoins += amount;
                 if(this.uiManager) {
@@ -585,11 +632,9 @@ export default class BattleScene extends Phaser.Scene {
             }
         });
 
-        // 3. 획득 금액 표시 (Floating Text) - 같은 애니메이션 적용
         this.showFloatingCoinText(startX, startY, amount);
     }
 
-    // [New Function] 획득 금액 부양 텍스트 (World Space)
     showFloatingCoinText(x, y, amount) {
         const text = this.add.text(x, y, `+${amount}`, {
             fontFamily: 'Arial',
@@ -604,7 +649,7 @@ export default class BattleScene extends Phaser.Scene {
 
         this.tweens.add({
             targets: text,
-            y: y - 50, // 위로 둥둥
+            y: y - 50, 
             alpha: 0,
             duration: 1000,
             ease: 'Power2',
@@ -709,7 +754,6 @@ export default class BattleScene extends Phaser.Scene {
         
         if (this.uiManager.isDebugEnabled) {
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
-            // [Fix] 안전 체크 추가
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(true);
         } else {
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
@@ -728,7 +772,6 @@ export default class BattleScene extends Phaser.Scene {
             if (this.checkBattleTimer <= 0) {
                 this.checkBattleTimer = 100;
                 if (this.combatManager.checkBattleDistance(this.blueTeam, this.redTeam)) {
-                   // 거리 감지 로직
                 }
             }
         }
@@ -769,7 +812,6 @@ export default class BattleScene extends Phaser.Scene {
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
 
-        // 기존 점수 계산 로직
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
         const survivors = this.blueTeam.countActive();
@@ -783,7 +825,6 @@ export default class BattleScene extends Phaser.Scene {
                 const bonusCoins = isWin ? Math.floor(totalScore / 100) : 0;
                 const finalCoins = this.playerCoins + bonusCoins;
 
-                // [Fix] UIScene을 명시적으로 종료하여 전투 UI 제거
                 this.scene.stop('UIScene'); 
 
                 this.scene.start('StrategyScene', {
@@ -796,7 +837,6 @@ export default class BattleScene extends Phaser.Scene {
                 });
             };
         } else {
-            // [Arcade Mode Logic]
             let rank = 'F';
             if (isWin) {
                 if (totalScore >= 3500) rank = 'S';
@@ -838,8 +878,6 @@ export default class BattleScene extends Phaser.Scene {
         
         console.log(`🎉 [nextLevel] Score: ${score}, BonusCoins: ${bonusCoins}, NextCoins: ${nextCoins}`);
         
-        // [Modified] 애니메이션 완료 후 씬 재시작 (UI Animation 사용)
-        // 화면 중앙(Screen Space) 좌표 계산
         const centerX = this.scale.width / 2;
         const centerY = this.scale.height / 2;
 
