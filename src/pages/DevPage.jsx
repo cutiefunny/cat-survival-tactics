@@ -5,17 +5,17 @@ import { db } from "../firebaseConfig";
 import { useNavigate } from "@solidjs/router";
 import { LEVEL_KEYS } from "../game/managers/LevelManager";
 
-// [설정] 역할별 기본 스탯 정의 (defense 추가)
+// [설정] 역할별 기본 스탯 정의 (defense, killReward 추가)
 const DEFAULT_ROLE_DEFS = {
-  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10 },
-  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400 },
-  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600 },
-  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200 },
-  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500 },
-  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10 },
-  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000 },
-  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500 },
-  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500 }
+  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100 },
+  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15 },
+  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20 },
+  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30 },
+  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20 },
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25 },
+  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20 },
+  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10 },
+  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10 }
 };
 
 // [설정] 기본 유닛 가격
@@ -25,7 +25,6 @@ const DEFAULT_UNIT_COSTS = {
 
 const DEFAULT_CONFIG = {
   showDebugStats: false, 
-  // [Modified] initialCoins 추가
   gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, initialCoins: 50 },
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
@@ -151,8 +150,6 @@ const DevPage = () => {
     const targetArrayName = teamType === 'blue' ? "blueTeamRoles" : "redTeamRoles";
     const defaultRole = teamType === 'blue' ? "Normal" : "NormalDog";
     
-    // createStore의 setConfig에서 현재 상태를 직접 참조하기 위해 JSON 복사본 사용 대신
-    // 불변성 유지를 위해 현재 배열을 가져와서 계산
     const currentList = JSON.parse(JSON.stringify(config[targetArrayName]));
     const updatedList = syncArrayLength(currentList, newCount, defaultRole, config.roleDefinitions);
     setConfig(targetArrayName, updatedList);
@@ -165,7 +162,6 @@ const DevPage = () => {
     setConfig(targetArrayName, index, { role: newRole, ...stats });
   };
 
-  // [Modified] 스탯 변경 시 해당 역할을 가진 모든 유닛의 스탯도 함께 업데이트
   const handleStatChange = (roleName, statKey, value) => {
     setConfig("roleDefinitions", roleName, statKey, value);
     const updateTeam = (teamKey) => {
@@ -179,7 +175,6 @@ const DevPage = () => {
     updateTeam("redTeamRoles");
   };
 
-  // [New] 유닛 가격 변경 핸들러
   const handleCostChange = (roleName, value) => {
     setConfig("unitCosts", roleName, value);
   };
@@ -230,7 +225,6 @@ const DevPage = () => {
                 
                 <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
                 
-                {/* [New] Defense Icon Display */}
                 <span title="Defense" style={{whiteSpace: "nowrap"}}>🛡️ <span style={{color: "#aaaaff"}}>{unit.defense ?? 0}</span></span>
                 
                 <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
@@ -243,6 +237,11 @@ const DevPage = () => {
                     </span>
                 )}
 
+                {/* [New] Kill Reward Display in List */}
+                <span title="Kill Reward" style={{whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
+                    💰 <span style={{color: "#ffd700"}}>{unit.killReward ?? 10}</span>
+                </span>
+
                 {unit.role === 'Healer' && (
                      <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
                         😡Stack {unit.aggroStackLimit || 10}
@@ -254,7 +253,6 @@ const DevPage = () => {
   };
 
   return (
-    // [Modified] overflow-y: auto 추가 및 height: 100vh로 화면 높이 고정
     <div style={{ padding: "40px", "background-color": "#1a1a1a", color: "white", "height": "100vh", "overflow-y": "auto", "box-sizing": "border-box", "font-family": "monospace" }}>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "border-bottom": "2px solid #444", "padding-bottom": "10px" }}>
         <h1 style={{ margin: 0 }}>🐱 Tactics Dev Console</h1>
@@ -297,7 +295,6 @@ const DevPage = () => {
                 </select>
             </label>
 
-            {/* [New] Initial Coins */}
             <label style={rowStyle}>
                 <span style={{ color: "#ffdd00", fontWeight: "bold", marginRight: "10px" }}>💰 Initial Coins:</span>
                 <input 
@@ -356,7 +353,6 @@ const DevPage = () => {
                     <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : role === 'Raccoon' ? '#ff8844' : '#aaa'}` }}>
                         <div style={{display: "flex", "justify-content": "space-between", "margin-bottom": "10px"}}>
                             <h4 style={{ margin: "0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
-                            {/* [New] Cost Input */}
                             <label style={{ fontSize: "0.9em", color: "#ffdd00" }}>
                                 💵Cost: 
                                 <input 
@@ -376,7 +372,6 @@ const DevPage = () => {
                                 <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} />
                             </label>
                             
-                            {/* [New] Defense Input */}
                             <label style={statLabelStyle}>DEF<input type="number" value={config.roleDefinitions[role].defense ?? 0} onInput={(e) => handleStatChange(role, "defense", parseInt(e.target.value))} style={statInputStyle} /></label>
 
                             <label style={statLabelStyle}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={statInputStyle} /></label>
@@ -388,6 +383,17 @@ const DevPage = () => {
                                     value={config.roleDefinitions[role].attackCooldown || 500} 
                                     onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} 
                                     style={{ ...statInputStyle, background: "#112211", borderColor: "#484", color: "#afa" }} 
+                                />
+                            </label>
+
+                            {/* [New] Kill Reward Input */}
+                            <label style={{...statLabelStyle, color: "#ffd700"}}>
+                                Kill Reward
+                                <input 
+                                    type="number" 
+                                    value={config.roleDefinitions[role].killReward ?? 10} 
+                                    onInput={(e) => handleStatChange(role, "killReward", parseInt(e.target.value))} 
+                                    style={{ ...statInputStyle, background: "#221100", borderColor: "#aa8800", color: "#ffd700" }} 
                                 />
                             </label>
                             

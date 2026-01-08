@@ -13,50 +13,58 @@ export const ROLE_TEXTURES = {
 };
 
 export const ROLE_BASE_STATS = {
-    // [Fix] attackRange 명시 추가 및 [New] defense 추가
+    // [Updated] killReward(처치 보상) 추가
     'Leader': { 
         hp: 200, attackPower: 25, moveSpeed: 90, 
-        defense: 2, // 리더 방어력 2
+        defense: 2, 
         attackRange: 50, 
-        skillCooldown: 30000, skillRange: 300, skillDuration: 10000 
+        skillCooldown: 30000, skillRange: 300, skillDuration: 10000,
+        killReward: 100 // 보스급 보상
     },
     'Tanker': { 
         hp: 300, attackPower: 10, moveSpeed: 50, 
-        defense: 5, // 탱커 방어력 5
+        defense: 5, 
         attackRange: 50, 
-        skillCooldown: 10000, skillRange: 200 
+        skillCooldown: 10000, skillRange: 200,
+        killReward: 30 // 튼튼한 적 보상
     },
     'Healer': { 
         hp: 100, attackPower: 15, moveSpeed: 110, 
-        defense: 0, // 기본 0
+        defense: 0, 
         attackRange: 50, 
-        skillCooldown: 3000, aggroStackLimit: 10 
+        skillCooldown: 3000, aggroStackLimit: 10,
+        killReward: 25 // 우선 순위 타겟 보상
     },
     'Raccoon': { 
         hp: 150, attackPower: 20, moveSpeed: 100, 
         defense: 0, 
         attackRange: 50, 
-        skillCooldown: 8000 
+        skillCooldown: 8000,
+        killReward: 20
     },
     'Shooter': { 
         hp: 80, attackPower: 30, moveSpeed: 80, 
         defense: 0, 
-        attackRange: 250 // [Important] 원거리 (CombatManager가 > 60일 때 투사체 발사)
+        attackRange: 250, // [Important] 원거리
+        killReward: 20
     },
     'Runner': { 
         hp: 120, attackPower: 18, moveSpeed: 120, 
         defense: 0, 
-        attackRange: 50 
+        attackRange: 50,
+        killReward: 15
     },
     'Normal': { 
         hp: 140, attackPower: 15, moveSpeed: 70, 
         defense: 0, 
-        attackRange: 50 
+        attackRange: 50,
+        killReward: 10
     },
     'NormalDog': { 
         hp: 140, attackPower: 15, moveSpeed: 70, 
         defense: 0, 
-        attackRange: 50 
+        attackRange: 50,
+        killReward: 10 // 기본 잡몹 보상
     }
 };
 

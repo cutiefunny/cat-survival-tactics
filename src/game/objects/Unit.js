@@ -35,6 +35,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         
         // [New] 방어력 추가 (기본값 0)
         this.defense = stats.defense || 0;
+        
+        // [New] 처치 보상 추가 (기본값 10)
+        this.killReward = stats.killReward || 10;
 
         this.attackRange = stats.attackRange || 50;
         this.aiConfig = stats.aiConfig || {}; 
@@ -120,9 +123,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
 
-        // [New] 적군(red) 사망 시 코인 드랍
+        // [Modified] 적군(red) 사망 시 설정된 killReward 만큼 코인 드랍
         if (this.team === 'red' && this.scene && typeof this.scene.animateCoinDrop === 'function') {
-            const dropAmount = 10; // 몬스터 처치 시 획득할 골드량
+            const dropAmount = this.killReward; 
             this.scene.animateCoinDrop(this.x, this.y, dropAmount);
         }
 
@@ -283,26 +286,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
         // 수동 조작 중이 아닐 때만 AI 가동 (Auto Battle)
         if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
-            this.updateAI(delta);
-        }
-    }
-
-    updateNpcLogic(delta) {
-        if (!this.scene.battleStarted) {
-            this.ai.followLeader();
-            return;
-        }
-        if (this.team === 'blue') {
-            if (this.ai.isLowHpFleeing) {
-                this.updateAI(delta);
-            } else {
-                switch (this.scene.squadState) {
-                    case 'FORMATION': this.ai.followLeader(); break;
-                    case 'FLEE': this.ai.runAway(delta); break;
-                    case 'FREE': default: this.updateAI(delta); break;
-                }
-            }
-        } else {
             this.updateAI(delta);
         }
     }
