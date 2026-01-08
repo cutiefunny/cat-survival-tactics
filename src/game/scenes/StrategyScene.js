@@ -6,6 +6,7 @@ import leaderImg from '../../assets/units/leader.png';
 import dogImg from '../../assets/units/dog.png';
 import runnerImg from '../../assets/units/runner.png'; 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
+import openingBgm from '../../assets/sounds/opening.mp3';
 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
@@ -28,6 +29,8 @@ export default class StrategyScene extends Phaser.Scene {
         this.load.spritesheet('leader_token', leaderImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('dog_token', dogImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('runner_token', runnerImg, { frameWidth: 100, frameHeight: 100 });
+
+        this.load.audio('opening_bgm', openingBgm);
     }
 
     create() {
@@ -43,7 +46,8 @@ export default class StrategyScene extends Phaser.Scene {
 
         if (tileset) {
             map.layers.forEach(layerData => {
-                map.createLayer(layerData.name, tileset, 0, 0);
+                const layer = map.createLayer(layerData.name, tileset, 0, 0);
+                if (layer) layer.setDepth(0);
             });
         }
 
@@ -71,6 +75,8 @@ export default class StrategyScene extends Phaser.Scene {
         this.hasMoved = false;
         this.previousLeaderId = null;
 
+        this.manageBGM();
+
         this.parseMapData(map, dbArmyData);
         this.mapNodes = this.registry.get('worldMapData');
 
@@ -95,10 +101,12 @@ export default class StrategyScene extends Phaser.Scene {
         }
 
         this.graphicsLayer = this.add.graphics();
+        this.graphicsLayer.setDepth(100); 
+
         this.drawConnections();
         this.createTerritoryNodes();
-        this.createPlayerToken();
         this.createEnemyTokens();
+        this.createPlayerToken();
 
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
         this.uiCamera.ignore(this.children.list);
@@ -127,6 +135,27 @@ export default class StrategyScene extends Phaser.Scene {
         this.prevPinchDistance = 0;
     }
 
+    manageBGM() {
+        this.sound.stopAll(); 
+        
+        this.bgm = this.sound.add('opening_bgm', { loop: true, volume: 0.5 });
+        const isMuted = this.registry.get('isBgmMuted') || false;
+        this.bgm.setMute(isMuted);
+
+        // [수정] 오디오 컨텍스트가 잠겨있는지 확인 (브라우저 정책 대응)
+        if (this.sound.locked) {
+            // 잠겨있다면, 사용자 입력(터치/클릭) 발생 시 'unlocked' 이벤트가 호출됨
+            this.sound.once('unlocked', () => {
+                if (this.bgm && !this.bgm.isPlaying) {
+                    this.bgm.play();
+                }
+            });
+        } else {
+            // 잠겨있지 않다면 바로 재생
+            this.bgm.play();
+        }
+    }
+
     createUI() {
         this.uiContainer = this.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
@@ -149,6 +178,24 @@ export default class StrategyScene extends Phaser.Scene {
         this.statusText = this.add.text(w - 20, headerH/2, currentStatusMsg, { 
             fontSize: '16px', color: '#dddddd', align: 'right' 
         }).setOrigin(1, 0.5);
+
+        const isMuted = this.registry.get('isBgmMuted') || false;
+        const bgmTextStr = isMuted ? "🔇 BGM OFF" : "🔊 BGM ON";
+        
+        this.bgmBtn = this.add.text(20, headerH/2, bgmTextStr, {
+            fontSize: '18px', color: '#ffffff', fontStyle: 'bold'
+        }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
+
+        this.bgmBtn.on('pointerdown', () => {
+            const newState = !this.registry.get('isBgmMuted');
+            this.registry.set('isBgmMuted', newState);
+            
+            if (this.bgm) {
+                this.bgm.setMute(newState);
+            }
+            
+            this.bgmBtn.setText(newState ? "🔇 BGM OFF" : "🔊 BGM ON");
+        });
 
         const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
 
@@ -174,7 +221,7 @@ export default class StrategyScene extends Phaser.Scene {
             }
         });
 
-        this.uiContainer.add([headerBg, footerBg, this.statusText, this.undoBtn, this.endTurnBtn]);
+        this.uiContainer.add([headerBg, footerBg, this.statusText, this.bgmBtn, this.undoBtn, this.endTurnBtn]);
         this.updateUIState();
     }
 
@@ -233,8 +280,18 @@ export default class StrategyScene extends Phaser.Scene {
         this.moveLeaderToken(prevNode, () => {
             this.hasMoved = false;
             this.previousLeaderId = null;
+            this.selectedTargetId = null; 
             this.statusText.setText(`📍 복귀 완료: ${prevNode.name}`);
             this.updateUIState();
+            
+            if (this.selectionTween) {
+                this.selectionTween.stop();
+                this.selectionTween = null;
+            }
+            this.nodeContainer.getChildren().forEach(c => {
+                if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
+                c.scale = 1;
+            });
         });
     }
 
@@ -245,20 +302,18 @@ export default class StrategyScene extends Phaser.Scene {
 
         if (node.owner === 'neutral') {
             this.statusText.setText("⛔ 아직 지나갈 수 없다! 여기는 합정파의 영역이다냥!");
-            this.tweens.add({
-                targets: circleObj,
-                x: circleObj.x + 5,
-                duration: 50,
-                yoyo: true,
-                repeat: 3
-            });
-            this.cameras.main.shake(100, 0.005);
+            this.shakeNode(circleObj);
             return;
         }
 
         if (this.hasMoved) {
+            if (this.previousLeaderId !== null && node.id === this.previousLeaderId) {
+                this.undoMove();
+                return;
+            }
+
             this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요.");
-            this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 });
+            this.shakeStatusText();
             return;
         }
 
@@ -268,53 +323,63 @@ export default class StrategyScene extends Phaser.Scene {
         }
 
         const isConnected = currentNode.connectedTo.includes(node.id);
-
         if (!isConnected) {
             this.statusText.setText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다.");
-            this.tweens.add({ targets: circleObj, x: circleObj.x + 5, duration: 50, yoyo: true, repeat: 3 });
+            this.shakeNode(circleObj);
             return;
         }
 
-        if (node.owner === 'player') {
-            this.statusText.setText(`🚶 이동 중: ${node.name}...`);
-            
-            if (this.selectionTween) {
-                this.selectionTween.stop();
-                this.selectionTween = null;
-                this.nodeContainer.getChildren().forEach(c => {
-                    if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-                    c.scale = 1;
-                });
-            }
-            this.selectedTargetId = null;
-
-            this.previousLeaderId = currentLeaderId;
-
-            this.moveLeaderToken(node, () => {
-                this.hasMoved = true; 
-                this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`);
-                this.updateUIState();
+        if (this.selectionTween) {
+            this.selectionTween.stop();
+            this.selectionTween = null;
+            this.nodeContainer.getChildren().forEach(c => {
+                if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
+                c.scale = 1;
             });
-            return;
         }
 
-        this.selectedTargetId = node.id;
-        
-        let infoText = "";
-        if (node.army) {
-            infoText = ` (적군 발견: ${node.army.count}마리)`;
-        }
-        this.statusText.setText(`🎯 목표 설정: ${node.name}${infoText}`);
-        
         this.nodeContainer.getChildren().forEach(c => {
             if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
         });
         circleObj.setAlpha(1.0);
         
-        if (this.selectionTween) this.selectionTween.stop();
         this.selectionTween = this.tweens.add({
             targets: circleObj, scale: { from: 1, to: 1.3 }, yoyo: true, repeat: -1, duration: 600
         });
+
+        this.previousLeaderId = currentLeaderId;
+        
+        if (node.owner !== 'player') {
+            this.selectedTargetId = node.id;
+        } else {
+            this.selectedTargetId = null; 
+        }
+
+        this.statusText.setText(`🚶 ${node.name}(으)로 이동 중...`);
+
+        this.moveLeaderToken(node, () => {
+            this.hasMoved = true; 
+            
+            if (this.selectedTargetId) {
+                let infoText = "";
+                if (node.army) infoText = ` (적군: ${node.army.count}마리)`;
+                this.statusText.setText(`⚔️ ${node.name} 진입!${infoText} 전투하려면 [턴 종료]`);
+            } else {
+                this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`);
+            }
+            this.updateUIState();
+        });
+    }
+    
+    shakeNode(target) {
+        this.tweens.add({
+            targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3
+        });
+        this.cameras.main.shake(100, 0.005);
+    }
+    
+    shakeStatusText() {
+        this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 });
     }
 
     handleTurnEnd() {
@@ -339,21 +404,19 @@ export default class StrategyScene extends Phaser.Scene {
 
     startBattle() {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
-        console.log(`⚔️ Attacking ${targetNode.name}`);
-        
-        this.previousLeaderId = null;
-        this.updateUIState();
+        if (!targetNode) return;
 
-        this.moveLeaderToken(targetNode, () => {
-            const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
-            
-            this.scene.start('BattleScene', {
-                isStrategyMode: true,
-                targetNodeId: this.selectedTargetId,
-                levelIndex: selectedLevelIndex,
-                currentCoins: this.registry.get('playerCoins') || 100,
-                armyConfig: targetNode.army || null
-            });
+        console.log(`⚔️ Attacking ${targetNode.name} (BGM: ${targetNode.bgm})`);
+        
+        const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
+        
+        this.scene.start('BattleScene', {
+            isStrategyMode: true,
+            targetNodeId: this.selectedTargetId,
+            levelIndex: selectedLevelIndex,
+            currentCoins: this.registry.get('playerCoins') || 100,
+            armyConfig: targetNode.army || null,
+            bgmKey: targetNode.bgm 
         });
     }
 
@@ -479,7 +542,8 @@ export default class StrategyScene extends Phaser.Scene {
                     connectedTo: [], 
                     levelIndex: finalLevelIndex, 
                     desc: config.description || "",
-                    army: armyData 
+                    army: armyData,
+                    bgm: config.bgm || "stage1_bgm" 
                 };
             });
         } else {
@@ -524,10 +588,9 @@ export default class StrategyScene extends Phaser.Scene {
 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 
-                // [Modified] 크기 결정 (중립군은 표준 60으로 고정)
                 let finalSize = 60;
                 if (node.owner === 'neutral') {
-                    finalSize = 60; // 중립군 (표준 크기)
+                    finalSize = 60; 
                 } else {
                     const armyCount = node.army.count || 1;
                     finalSize = 50 + (armyCount - 5) * 5;
@@ -537,6 +600,7 @@ export default class StrategyScene extends Phaser.Scene {
                 enemyObj.setDisplaySize(finalSize, finalSize);
                 enemyObj.setOrigin(0.5, 0.8);
                 enemyObj.setFlipX(false); 
+                enemyObj.setDepth(10); 
                 
                 if (node.army.type === 'runner') enemyObj.play('runner_idle');
                 else enemyObj.play('dog_idle');
@@ -563,6 +627,7 @@ export default class StrategyScene extends Phaser.Scene {
             this.leaderObj.setFlipX(true);
             this.leaderObj.setDisplaySize(60, 60); 
             this.leaderObj.setOrigin(0.5, 0.8);
+            this.leaderObj.setDepth(50); 
             this.leaderObj.play('leader_idle');
             this.tweens.add({
                 targets: this.leaderObj, scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 },
@@ -580,9 +645,13 @@ export default class StrategyScene extends Phaser.Scene {
             else if (node.owner === 'neutral') color = 0x888888; 
             
             const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3);
+            shadow.setDepth(100); 
+
             const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
-            circle.setAlpha(0.5);
+            circle.setAlpha(0.5); 
             circle.nodeData = node;
+            circle.setDepth(100); 
+
             circle.on('pointerdown', () => this.selectTerritory(circle));
             this.nodeContainer.add(shadow);
             this.nodeContainer.add(circle);
@@ -592,7 +661,7 @@ export default class StrategyScene extends Phaser.Scene {
     drawConnections() {
         if (!this.mapNodes) return;
         this.graphicsLayer.clear();
-        this.graphicsLayer.lineStyle(2, 0x888888, 0.5);
+        this.graphicsLayer.lineStyle(2, 0x888888, 0.5); 
         this.mapNodes.forEach(node => {
             node.connectedTo.forEach(targetId => {
                 const target = this.mapNodes.find(n => n.id === targetId);

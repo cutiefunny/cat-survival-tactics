@@ -25,7 +25,7 @@ import PathfindingManager from '../systems/PathfindingManager';
 
 // [Assets - Maps]
 import stage1Data from '../../assets/maps/stage1.json';
-import level4Data from '../../assets/maps/level4.json'; // [New] Level 4 Import
+import level4Data from '../../assets/maps/level4.json'; 
 
 // [Assets - Tilesets]
 import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
@@ -33,7 +33,7 @@ import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
 import tilesetCity1Img from '../../assets/tilesets/City_20.png';
 import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
 import tilesetParkImg from '../../assets/tilesets/park.png'; 
-import tilesetCarImg from '../../assets/tilesets/car.png'; // [New] Car Tileset Import
+import tilesetCarImg from '../../assets/tilesets/car.png'; 
 
 // [Assets - Street Tilesets]
 import tilesetStreet1Img from '../../assets/tilesets/street1.png';
@@ -50,6 +50,11 @@ import tankerSheet from '../../assets/units/tanker.png';
 import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
 
+// [New] BGM Assets (실제 파일 임포트)
+import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
+import level1 from '../../assets/sounds/level1.mp3';
+import level2 from '../../assets/sounds/level2.mp3';
+
 const UnitClasses = {
     'Shooter': Shooter, 
     'Runner': Runner, 
@@ -60,6 +65,14 @@ const UnitClasses = {
     'Healer': Healer, 
     'Raccoon': Raccoon,
     'NormalDog': Unit 
+};
+
+// [Config] BGM 매핑 (Config의 bgm 키 -> 실제 파일)
+const BGM_SOURCES = {
+    'stage1_bgm': stage1BgmFile, // 기존 호환성
+    'level1': level1,
+    'level2': level2,
+    'default': stage1BgmFile
 };
 
 // [Config] 기본 용병 가격
@@ -97,8 +110,11 @@ export default class BattleScene extends Phaser.Scene {
         this.isStrategyMode = data && data.isStrategyMode;
         this.targetNodeId = data ? data.targetNodeId : null;
         
-        // [New] 주둔군(Army) 데이터 수신
+        // 주둔군(Army) 데이터 수신
         this.armyConfig = data ? data.armyConfig : null;
+        
+        // [수정] BGM 키 수신 및 저장
+        this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
@@ -110,10 +126,7 @@ export default class BattleScene extends Phaser.Scene {
         this.currentLevelIndex = targetIndex;
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
         
-        console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}`);
-        if (this.armyConfig) {
-            console.log(`⚔️ Garrison Army Detected:`, this.armyConfig);
-        }
+        console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}`);
     }
 
     preload() {
@@ -128,7 +141,7 @@ export default class BattleScene extends Phaser.Scene {
         this.load.spritesheet('healer', healerSheet, sheetConfig);
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
-        this.load.tilemapTiledJSON('level4', level4Data); // [New] Level 4 Preload
+        this.load.tilemapTiledJSON('level4', level4Data); 
         
         LEVEL_KEYS.forEach(key => {
             console.log(`🗺️ Preloading Map: ${key}`);
@@ -140,15 +153,48 @@ export default class BattleScene extends Phaser.Scene {
         this.load.image('tiles_city', tilesetCity1Img);
         this.load.image('tiles_city2', tilesetCity2Img);
         this.load.image('tiles_park', tilesetParkImg);
-        this.load.image('tiles_car', tilesetCarImg); // [New] Car Tileset Preload
+        this.load.image('tiles_car', tilesetCarImg); 
         
         this.load.image('tiles_street1', tilesetStreet1Img);
         this.load.image('tiles_street2', tilesetStreet2Img);
         this.load.image('tiles_street3', tilesetStreet3Img);
         this.load.image('tiles_street4', tilesetStreet4Img);
+
+        // [수정] 전달받은 bgmKey에 해당하는 파일 로드
+        // init에서 받은 bgmKey를 이용해 BGM_SOURCES 맵에서 실제 파일을 찾습니다.
+        const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
+        
+        if (bgmFile) {
+            console.log(`🎵 Preloading Audio Key: '${this.bgmKey}' from source.`);
+            this.load.audio(this.bgmKey, bgmFile);
+        } else {
+            console.warn(`⚠️ No BGM file found for key: '${this.bgmKey}'. Using default.`);
+            this.load.audio('default', BGM_SOURCES['default']);
+        }
     }
 
     create() {
+        // [수정] BGM 재생 로직
+        this.sound.stopAll(); // 이전 씬의 음악(Strategy) 종료
+
+        // preload에서 로드한 키(this.bgmKey)로 재생 시도
+        // 만약 로드에 실패했거나 매핑이 없으면 'default'로 폴백
+        let playKey = this.bgmKey;
+        if (!this.cache.audio.exists(playKey)) {
+            console.warn(`⚠️ Audio key '${playKey}' not found in cache. Falling back to 'default'.`);
+            playKey = 'default';
+        }
+
+        if (this.cache.audio.exists(playKey)) {
+            const isMuted = this.registry.get('isBgmMuted') || false;
+            console.log(`▶️ Playing BGM: ${playKey}`);
+            this.bgm = this.sound.add(playKey, { loop: true, volume: 0.5 });
+            this.bgm.play();
+            this.bgm.setMute(isMuted);
+        } else {
+            console.error(`❌ Failed to play BGM. Key '${playKey}' is missing.`);
+        }
+
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
@@ -478,14 +524,11 @@ export default class BattleScene extends Phaser.Scene {
         // --- Red Team Spawn (Modified Logic) ---
         let dogsSpawned = false;
 
-        // 적 스폰 영역(Area)을 찾기 위한 헬퍼 변수
         let redSpawnArea = null;
 
         if (map) {
             const dogLayer = map.getObjectLayer('Dogs');
             if (dogLayer && dogLayer.objects.length > 0) {
-                // 면(Rectangle) 형태의 Object가 있는지 확인
-                // Tiled에서 Object를 영역으로 그리면 width, height가 0보다 큼
                 const areaObj = dogLayer.objects.find(obj => obj.width > 0 && obj.height > 0);
                 if (areaObj) {
                     redSpawnArea = new Phaser.Geom.Rectangle(areaObj.x, areaObj.y, areaObj.width, areaObj.height);
@@ -493,7 +536,6 @@ export default class BattleScene extends Phaser.Scene {
             }
         }
 
-        // [Case 1] Garrison Army (Priority 1) - 주둔군이 있을 때
         if (this.armyConfig) {
             const count = this.armyConfig.count || 1;
             const armyStats = defaultRedRoles[0] || config.redTeamStats; 
@@ -502,11 +544,9 @@ export default class BattleScene extends Phaser.Scene {
                 let spawnX, spawnY;
 
                 if (redSpawnArea) {
-                    // Dogs 레이어에 설정된 영역이 있다면 그 안에서 랜덤 생성
                     spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
                     spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
                 } else {
-                    // 영역이 없으면 기존대로 우측 끝 fallback
                     spawnX = (this.mapWidth || 2000) - 250 + Phaser.Math.Between(-30, 30);
                     spawnY = startY + (i * spawnGap);
                 }
@@ -518,11 +558,9 @@ export default class BattleScene extends Phaser.Scene {
             console.log(`⚔️ [BattleScene] Spawning Garrison Army (${count}) inside ${redSpawnArea ? 'Area' : 'Fallback Zone'}`);
         }
 
-        // [Case 2] Map Object Layer (Priority 2) - 주둔군이 없을 때
         if (!dogsSpawned && map) {
             const dogLayer = map.getObjectLayer('Dogs');
             if (dogLayer && dogLayer.objects.length > 0) {
-                // 1. 영역(Area)이 정의되어 있다면 -> 그 영역 안에 Default Red Count만큼 랜덤 생성
                 if (redSpawnArea) {
                     for (let i = 0; i < redCount; i++) {
                         const stats = defaultRedRoles[i % defaultRedRoles.length];
@@ -533,7 +571,6 @@ export default class BattleScene extends Phaser.Scene {
                     }
                     console.log(`🗺️ [BattleScene] Spawning ${redCount} Enemies in Map Area`);
                 } 
-                // 2. 점(Point)들만 있다면 -> 각 점 위치에 1:1 생성
                 else {
                     dogLayer.objects.forEach((obj, index) => {
                         const stats = defaultRedRoles[index % defaultRedRoles.length];
@@ -546,7 +583,6 @@ export default class BattleScene extends Phaser.Scene {
             }
         }
 
-        // [Case 3] Fallback Default (Priority 3)
         if (!dogsSpawned) {
             for (let i = 0; i < redCount; i++) {
                 const stats = defaultRedRoles[i % defaultRedRoles.length];
@@ -813,6 +849,11 @@ export default class BattleScene extends Phaser.Scene {
         this.isGameOver = true;
         this.physics.pause();
         this.inputManager.destroy(); 
+        
+        // [수정] 전투 종료 시 BGM 정지
+        if (this.bgm) {
+            this.bgm.stop();
+        }
 
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();

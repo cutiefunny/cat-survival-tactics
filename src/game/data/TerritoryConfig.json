@@ -2,33 +2,39 @@
   "default": {
     "mapId": "level2",
     "name": "Unknown Area",
-    "difficulty": 1
+    "difficulty": 1,
+    "bgm": "level1"
   },
   "territories": {
     "2": {
       "mapId": "level1",
       "name": "길거리",
-      "difficulty": 1
+      "difficulty": 1,
+      "bgm": "level1"
     },
     "3": {
       "mapId": "level3",
       "name": "무대륙",
-      "difficulty": 2
+      "difficulty": 2,
+      "bgm": "level2"
     },
     "4": {
       "mapId": "level4",
       "name": "상점가",
-      "difficulty": 2
+      "difficulty": 2,
+      "bgm": "level2"
     },
     "5": {
       "mapId": "level4",
       "name": "상점가2",
-      "difficulty": 2
+      "difficulty": 2,
+      "bgm": "level2"
     },
     "10": {
       "mapId": "level2",
       "name": "공원",
-      "difficulty": 2
+      "difficulty": 2,
+      "bgm": "level2"
     }
   }
 }
