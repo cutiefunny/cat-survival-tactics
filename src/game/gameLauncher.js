@@ -1,21 +1,31 @@
 import Phaser from 'phaser';
-import { getGameConfig } from './phaserConfig';
+import BattleScene from './scenes/BattleScene';
+import UIScene from './scenes/UIScene';
+import StrategyScene from './scenes/StrategyScene';
 
+// [Fix] export default -> export function으로 변경 (기존 import 방식 유지)
 export function launchGame(containerId) {
-    // 1. 컨테이너 CSS 강제 설정 (중앙 정렬)
-    const container = document.getElementById(containerId);
-    if (container) {
-        container.style.width = '100vw';
-        container.style.height = '100vh';
-        container.style.display = 'flex';
-        container.style.justifyContent = 'center';
-        container.style.alignItems = 'center';
-        container.style.margin = '0';
-        container.style.padding = '0';
-        container.style.overflow = 'hidden';
-    }
+    const config = {
+        type: Phaser.AUTO,
+        parent: containerId,
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#000000',
+        physics: {
+            default: 'arcade',
+            arcade: {
+                debug: false, 
+                gravity: { y: 0 } 
+            }
+        },
+        // [New] StrategyScene을 가장 앞에 배치하여 시작 씬으로 설정
+        scene: [StrategyScene, BattleScene, UIScene], 
+        
+        scale: {
+            mode: Phaser.Scale.RESIZE,
+            autoCenter: Phaser.Scale.CENTER_BOTH
+        }
+    };
 
-    // 2. Phaser 게임 인스턴스 생성
-    const config = getGameConfig(containerId);
     return new Phaser.Game(config);
 }

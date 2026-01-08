@@ -88,8 +88,13 @@ export default class BattleScene extends Phaser.Scene {
     }
 
     init(data) {
+        // [Existing Code]
         let targetIndex = 0;
         this.hasLevelIndexPassed = false; 
+
+        // [New] 전략 모드 데이터 수신
+        this.isStrategyMode = data && data.isStrategyMode;
+        this.targetNodeId = data ? data.targetNodeId : null;
 
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
@@ -99,12 +104,9 @@ export default class BattleScene extends Phaser.Scene {
         }
 
         this.currentLevelIndex = targetIndex;
-        
-        // 이전 씬에서 전달된 코인 확인
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
-
-        const levelName = this.currentLevelIndex === -1 ? "No Map" : (LEVEL_KEYS[this.currentLevelIndex] || 'Unknown');
-        console.log(`🎮 [BattleScene] Init Level: ${this.currentLevelIndex}, Passed Coins: ${this.passedCoins}`);
+        
+        console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}`);
     }
 
     preload() {
@@ -767,28 +769,49 @@ export default class BattleScene extends Phaser.Scene {
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
 
+        // 기존 점수 계산 로직
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
         const survivors = this.blueTeam.countActive();
-        
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
         
-        let rank = 'F';
-        if (isWin) {
-            if (totalScore >= 3500) rank = 'S';
-            else if (totalScore >= 2500) rank = 'A';
-            else if (totalScore >= 1500) rank = 'B';
-            else rank = 'C';
+        if (this.isStrategyMode) {
+            btnText = isWin ? "Return to Map (Victory)" : "Return to Map (Retreat)";
+            callback = () => {
+                const bonusCoins = isWin ? Math.floor(totalScore / 100) : 0;
+                const finalCoins = this.playerCoins + bonusCoins;
 
-            if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
-                btnText = "Next Level ▶️";
-                callback = () => this.nextLevel(totalScore); 
-            } else {
-                btnText = "All Clear! 🏆";
-                message = "Champion!";
-                callback = () => this.restartGamerFromBeginning();
+                // [Fix] UIScene을 명시적으로 종료하여 전투 UI 제거
+                this.scene.stop('UIScene'); 
+
+                this.scene.start('StrategyScene', {
+                    battleResult: {
+                        isWin: isWin,
+                        targetNodeId: this.targetNodeId,
+                        remainingCoins: finalCoins,
+                        score: totalScore
+                    }
+                });
+            };
+        } else {
+            // [Arcade Mode Logic]
+            let rank = 'F';
+            if (isWin) {
+                if (totalScore >= 3500) rank = 'S';
+                else if (totalScore >= 2500) rank = 'A';
+                else if (totalScore >= 1500) rank = 'B';
+                else rank = 'C';
+
+                if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
+                    btnText = "Next Level ▶️";
+                    callback = () => this.nextLevel(totalScore); 
+                } else {
+                    btnText = "All Clear! 🏆";
+                    message = "Champion!";
+                    callback = () => this.restartGamerFromBeginning();
+                }
             }
         }
 
@@ -801,7 +824,7 @@ export default class BattleScene extends Phaser.Scene {
                 time: durationSec,
                 survivors: survivors,
                 score: totalScore,
-                rank: rank
+                rank: isWin ? 'S' : 'F'
             }
         };
 
