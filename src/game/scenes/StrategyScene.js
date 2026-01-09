@@ -75,7 +75,6 @@ export default class StrategyScene extends BaseScene {
         this.hasMoved = false;
         this.previousLeaderId = null;
         
-        // [수정] 변수 초기화 위치 변경: UI 생성 전에 null로 확실히 초기화
         this.selectedTargetId = null; 
 
         this.playBgm('opening_bgm', 0.5);
@@ -127,7 +126,7 @@ export default class StrategyScene extends BaseScene {
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
         this.uiCamera.ignore(this.children.list);
         
-        this.createUI(); // 여기서 updateUIState가 호출됨 (selectedTargetId가 null이어야 함)
+        this.createUI(); 
         
         if (battleResultMessage) {
             this.statusText.setText(battleResultMessage);
@@ -167,17 +166,24 @@ export default class StrategyScene extends BaseScene {
         const headerH = 60;
         const footerH = 80;
 
-        const headerBg = this.add.rectangle(0, 0, w, headerH, 0x000000, 0.85).setOrigin(0, 0);
+        // [Modified] 헤더 위치 계산 (화면 하단 푸터 바로 위)
+        const headerY = h - footerH - headerH;
+
+        // 1. 헤더 배경 (하단 배치)
+        const headerBg = this.add.rectangle(0, headerY, w, headerH, 0x000000, 0.85).setOrigin(0, 0);
         
         const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
-        this.statusText = this.add.text(w - 20, headerH/2, currentStatusMsg, { 
+        
+        // 2. 상태 메시지 텍스트 (헤더 영역 내부로 이동)
+        this.statusText = this.add.text(w - 20, headerY + headerH/2, currentStatusMsg, { 
             fontSize: '16px', color: '#dddddd', align: 'right' 
         }).setOrigin(1, 0.5);
 
         const isMuted = this.registry.get('isBgmMuted') || false;
         const bgmTextStr = isMuted ? "🔇 BGM OFF" : "🔊 BGM ON";
         
-        this.bgmBtn = this.add.text(20, headerH/2, bgmTextStr, {
+        // 3. BGM 버튼 (헤더 영역 내부로 이동)
+        this.bgmBtn = this.add.text(20, headerY + headerH/2, bgmTextStr, {
             fontSize: '18px', color: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
 
@@ -186,8 +192,10 @@ export default class StrategyScene extends BaseScene {
             this.bgmBtn.setText(isNowMuted ? "🔇 BGM OFF" : "🔊 BGM ON");
         });
 
+        // 4. 푸터 배경 (맨 하단 고정)
         const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
 
+        // 5. 버튼들 (푸터 영역)
         this.undoBtn = this.add.text(w/2 - 120, h - footerH/2, '취소', {
             fontSize: '24px', fontStyle: 'bold', backgroundColor: '#666666', padding: { x: 30, y: 15 }, color: '#ffffff', align: 'center'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
@@ -217,7 +225,6 @@ export default class StrategyScene extends BaseScene {
     updateUIState() {
         if (!this.undoBtn || !this.endTurnBtn) return;
 
-        // 1. 위치 및 취소 버튼 표시 여부
         if (this.hasMoved && this.previousLeaderId !== null) {
             this.undoBtn.setVisible(true);
             this.endTurnBtn.setX(this.scale.width / 2 + 50); 
@@ -227,8 +234,6 @@ export default class StrategyScene extends BaseScene {
             this.endTurnBtn.setX(this.scale.width / 2);
         }
 
-        // 2. 버튼 텍스트 변경 (전투 발생 여부 확인)
-        // [수정] undefined 체크도 포함하여 안전하게 처리
         if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
             this.endTurnBtn.setText("전투 시작");
         } else {

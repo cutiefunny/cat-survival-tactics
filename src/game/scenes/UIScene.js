@@ -7,7 +7,8 @@ export default class UIScene extends Phaser.Scene {
 
     create() {
         this.footerHeight = 80;
-        
+        this.headerHeight = 60; 
+
         this.autoBtn = null;
         this.squadBtn = null;
         this.speedBtn = null;
@@ -48,7 +49,6 @@ export default class UIScene extends Phaser.Scene {
         this.repositionFooterElements();
     }
 
-    // [Modified] 상점 UI 생성
     createShopUI(unitData, currentCoins, onBuyCallback) {
         if (this.shopContainer) this.shopContainer.destroy();
 
@@ -59,7 +59,7 @@ export default class UIScene extends Phaser.Scene {
         this.shopContainer = this.add.container(0, 0);
         
         const bg = this.add.rectangle(width/2, panelHeight/2, width, panelHeight, 0x000000, 0.7);
-        const border = this.add.rectangle(width/2, panelHeight, width, 2, 0xffcc00, 0.5);
+        const border = this.add.rectangle(width/2, panelHeight, width, 2, 0xffcc00, 0.5); // [Modified] 테두리를 위쪽으로? 아니면 유지? 여기서는 그냥 둠
         this.shopContainer.add([bg, border]);
 
         const fontSize = isMobile ? '16px' : '24px';
@@ -100,7 +100,7 @@ export default class UIScene extends Phaser.Scene {
 
     repositionShopElements() {
         if (!this.shopContainer || !this.shopContainer.visible) return;
-        const { width } = this.scale;
+        const { width, height } = this.scale;
         const isMobile = width < 600;
         
         let scale = 1;
@@ -117,12 +117,19 @@ export default class UIScene extends Phaser.Scene {
         const border = this.shopContainer.list[1];
         const panelHeight = bg ? bg.height : (isMobile ? 60 : 80);
 
+        // [Modified] 상점 UI 위치: 화면 하단 푸터 바로 위
+        // 컨테이너의 y좌표를 계산하여 배치합니다.
+        const targetY = height - this.footerHeight - (panelHeight * scale);
+        this.shopContainer.setPosition(0, targetY);
+
+        // 내부 요소들의 위치 설정 (컨테이너 내부 좌표계 기준)
         if (bg) {
             bg.setPosition(effectiveWidth / 2, panelHeight/2);
             bg.setSize(effectiveWidth, panelHeight);
         }
         if (border) {
-            border.setPosition(effectiveWidth / 2, panelHeight);
+            // 테두리는 상단에 위치시키는 것이 더 자연스러울 수 있으나, 기존 스타일 유지 (아래쪽 or 전체)
+            border.setPosition(effectiveWidth / 2, 0); // 상단 라인으로 변경
             border.setSize(effectiveWidth, 2);
         }
 
@@ -167,9 +174,10 @@ export default class UIScene extends Phaser.Scene {
 
     hideShopUI() {
         if (this.shopContainer) {
+            const { height } = this.scale;
             this.tweens.add({
                 targets: this.shopContainer,
-                y: -100,
+                y: height, // [Modified] 아래쪽으로 사라지게 변경
                 alpha: 0,
                 duration: 500,
                 onComplete: () => {
@@ -268,7 +276,7 @@ export default class UIScene extends Phaser.Scene {
 
     showStartAnimation() {
         if (this.msgText) {
-            const { width } = this.scale;
+            const { width, height } = this.scale;
             const fontSize = Math.min(48, width * 0.12);
             this.msgText.setFontSize(`${fontSize}px`);
             
@@ -276,6 +284,7 @@ export default class UIScene extends Phaser.Scene {
             this.msgText.setColor("#ffcc00");
             this.msgText.setAlpha(1);
             this.msgText.setScale(0.5);
+            this.msgText.setPosition(width / 2, height / 2);
             
             this.tweens.add({
                 targets: this.msgText, scale: 1.2, alpha: 0, duration: 1500, ease: 'Power2'
@@ -349,7 +358,6 @@ export default class UIScene extends Phaser.Scene {
                 targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
                 onComplete: () => {
                     if (isWin && btnText.includes("Next")) {
-                        // [Fix] BattleScene에서 호출하던 로직을 여기서 처리하도록 변경
                         if (callback) callback();
                     } else {
                         if (callback) callback();
@@ -380,15 +388,12 @@ export default class UIScene extends Phaser.Scene {
         });
     }
 
-    // [New] 코인 획득 애니메이션 (우측 상단 UI 방향)
     playCoinAnimation(startX, startY, amount, onComplete) {
         const coinCount = 10; 
         
-        // 목표 지점: 우측 상단 UI의 코인 텍스트 위치 (대략적인 값, scale 고려)
         const targetX = this.scale.width - 50;   
-        const targetY = 50; 
+        const targetY = this.scale.height - this.footerHeight - 40; // [Modified] 코인 날아가는 목표 지점 조정 (하단 상점 코인 텍스트 부근)
         
-        // 1. 획득 금액 텍스트 (화면 중앙 시작)
         if (amount > 0) {
             const amountText = this.add.text(startX, startY, `+${amount}냥`, { 
                 fontSize: '64px', color: '#ffd700', stroke: '#000000', strokeThickness: 4, fontStyle: 'bold' 
@@ -409,7 +414,6 @@ export default class UIScene extends Phaser.Scene {
         for (let i = 0; i < coinCount; i++) {
             const coin = this.add.text(startX, startY, '💰', { fontSize: '32px' }).setOrigin(0.5).setDepth(4000);
             
-            // 흩뿌려지는 효과
             const scatterX = Phaser.Math.Between(-60, 60);
             const scatterY = Phaser.Math.Between(-60, 60);
 
@@ -421,7 +425,6 @@ export default class UIScene extends Phaser.Scene {
                 duration: 300,
                 ease: 'Power2',
                 onComplete: () => {
-                    // 우측 상단으로 날아가기
                     this.tweens.add({
                         targets: coin,
                         x: targetX,
