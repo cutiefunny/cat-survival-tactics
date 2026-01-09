@@ -11,6 +11,16 @@ import openingBgm from '../../assets/sounds/opening.mp3';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
+// [New] 유닛 가격 정보 (BattleScene에서 가져옴)
+const UNIT_COSTS = [
+    { role: 'Tanker', name: '탱커', cost: 10 },
+    { role: 'Shooter', name: '슈터', cost: 20 },
+    { role: 'Healer', name: '힐러', cost: 25 },
+    { role: 'Raccoon', name: '너구리', cost: 10 },
+    { role: 'Runner', name: '러너', cost: 10 },
+    { role: 'Normal', name: '일반냥', cost: 5 }
+];
+
 export default class StrategyScene extends BaseScene {
     constructor() {
         super('StrategyScene'); 
@@ -19,6 +29,14 @@ export default class StrategyScene extends BaseScene {
     init(data) {
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
+        }
+        // [New] 부대 정보 초기화 (없으면 리더만 존재)
+        if (!this.registry.get('playerSquad')) {
+            this.registry.set('playerSquad', [{ role: 'Leader' }]);
+        }
+        // [New] 코인 정보 초기화
+        if (this.registry.get('playerCoins') === undefined) {
+            this.registry.set('playerCoins', 50); // 기본 자금
         }
     }
 
@@ -74,8 +92,8 @@ export default class StrategyScene extends BaseScene {
     initializeGameWorld(map, dbArmyData) {
         this.hasMoved = false;
         this.previousLeaderId = null;
-        
         this.selectedTargetId = null; 
+        this.isShopOpen = false; // 상점 열림 상태
 
         this.playBgm('opening_bgm', 0.5);
 
@@ -98,7 +116,6 @@ export default class StrategyScene extends BaseScene {
                 battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
             } else {
                 const lastSafeId = this.registry.get('lastSafeNodeId');
-                
                 if (lastSafeId) {
                     this.registry.set('leaderPosition', lastSafeId);
                     const safeNode = this.mapNodes.find(n => n.id === lastSafeId);
@@ -106,10 +123,8 @@ export default class StrategyScene extends BaseScene {
                     battleResultMessage = `🏳️ 패배... ${retreatName}(으)로 후퇴합니다.`;
                 } else {
                     const base = this.mapNodes.find(n => n.owner === 'player') || this.mapNodes[0];
-                    if (base) {
-                        this.registry.set('leaderPosition', base.id);
-                        battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
-                    }
+                    if (base) this.registry.set('leaderPosition', base.id);
+                    battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
                 }
             }
             this.battleResultData = null;
@@ -141,7 +156,6 @@ export default class StrategyScene extends BaseScene {
         this.updateCameraLayout();
 
         this.setupCameraControls();
-
         this.prevPinchDistance = 0;
     }
 
@@ -154,10 +168,13 @@ export default class StrategyScene extends BaseScene {
         this.uiContainer = this.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
         this.drawUIElements();
+        this.createShopPopup(); // [New] 상점 팝업 생성
     }
 
     drawUIElements() {
         if (this.uiContainer.list.length > 0) {
+            // 팝업 컨테이너는 유지하고 나머지만 재생성하거나, 전체 삭제 후 재생성
+            // 여기서는 간단하게 전체 삭제 후 재생성 (팝업 포함)
             this.uiContainer.removeAll(true);
         }
 
@@ -165,61 +182,150 @@ export default class StrategyScene extends BaseScene {
         const h = this.scale.height;
         const headerH = 60;
         const footerH = 80;
-
-        // [Modified] 헤더 위치 계산 (화면 하단 푸터 바로 위)
         const headerY = h - footerH - headerH;
 
-        // 1. 헤더 배경 (하단 배치)
+        // 1. 헤더 영역
         const headerBg = this.add.rectangle(0, headerY, w, headerH, 0x000000, 0.85).setOrigin(0, 0);
-        
         const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
         
-        // 2. 상태 메시지 텍스트 (헤더 영역 내부로 이동)
         this.statusText = this.add.text(w - 20, headerY + headerH/2, currentStatusMsg, { 
             fontSize: '16px', color: '#dddddd', align: 'right' 
         }).setOrigin(1, 0.5);
 
-        const isMuted = this.registry.get('isBgmMuted') || false;
-        const bgmTextStr = isMuted ? "🔇 BGM OFF" : "🔊 BGM ON";
-        
-        // 3. BGM 버튼 (헤더 영역 내부로 이동)
-        this.bgmBtn = this.add.text(20, headerY + headerH/2, bgmTextStr, {
-            fontSize: '18px', color: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
+        // [New] 코인 표시
+        const coins = this.registry.get('playerCoins');
+        this.coinText = this.add.text(20, headerY + headerH/2, `💰 ${coins}냥`, {
+            fontSize: '20px', color: '#ffd700', fontStyle: 'bold'
+        }).setOrigin(0, 0.5);
 
-        this.bgmBtn.on('pointerdown', () => {
-            const isNowMuted = this.toggleBgmMute();
-            this.bgmBtn.setText(isNowMuted ? "🔇 BGM OFF" : "🔊 BGM ON");
-        });
-
-        // 4. 푸터 배경 (맨 하단 고정)
+        // 2. 푸터 영역
         const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
 
-        // 5. 버튼들 (푸터 영역)
-        this.undoBtn = this.add.text(w/2 - 120, h - footerH/2, '취소', {
-            fontSize: '24px', fontStyle: 'bold', backgroundColor: '#666666', padding: { x: 30, y: 15 }, color: '#ffffff', align: 'center'
+        // [Modified] 버튼 배치 (좌: 상점, 중: 취소, 우: 턴종료/전투)
+        const btnY = h - footerH/2;
+        
+        // 상점 버튼
+        this.shopBtn = this.add.text(60, btnY, '🏰 부대편성', {
+            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#444444', padding: { x: 20, y: 10 }, color: '#ffffff'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        
+        this.shopBtn.on('pointerdown', () => this.toggleShop());
 
-        this.undoBtn.on('pointerover', () => this.undoBtn.setBackgroundColor('#888888'));
-        this.undoBtn.on('pointerout', () => this.undoBtn.setBackgroundColor('#666666'));
+        // 취소 버튼
+        this.undoBtn = this.add.text(w/2, btnY, '이동 취소', {
+            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#666666', padding: { x: 20, y: 10 }, color: '#ffffff'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
         this.undoBtn.on('pointerdown', () => this.undoMove());
 
-        this.endTurnBtn = this.add.text(w/2 + 40, h - footerH/2, '턴 종료', {
-            fontSize: '24px', fontStyle: 'bold', backgroundColor: '#cc0000', padding: { x: 40, y: 15 }, color: '#ffffff', align: 'center'
+        // 턴 종료 버튼
+        this.endTurnBtn = this.add.text(w - 80, btnY, '턴 종료', {
+            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#cc0000', padding: { x: 20, y: 10 }, color: '#ffffff'
         }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-        this.endTurnBtn.on('pointerover', () => this.endTurnBtn.setBackgroundColor('#ff4444'));
-        this.endTurnBtn.on('pointerout', () => this.endTurnBtn.setBackgroundColor('#cc0000'));
+        
         this.endTurnBtn.on('pointerdown', () => {
-            if (this.selectedTargetId !== null) {
-                this.startBattle();
-            } else {
-                this.handleTurnEnd();
-            }
+            if (this.selectedTargetId !== null) this.startBattle();
+            else this.handleTurnEnd();
         });
 
-        this.uiContainer.add([headerBg, footerBg, this.statusText, this.bgmBtn, this.undoBtn, this.endTurnBtn]);
+        this.uiContainer.add([headerBg, this.statusText, this.coinText, footerBg, this.shopBtn, this.undoBtn, this.endTurnBtn]);
+        
+        // BGM 버튼은 코인 옆이나 적절한 곳으로 이동 (여기서는 공간 부족으로 생략하거나 코인 옆에 배치)
+        this.bgmBtn = this.add.text(140, headerY + headerH/2, "🔊", { fontSize: '20px' }).setOrigin(0, 0.5).setInteractive();
+        this.bgmBtn.on('pointerdown', () => {
+            const isMuted = this.toggleBgmMute();
+            this.bgmBtn.setText(isMuted ? "🔇" : "🔊");
+        });
+        this.uiContainer.add(this.bgmBtn);
+
         this.updateUIState();
+        this.createShopPopup(); // 팝업 재생성
+    }
+
+    // [New] 상점(부대 편성) 팝업 생성
+    createShopPopup() {
+        const { width, height } = this.scale;
+        this.shopPopup = this.add.container(width/2, height/2).setDepth(2000).setVisible(false);
+        
+        const popupW = Math.min(600, width * 0.9);
+        const popupH = Math.min(400, height * 0.7);
+        
+        const bg = this.add.rectangle(0, 0, popupW, popupH, 0x222222).setStrokeStyle(4, 0xffcc00);
+        const title = this.add.text(0, -popupH/2 + 30, "용병 고용", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
+        
+        const closeBtn = this.add.text(popupW/2 - 30, -popupH/2 + 30, "X", { fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5).setInteractive();
+        closeBtn.on('pointerdown', () => this.toggleShop());
+
+        this.shopPopup.add([bg, title, closeBtn]);
+
+        // 유닛 리스트 (그리드 형태)
+        const startX = -popupW/2 + 60;
+        const startY = -popupH/2 + 80;
+        const gapX = 120;
+        const gapY = 100;
+        
+        UNIT_COSTS.forEach((unit, index) => {
+            const row = Math.floor(index / 3); // 3열
+            const col = index % 3;
+            const x = startX + col * gapX;
+            const y = startY + row * gapY;
+
+            // 모바일 대응: 화면 좁으면 2열로
+            // 간단하게 구현:
+            
+            const btn = this.add.container(x, y);
+            const btnBg = this.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
+            const nameTxt = this.add.text(0, -15, unit.name, { fontSize: '16px' }).setOrigin(0.5);
+            const costTxt = this.add.text(0, 15, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
+            
+            btn.add([btnBg, nameTxt, costTxt]);
+            
+            btnBg.on('pointerdown', () => this.buyUnit(unit));
+            
+            this.shopPopup.add(btn);
+        });
+        
+        // 현재 부대 정보 표시
+        const squadInfoY = popupH/2 - 40;
+        this.squadCountText = this.add.text(0, squadInfoY, `현재 부대원: ${this.getSquadCount()}명`, { fontSize: '18px', color: '#aaaaaa' }).setOrigin(0.5);
+        this.shopPopup.add(this.squadCountText);
+
+        this.uiContainer.add(this.shopPopup);
+    }
+
+    toggleShop() {
+        if (!this.shopPopup) return;
+        this.isShopOpen = !this.isShopOpen;
+        this.shopPopup.setVisible(this.isShopOpen);
+        
+        if(this.isShopOpen) {
+            this.squadCountText.setText(`현재 부대원: ${this.getSquadCount()}명`);
+        }
+    }
+
+    buyUnit(unitConfig) {
+        const currentCoins = this.registry.get('playerCoins');
+        if (currentCoins >= unitConfig.cost) {
+            // 코인 차감
+            const newCoins = currentCoins - unitConfig.cost;
+            this.registry.set('playerCoins', newCoins);
+            this.coinText.setText(`💰 ${newCoins}냥`);
+            
+            // 부대 추가
+            const squad = this.registry.get('playerSquad');
+            squad.push({ role: unitConfig.role });
+            this.registry.set('playerSquad', squad);
+            
+            this.squadCountText.setText(`현재 부대원: ${squad.length}명`);
+            
+            // 효과
+            this.cameras.main.shake(50, 0.005);
+        } else {
+            this.cameras.main.shake(100, 0.01); // 돈 부족 피드백
+        }
+    }
+
+    getSquadCount() {
+        return this.registry.get('playerSquad').length;
     }
 
     updateUIState() {
@@ -227,25 +333,26 @@ export default class StrategyScene extends BaseScene {
 
         if (this.hasMoved && this.previousLeaderId !== null) {
             this.undoBtn.setVisible(true);
-            this.endTurnBtn.setX(this.scale.width / 2 + 50); 
-            this.undoBtn.setX(this.scale.width / 2 - 90);
+            this.shopBtn.setVisible(false); // 이동 후에는 상점 이용 불가 (선택사항)
         } else {
             this.undoBtn.setVisible(false);
-            this.endTurnBtn.setX(this.scale.width / 2);
+            this.shopBtn.setVisible(true);
         }
 
         if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
             this.endTurnBtn.setText("전투 시작");
+            this.endTurnBtn.setStyle({ backgroundColor: '#ff0000' });
         } else {
             this.endTurnBtn.setText("턴 종료");
+            this.endTurnBtn.setStyle({ backgroundColor: '#cc0000' });
         }
     }
 
+    // ... (resizeUI, moveLeaderToken 등 기존 로직 동일) ...
     resizeUI() {
         this.uiCamera.setViewport(0, 0, this.scale.width, this.scale.height);
         this.drawUIElements();
     }
-
     moveLeaderToken(targetNode, onCompleteCallback) {
         this.input.enabled = false; 
         if (targetNode.x < this.leaderObj.x) { this.leaderObj.setFlipX(false); } else { this.leaderObj.setFlipX(true); }
@@ -260,7 +367,6 @@ export default class StrategyScene extends BaseScene {
             }
         });
     }
-
     undoMove() {
         if (!this.hasMoved || this.previousLeaderId === null) return;
         const prevNode = this.mapNodes.find(n => n.id === this.previousLeaderId);
@@ -274,7 +380,6 @@ export default class StrategyScene extends BaseScene {
             this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
         });
     }
-
     selectTerritory(circleObj) {
         const node = circleObj.nodeData;
         const currentLeaderId = this.registry.get('leaderPosition');
@@ -304,10 +409,8 @@ export default class StrategyScene extends BaseScene {
             this.updateUIState();
         });
     }
-    
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
     shakeStatusText() { this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 }); }
-
     handleTurnEnd() {
         this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
         if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
@@ -316,7 +419,6 @@ export default class StrategyScene extends BaseScene {
         this.statusText.setText("🌙 턴 종료. 행동력이 회복되었습니다.");
         this.updateUIState();
     }
-
     startBattle() {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
         if (!targetNode) return;
@@ -326,14 +428,12 @@ export default class StrategyScene extends BaseScene {
             currentCoins: this.registry.get('playerCoins') || 100, armyConfig: targetNode.army || null, bgmKey: targetNode.bgm 
         });
     }
-
     createAnimations() {
         if (!this.anims.exists('leader_idle')) { this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
         if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
     }
-
     update(time, delta) {
         if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
             const distance = Phaser.Math.Distance.Between(this.input.pointer1.x, this.input.pointer1.y, this.input.pointer2.x, this.input.pointer2.y);
@@ -347,29 +447,18 @@ export default class StrategyScene extends BaseScene {
             this.prevPinchDistance = distance;
         } else { this.prevPinchDistance = 0; }
     }
-
     updateCameraLayout() {
-        const screenWidth = this.scale.width;
-        const screenHeight = this.scale.height;
+        const screenWidth = this.scale.width; const screenHeight = this.scale.height;
         const isPC = this.sys.game.device.os.desktop;
-        const zoomFitWidth = screenWidth / this.mapWidth;
-        const zoomFitHeight = screenHeight / this.mapHeight;
+        const zoomFitWidth = screenWidth / this.mapWidth; const zoomFitHeight = screenHeight / this.mapHeight;
         this.minZoom = isPC ? zoomFitHeight : zoomFitWidth;
-
-        if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) {
-            this.cameras.main.setZoom(this.minZoom);
-        }
-
+        if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) { this.cameras.main.setZoom(this.minZoom); }
         const currentZoom = this.cameras.main.zoom;
-        const displayWidth = screenWidth / currentZoom;
-        const displayHeight = screenHeight / currentZoom;
-        
+        const displayWidth = screenWidth / currentZoom; const displayHeight = screenHeight / currentZoom;
         const offsetX = Math.max(0, (displayWidth - this.mapWidth) / 2);
         const offsetY = Math.max(0, (displayHeight - this.mapHeight) / 2);
-
         this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(this.mapWidth, displayWidth), Math.max(this.mapHeight, displayHeight));
     }
-
     setupCameraControls() {
         this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
             const newZoom = this.cameras.main.zoom - deltaY * 0.001;
@@ -385,7 +474,6 @@ export default class StrategyScene extends BaseScene {
             }
         });
     }
-
     parseMapData(map, dbArmyData = {}) {
         const existingData = this.registry.get('worldMapData');
         let objectLayer = map.getObjectLayer('territory');
@@ -399,9 +487,7 @@ export default class StrategyScene extends BaseScene {
                 const config = territoryConfig.territories[obj.id.toString()] || territoryConfig.default;
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
-                if (obj.id === 6) {
-                    return { id: obj.id, x: obj.x, y: obj.y, name: "???", owner: 'neutral', connectedTo: [], levelIndex: 0, desc: "Locked Path", army: { type: 'runner', count: 1 } };
-                }
+                if (obj.id === 6) { return { id: obj.id, x: obj.x, y: obj.y, name: "???", owner: 'neutral', connectedTo: [], levelIndex: 0, desc: "Locked Path", army: { type: 'runner', count: 1 } }; }
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : 'enemy';
                 let armyData = null;
