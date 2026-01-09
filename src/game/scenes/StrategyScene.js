@@ -95,7 +95,24 @@ export default class StrategyScene extends Phaser.Scene {
                 }
                 battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
             } else {
-                battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
+                // [수정] 패배 시 로직: 이전 안전한 위치로 복귀
+                const lastSafeId = this.registry.get('lastSafeNodeId');
+                
+                if (lastSafeId) {
+                    // 레지스트리에 저장된 이전 위치로 리더 위치 복구
+                    this.registry.set('leaderPosition', lastSafeId);
+                    
+                    const safeNode = this.mapNodes.find(n => n.id === lastSafeId);
+                    const retreatName = safeNode ? safeNode.name : "본부";
+                    battleResultMessage = `🏳️ 패배... ${retreatName}(으)로 후퇴합니다.`;
+                } else {
+                    // 안전 위치 정보가 없을 경우(예외 처리), 플레이어 소유의 아무 땅이나 본부로 이동
+                    const base = this.mapNodes.find(n => n.owner === 'player') || this.mapNodes[0];
+                    if (base) {
+                        this.registry.set('leaderPosition', base.id);
+                        battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
+                    }
+                }
             }
             this.battleResultData = null;
         }
@@ -142,16 +159,13 @@ export default class StrategyScene extends Phaser.Scene {
         const isMuted = this.registry.get('isBgmMuted') || false;
         this.bgm.setMute(isMuted);
 
-        // [수정] 오디오 컨텍스트가 잠겨있는지 확인 (브라우저 정책 대응)
         if (this.sound.locked) {
-            // 잠겨있다면, 사용자 입력(터치/클릭) 발생 시 'unlocked' 이벤트가 호출됨
             this.sound.once('unlocked', () => {
                 if (this.bgm && !this.bgm.isPlaying) {
                     this.bgm.play();
                 }
             });
         } else {
-            // 잠겨있지 않다면 바로 재생
             this.bgm.play();
         }
     }
@@ -348,6 +362,9 @@ export default class StrategyScene extends Phaser.Scene {
         });
 
         this.previousLeaderId = currentLeaderId;
+        
+        // [수정] 이동하기 전에 현재(출발하는) 안전한 노드의 ID를 저장
+        this.registry.set('lastSafeNodeId', currentLeaderId); 
         
         if (node.owner !== 'player') {
             this.selectedTargetId = node.id;

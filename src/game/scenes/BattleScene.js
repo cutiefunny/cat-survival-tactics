@@ -850,10 +850,10 @@ export default class BattleScene extends Phaser.Scene {
         this.physics.pause();
         this.inputManager.destroy(); 
         
-        // [수정] 전투 종료 시 BGM 정지
-        if (this.bgm) {
-            this.bgm.stop();
-        }
+        // [수정] BGM 정지 로직 제거 (모달 발생 시에도 음악 유지)
+        // if (this.bgm) {
+        //     this.bgm.stop();
+        // }
 
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
@@ -866,7 +866,7 @@ export default class BattleScene extends Phaser.Scene {
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
         
         if (this.isStrategyMode) {
-            btnText = isWin ? "Return to Map (Victory)" : "Return to Map (Retreat)";
+            btnText = "맵으로";
             callback = () => {
                 const bonusCoins = isWin ? Math.floor(totalScore / 100) : 0;
                 const finalCoins = this.playerCoins + bonusCoins;
