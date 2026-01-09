@@ -1,3 +1,4 @@
+import BaseScene from './BaseScene'; 
 import Phaser from 'phaser';
 import sangsuMap from '../../assets/maps/sangsu_map.json'; 
 import territoryConfig from '../data/TerritoryConfig.json'; 
@@ -7,13 +8,12 @@ import dogImg from '../../assets/units/dog.png';
 import runnerImg from '../../assets/units/runner.png'; 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
-
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 
-export default class StrategyScene extends Phaser.Scene {
+export default class StrategyScene extends BaseScene {
     constructor() {
-        super({ key: 'StrategyScene' });
+        super('StrategyScene'); 
     }
 
     init(data) {
@@ -25,15 +25,15 @@ export default class StrategyScene extends Phaser.Scene {
     preload() {
         this.load.tilemapTiledJSON('strategy_map', sangsuMap);
         this.load.image('sangsu_tiles', sangsuTilesImg);
-        
         this.load.spritesheet('leader_token', leaderImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('dog_token', dogImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('runner_token', runnerImg, { frameWidth: 100, frameHeight: 100 });
-
         this.load.audio('opening_bgm', openingBgm);
     }
 
     create() {
+        super.create(); 
+
         this.scene.stop('UIScene');
         this.cameras.main.setBackgroundColor('#111');
 
@@ -74,8 +74,11 @@ export default class StrategyScene extends Phaser.Scene {
     initializeGameWorld(map, dbArmyData) {
         this.hasMoved = false;
         this.previousLeaderId = null;
+        
+        // [수정] 변수 초기화 위치 변경: UI 생성 전에 null로 확실히 초기화
+        this.selectedTargetId = null; 
 
-        this.manageBGM();
+        this.playBgm('opening_bgm', 0.5);
 
         this.parseMapData(map, dbArmyData);
         this.mapNodes = this.registry.get('worldMapData');
@@ -95,18 +98,14 @@ export default class StrategyScene extends Phaser.Scene {
                 }
                 battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
             } else {
-                // [수정] 패배 시 로직: 이전 안전한 위치로 복귀
                 const lastSafeId = this.registry.get('lastSafeNodeId');
                 
                 if (lastSafeId) {
-                    // 레지스트리에 저장된 이전 위치로 리더 위치 복구
                     this.registry.set('leaderPosition', lastSafeId);
-                    
                     const safeNode = this.mapNodes.find(n => n.id === lastSafeId);
                     const retreatName = safeNode ? safeNode.name : "본부";
                     battleResultMessage = `🏳️ 패배... ${retreatName}(으)로 후퇴합니다.`;
                 } else {
-                    // 안전 위치 정보가 없을 경우(예외 처리), 플레이어 소유의 아무 땅이나 본부로 이동
                     const base = this.mapNodes.find(n => n.owner === 'player') || this.mapNodes[0];
                     if (base) {
                         this.registry.set('leaderPosition', base.id);
@@ -128,7 +127,8 @@ export default class StrategyScene extends Phaser.Scene {
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
         this.uiCamera.ignore(this.children.list);
         
-        this.createUI();
+        this.createUI(); // 여기서 updateUIState가 호출됨 (selectedTargetId가 null이어야 함)
+        
         if (battleResultMessage) {
             this.statusText.setText(battleResultMessage);
         }
@@ -141,33 +141,14 @@ export default class StrategyScene extends Phaser.Scene {
         this.mapHeight = map.heightInPixels;
         this.updateCameraLayout();
 
-        this.scale.on('resize', (gameSize, baseSize, displaySize, previousWidth, previousHeight) => {
-            this.updateCameraLayout();
-            this.resizeUI();
-        }, this);
-
         this.setupCameraControls();
 
-        this.selectedTargetId = null;
         this.prevPinchDistance = 0;
     }
 
-    manageBGM() {
-        this.sound.stopAll(); 
-        
-        this.bgm = this.sound.add('opening_bgm', { loop: true, volume: 0.5 });
-        const isMuted = this.registry.get('isBgmMuted') || false;
-        this.bgm.setMute(isMuted);
-
-        if (this.sound.locked) {
-            this.sound.once('unlocked', () => {
-                if (this.bgm && !this.bgm.isPlaying) {
-                    this.bgm.play();
-                }
-            });
-        } else {
-            this.bgm.play();
-        }
+    handleResize(gameSize) {
+        this.updateCameraLayout();
+        this.resizeUI();
     }
 
     createUI() {
@@ -201,14 +182,8 @@ export default class StrategyScene extends Phaser.Scene {
         }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
 
         this.bgmBtn.on('pointerdown', () => {
-            const newState = !this.registry.get('isBgmMuted');
-            this.registry.set('isBgmMuted', newState);
-            
-            if (this.bgm) {
-                this.bgm.setMute(newState);
-            }
-            
-            this.bgmBtn.setText(newState ? "🔇 BGM OFF" : "🔊 BGM ON");
+            const isNowMuted = this.toggleBgmMute();
+            this.bgmBtn.setText(isNowMuted ? "🔇 BGM OFF" : "🔊 BGM ON");
         });
 
         const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
@@ -242,6 +217,7 @@ export default class StrategyScene extends Phaser.Scene {
     updateUIState() {
         if (!this.undoBtn || !this.endTurnBtn) return;
 
+        // 1. 위치 및 취소 버튼 표시 여부
         if (this.hasMoved && this.previousLeaderId !== null) {
             this.undoBtn.setVisible(true);
             this.endTurnBtn.setX(this.scale.width / 2 + 50); 
@@ -249,6 +225,14 @@ export default class StrategyScene extends Phaser.Scene {
         } else {
             this.undoBtn.setVisible(false);
             this.endTurnBtn.setX(this.scale.width / 2);
+        }
+
+        // 2. 버튼 텍스트 변경 (전투 발생 여부 확인)
+        // [수정] undefined 체크도 포함하여 안전하게 처리
+        if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
+            this.endTurnBtn.setText("전투 시작");
+        } else {
+            this.endTurnBtn.setText("턴 종료");
         }
     }
 
@@ -259,21 +243,10 @@ export default class StrategyScene extends Phaser.Scene {
 
     moveLeaderToken(targetNode, onCompleteCallback) {
         this.input.enabled = false; 
-
-        if (targetNode.x < this.leaderObj.x) {
-            this.leaderObj.setFlipX(false);
-        } else {
-            this.leaderObj.setFlipX(true);
-        }
-
+        if (targetNode.x < this.leaderObj.x) { this.leaderObj.setFlipX(false); } else { this.leaderObj.setFlipX(true); }
         this.leaderObj.play('leader_walk');
-
         this.tweens.add({
-            targets: this.leaderObj,
-            x: targetNode.x,
-            y: targetNode.y,
-            duration: 1000,
-            ease: 'Power2',
+            targets: this.leaderObj, x: targetNode.x, y: targetNode.y, duration: 1000, ease: 'Power2',
             onComplete: () => {
                 this.leaderObj.play('leader_idle');
                 this.registry.set('leaderPosition', targetNode.id);
@@ -285,27 +258,15 @@ export default class StrategyScene extends Phaser.Scene {
 
     undoMove() {
         if (!this.hasMoved || this.previousLeaderId === null) return;
-
         const prevNode = this.mapNodes.find(n => n.id === this.previousLeaderId);
         if (!prevNode) return;
-
         this.statusText.setText("↩️ 원래 위치로 복귀 중...");
-        
         this.moveLeaderToken(prevNode, () => {
-            this.hasMoved = false;
-            this.previousLeaderId = null;
-            this.selectedTargetId = null; 
+            this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
             this.statusText.setText(`📍 복귀 완료: ${prevNode.name}`);
             this.updateUIState();
-            
-            if (this.selectionTween) {
-                this.selectionTween.stop();
-                this.selectionTween = null;
-            }
-            this.nodeContainer.getChildren().forEach(c => {
-                if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-                c.scale = 1;
-            });
+            if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
+            this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
         });
     }
 
@@ -313,143 +274,59 @@ export default class StrategyScene extends Phaser.Scene {
         const node = circleObj.nodeData;
         const currentLeaderId = this.registry.get('leaderPosition');
         const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
-
-        if (node.owner === 'neutral') {
-            this.statusText.setText("⛔ 아직 지나갈 수 없다! 여기는 합정파의 영역이다냥!");
-            this.shakeNode(circleObj);
-            return;
-        }
-
+        if (node.owner === 'neutral') { this.statusText.setText("⛔ 아직 지나갈 수 없다! 여기는 합정파의 영역이다냥!"); this.shakeNode(circleObj); return; }
         if (this.hasMoved) {
-            if (this.previousLeaderId !== null && node.id === this.previousLeaderId) {
-                this.undoMove();
-                return;
-            }
-
-            this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요.");
-            this.shakeStatusText();
-            return;
+            if (this.previousLeaderId !== null && node.id === this.previousLeaderId) { this.undoMove(); return; }
+            this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요."); this.shakeStatusText(); return;
         }
-
-        if (node.id === currentLeaderId) {
-            this.statusText.setText(`📍 현재 위치: ${node.name}`);
-            return;
-        }
-
+        if (node.id === currentLeaderId) { this.statusText.setText(`📍 현재 위치: ${node.name}`); return; }
         const isConnected = currentNode.connectedTo.includes(node.id);
-        if (!isConnected) {
-            this.statusText.setText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다.");
-            this.shakeNode(circleObj);
-            return;
-        }
-
-        if (this.selectionTween) {
-            this.selectionTween.stop();
-            this.selectionTween = null;
-            this.nodeContainer.getChildren().forEach(c => {
-                if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-                c.scale = 1;
-            });
-        }
-
-        this.nodeContainer.getChildren().forEach(c => {
-            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-        });
+        if (!isConnected) { this.statusText.setText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다."); this.shakeNode(circleObj); return; }
+        if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; }); }
+        this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); });
         circleObj.setAlpha(1.0);
-        
-        this.selectionTween = this.tweens.add({
-            targets: circleObj, scale: { from: 1, to: 1.3 }, yoyo: true, repeat: -1, duration: 600
-        });
-
+        this.selectionTween = this.tweens.add({ targets: circleObj, scale: { from: 1, to: 1.3 }, yoyo: true, repeat: -1, duration: 600 });
         this.previousLeaderId = currentLeaderId;
-        
-        // [수정] 이동하기 전에 현재(출발하는) 안전한 노드의 ID를 저장
         this.registry.set('lastSafeNodeId', currentLeaderId); 
-        
-        if (node.owner !== 'player') {
-            this.selectedTargetId = node.id;
-        } else {
-            this.selectedTargetId = null; 
-        }
-
+        if (node.owner !== 'player') { this.selectedTargetId = node.id; } else { this.selectedTargetId = null; }
         this.statusText.setText(`🚶 ${node.name}(으)로 이동 중...`);
-
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
-            
             if (this.selectedTargetId) {
-                let infoText = "";
-                if (node.army) infoText = ` (적군: ${node.army.count}마리)`;
-                this.statusText.setText(`⚔️ ${node.name} 진입!${infoText} 전투하려면 [턴 종료]`);
-            } else {
-                this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`);
-            }
+                let infoText = ""; if (node.army) infoText = ` (적군: ${node.army.count}마리)`;
+                this.statusText.setText(`⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`);
+            } else { this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); }
             this.updateUIState();
         });
     }
     
-    shakeNode(target) {
-        this.tweens.add({
-            targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3
-        });
-        this.cameras.main.shake(100, 0.005);
-    }
-    
-    shakeStatusText() {
-        this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 });
-    }
+    shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
+    shakeStatusText() { this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 }); }
 
     handleTurnEnd() {
-        this.hasMoved = false; 
-        this.previousLeaderId = null; 
-        this.selectedTargetId = null; 
-
-        if (this.selectionTween) {
-            this.selectionTween.stop();
-            this.selectionTween = null;
-        }
-        this.nodeContainer.getChildren().forEach(c => {
-            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-            c.scale = 1;
-        });
-
+        this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
+        if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
+        this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
         this.cameras.main.flash(500, 0, 0, 0); 
         this.statusText.setText("🌙 턴 종료. 행동력이 회복되었습니다.");
-        
         this.updateUIState();
     }
 
     startBattle() {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
         if (!targetNode) return;
-
-        console.log(`⚔️ Attacking ${targetNode.name} (BGM: ${targetNode.bgm})`);
-        
         const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
-        
         this.scene.start('BattleScene', {
-            isStrategyMode: true,
-            targetNodeId: this.selectedTargetId,
-            levelIndex: selectedLevelIndex,
-            currentCoins: this.registry.get('playerCoins') || 100,
-            armyConfig: targetNode.army || null,
-            bgmKey: targetNode.bgm 
+            isStrategyMode: true, targetNodeId: this.selectedTargetId, levelIndex: selectedLevelIndex,
+            currentCoins: this.registry.get('playerCoins') || 100, armyConfig: targetNode.army || null, bgmKey: targetNode.bgm 
         });
     }
 
     createAnimations() {
-        if (!this.anims.exists('leader_idle')) {
-            this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 });
-        }
-        if (!this.anims.exists('leader_walk')) {
-            this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 });
-        }
-        if (!this.anims.exists('dog_idle')) {
-            this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 });
-        }
-        if (!this.anims.exists('runner_idle')) {
-            this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 });
-        }
+        if (!this.anims.exists('leader_idle')) { this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
+        if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
     }
 
     update(time, delta) {
@@ -463,9 +340,7 @@ export default class StrategyScene extends Phaser.Scene {
                 this.updateCameraLayout(); 
             }
             this.prevPinchDistance = distance;
-        } else {
-            this.prevPinchDistance = 0;
-        }
+        } else { this.prevPinchDistance = 0; }
     }
 
     updateCameraLayout() {
@@ -475,16 +350,19 @@ export default class StrategyScene extends Phaser.Scene {
         const zoomFitWidth = screenWidth / this.mapWidth;
         const zoomFitHeight = screenHeight / this.mapHeight;
         this.minZoom = isPC ? zoomFitHeight : zoomFitWidth;
+
         if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) {
             this.cameras.main.setZoom(this.minZoom);
         }
+
         const currentZoom = this.cameras.main.zoom;
         const displayWidth = screenWidth / currentZoom;
         const displayHeight = screenHeight / currentZoom;
+        
         const offsetX = Math.max(0, (displayWidth - this.mapWidth) / 2);
         const offsetY = Math.max(0, (displayHeight - this.mapHeight) / 2);
+
         this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(this.mapWidth, displayWidth), Math.max(this.mapHeight, displayHeight));
-        this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
     }
 
     setupCameraControls() {
@@ -508,128 +386,64 @@ export default class StrategyScene extends Phaser.Scene {
         let objectLayer = map.getObjectLayer('territory');
         if (!objectLayer) {
             const layers = map.objects;
-            if (layers && Object.keys(layers).length > 0) {
-                objectLayer = layers[Object.keys(layers)[0]];
-            }
+            if (layers && Object.keys(layers).length > 0) { objectLayer = layers[Object.keys(layers)[0]]; }
         }
-
         let nodes = [];
         if (objectLayer && objectLayer.objects) {
             nodes = objectLayer.objects.map(obj => {
                 const config = territoryConfig.territories[obj.id.toString()] || territoryConfig.default;
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
-                
                 if (obj.id === 6) {
-                    return {
-                        id: obj.id, x: obj.x, y: obj.y,
-                        name: "???",
-                        owner: 'neutral', 
-                        connectedTo: [], 
-                        levelIndex: 0, 
-                        desc: "Locked Path",
-                        army: { type: 'runner', count: 1 } 
-                    };
+                    return { id: obj.id, x: obj.x, y: obj.y, name: "???", owner: 'neutral', connectedTo: [], levelIndex: 0, desc: "Locked Path", army: { type: 'runner', count: 1 } };
                 }
-
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : 'enemy';
-
                 let armyData = null;
                 if (savedNode) {
-                    if (savedNode.owner === 'player' || savedNode.army === null) {
-                        armyData = null;
-                    } else {
-                        if (dbArmyData && dbArmyData[obj.id.toString()]) {
-                            armyData = dbArmyData[obj.id.toString()];
-                        } else {
-                            armyData = savedNode.army;
-                        }
-                    }
-                } else {
-                    if (dbArmyData && dbArmyData[obj.id.toString()]) {
-                        armyData = dbArmyData[obj.id.toString()];
-                    }
-                }
-
+                    if (savedNode.owner === 'player' || savedNode.army === null) { armyData = null; } 
+                    else { if (dbArmyData && dbArmyData[obj.id.toString()]) { armyData = dbArmyData[obj.id.toString()]; } else { armyData = savedNode.army; } }
+                } else { if (dbArmyData && dbArmyData[obj.id.toString()]) { armyData = dbArmyData[obj.id.toString()]; } }
                 return {
-                    id: obj.id, x: obj.x, y: obj.y,
-                    name: config.name || obj.name || `Territory ${obj.id}`,
-                    owner: owner, 
-                    connectedTo: [], 
-                    levelIndex: finalLevelIndex, 
-                    desc: config.description || "",
-                    army: armyData,
-                    bgm: config.bgm || "stage1_bgm" 
+                    id: obj.id, x: obj.x, y: obj.y, name: config.name || obj.name || `Territory ${obj.id}`,
+                    owner: owner, connectedTo: [], levelIndex: finalLevelIndex, desc: config.description || "",
+                    army: armyData, bgm: config.bgm || "stage1_bgm" 
                 };
             });
         } else {
             nodes = [{ id: 1, x: 200, y: 300, owner: 'player', name: 'Base', connectedTo: [], levelIndex: 0 }, { id: 2, x: 400, y: 300, owner: 'enemy', name: 'Target', connectedTo: [], levelIndex: 0 }];
         }
-        
         if (!existingData && nodes.length > 0) {
-            let startNode = nodes.reduce((prev, curr) => {
-                const prevScore = prev.y - prev.x;
-                const currScore = curr.y - curr.x;
-                return (currScore > prevScore) ? curr : prev;
-            });
-            startNode.owner = 'player';
-            startNode.name = "Main Base";
+            let startNode = nodes.reduce((prev, curr) => { const prevScore = prev.y - prev.x; const currScore = curr.y - curr.x; return (currScore > prevScore) ? curr : prev; });
+            startNode.owner = 'player'; startNode.name = "Main Base";
         }
-
         nodes.forEach(node => {
-            const others = nodes.filter(n => n.id !== node.id).map(n => ({
-                id: n.id, dist: Phaser.Math.Distance.Between(node.x, node.y, n.x, n.y)
-            }));
+            const others = nodes.filter(n => n.id !== node.id).map(n => ({ id: n.id, dist: Phaser.Math.Distance.Between(node.x, node.y, n.x, n.y) }));
             others.sort((a, b) => a.dist - b.dist);
             const neighbors = others.slice(0, 2);
             neighbors.forEach(nb => {
                 if (!node.connectedTo.includes(nb.id)) node.connectedTo.push(nb.id);
                 const targetNode = nodes.find(n => n.id === nb.id);
-                if (targetNode && !targetNode.connectedTo.includes(node.id)) {
-                    targetNode.connectedTo.push(node.id);
-                }
+                if (targetNode && !targetNode.connectedTo.includes(node.id)) { targetNode.connectedTo.push(node.id); }
             });
         });
-
         this.registry.set('worldMapData', nodes);
     }
-
     createEnemyTokens() {
         if (!this.mapNodes) return;
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
-                let textureKey = 'dog_token';
-                if (node.army.type === 'runner') textureKey = 'runner_token';
-                else if (node.army.type === 'dog') textureKey = 'dog_token';
-
+                let textureKey = 'dog_token'; if (node.army.type === 'runner') textureKey = 'runner_token'; else if (node.army.type === 'dog') textureKey = 'dog_token';
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                
                 let finalSize = 60;
-                if (node.owner === 'neutral') {
-                    finalSize = 60; 
-                } else {
-                    const armyCount = node.army.count || 1;
-                    finalSize = 50 + (armyCount - 5) * 5;
-                    finalSize = Phaser.Math.Clamp(finalSize, 30, 90);
-                }
-
-                enemyObj.setDisplaySize(finalSize, finalSize);
-                enemyObj.setOrigin(0.5, 0.8);
-                enemyObj.setFlipX(false); 
-                enemyObj.setDepth(10); 
-                
-                if (node.army.type === 'runner') enemyObj.play('runner_idle');
-                else enemyObj.play('dog_idle');
-                
-                this.tweens.add({
-                    targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 },
-                    yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut'
-                });
+                if (node.owner === 'neutral') { finalSize = 60; } 
+                else { const armyCount = node.army.count || 1; finalSize = 50 + (armyCount - 5) * 5; finalSize = Phaser.Math.Clamp(finalSize, 30, 90); }
+                enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
+                if (node.army.type === 'runner') enemyObj.play('runner_idle'); else enemyObj.play('dog_idle');
+                this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
             }
         });
     }
-
     createPlayerToken() {
         let leaderNodeId = this.registry.get('leaderPosition');
         if (leaderNodeId === undefined) {
@@ -638,57 +452,34 @@ export default class StrategyScene extends Phaser.Scene {
             this.registry.set('leaderPosition', leaderNodeId);
         }
         const currentNode = this.mapNodes.find(n => n.id === leaderNodeId);
-        
         if (currentNode) {
             this.leaderObj = this.add.sprite(currentNode.x, currentNode.y, 'leader_token');
-            this.leaderObj.setFlipX(true);
-            this.leaderObj.setDisplaySize(60, 60); 
-            this.leaderObj.setOrigin(0.5, 0.8);
-            this.leaderObj.setDepth(50); 
+            this.leaderObj.setFlipX(true); this.leaderObj.setDisplaySize(60, 60); this.leaderObj.setOrigin(0.5, 0.8); this.leaderObj.setDepth(50); 
             this.leaderObj.play('leader_idle');
-            this.tweens.add({
-                targets: this.leaderObj, scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 },
-                yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut'
-            });
+            this.tweens.add({ targets: this.leaderObj, scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
         }
     }
-
     createTerritoryNodes() {
         if (!this.mapNodes) return;
         this.nodeContainer = this.add.group();
         this.mapNodes.forEach(node => {
-            let color = 0xff4444; 
-            if (node.owner === 'player') color = 0x4488ff; 
-            else if (node.owner === 'neutral') color = 0x888888; 
-            
-            const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3);
-            shadow.setDepth(100); 
-
+            let color = 0xff4444; if (node.owner === 'player') color = 0x4488ff; else if (node.owner === 'neutral') color = 0x888888; 
+            const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3); shadow.setDepth(100); 
             const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
-            circle.setAlpha(0.5); 
-            circle.nodeData = node;
-            circle.setDepth(100); 
-
+            circle.setAlpha(0.5); circle.nodeData = node; circle.setDepth(100); 
             circle.on('pointerdown', () => this.selectTerritory(circle));
-            this.nodeContainer.add(shadow);
-            this.nodeContainer.add(circle);
+            this.nodeContainer.add(shadow); this.nodeContainer.add(circle);
         });
     }
-
     drawConnections() {
         if (!this.mapNodes) return;
-        this.graphicsLayer.clear();
-        this.graphicsLayer.lineStyle(2, 0x888888, 0.5); 
+        this.graphicsLayer.clear(); this.graphicsLayer.lineStyle(2, 0x888888, 0.5); 
         this.mapNodes.forEach(node => {
             node.connectedTo.forEach(targetId => {
                 const target = this.mapNodes.find(n => n.id === targetId);
-                if (target) {
-                    this.graphicsLayer.lineBetween(node.x, node.y, target.x, target.y);
-                }
+                if (target) { this.graphicsLayer.lineBetween(node.x, node.y, target.x, target.y); }
             });
         });
     }
-
-    handleBattleResult(data) {
-    }
+    handleBattleResult(data) { }
 }
