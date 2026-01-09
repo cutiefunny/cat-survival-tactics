@@ -516,34 +516,15 @@ export default class BattleScene extends BaseScene {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
         
-        // this.uiManager.hideShopUI(); // 제거됨
         if (this.zoneGraphics) { this.zoneGraphics.destroy(); this.zoneGraphics = null; }
         
         this.uiManager.cleanupBeforeBattle();
 
-        // [Modified] 전투 시작 시 화면 전체 꽉 차게 줌/팬
-        if (this.mapWidth && this.mapHeight) {
-            const { width, height } = this.scale;
-            const zoomX = width / this.mapWidth;
-            const zoomY = height / this.mapHeight;
-            const targetZoom = Math.max(zoomX, zoomY);
-            
-            this.tweens.add({
-                targets: this.cameras.main,
-                zoom: targetZoom,
-                scrollY: this.mapHeight - (height / targetZoom),
-                scrollX: (this.mapWidth - (width / targetZoom)) / 2,
-                duration: 500,
-                ease: 'Power2',
-                onComplete: () => {
-                    if (this.playerUnit?.active) {
-                        this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-                        this.cameras.main.setDeadzone(this.scale.width * 0.4, this.scale.height * 0.4);
-                    }
-                }
-            });
-        } else {
-             if (this.playerUnit?.active) this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+        // [Modified] 전투 시작 시 카메라 애니메이션 제거
+        // 기존의 맵 전체 보기 줌/팬 동작을 제거하고 즉시 플레이어 유닛을 따르도록 변경
+        if (this.playerUnit?.active) {
+            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+            this.cameras.main.setDeadzone(this.scale.width * 0.4, this.scale.height * 0.4);
         }
 
         this.startBattle();

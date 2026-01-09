@@ -257,7 +257,7 @@ export default class StrategyScene extends BaseScene {
         const popupH = Math.min(450, height * 0.8);
         
         const bg = this.add.rectangle(0, 0, popupW, popupH, 0x222222).setStrokeStyle(4, 0xffcc00);
-        const title = this.add.text(0, -popupH/2 + 30, "용병 고용", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
+        const title = this.add.text(0, -popupH/2 + 30, "용병 고용\n", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
         
         const closeBtn = this.add.text(popupW/2 - 30, -popupH/2 + 30, "X", { fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5).setInteractive();
         closeBtn.on('pointerdown', () => this.toggleShop());
@@ -276,14 +276,16 @@ export default class StrategyScene extends BaseScene {
         };
 
         // 유닛 리스트
-        const startX = -popupW/2 + 60;
-        const startY = -popupH/2 + 80;
+        const cols = 3;
         const gapX = 120;
         const gapY = 100;
+        const totalWidth = cols * gapX;
+        const startX = -totalWidth / 2 + gapX / 2;
+        const startY = -popupH/2 + 80;
 
         UNIT_COSTS.forEach((unit, index) => {
-            const row = Math.floor(index / 3);
-            const col = index % 3;
+            const row = Math.floor(index / cols);
+            const col = index % cols;
             const x = startX + col * gapX;
             const y = startY + row * gapY;
             
