@@ -1,17 +1,16 @@
 import { onMount, onCleanup } from "solid-js";
 import { launchGame } from "../game/gameLauncher";
 
-export default function PhaserGame() {
+export default function PhaserGame(props) {
   let gameInstance = null;
   const gameContainerId = "phaser-game-container";
 
   onMount(() => {
-    // 컴포넌트가 마운트되면 게임 실행
-    gameInstance = launchGame(gameContainerId);
+    // props.mockData가 있으면 함께 전달
+    gameInstance = launchGame(gameContainerId, props.mockData);
   });
 
   onCleanup(() => {
-    // 컴포넌트가 사라지면 게임 인스턴스 파괴 (메모리 누수 방지)
     if (gameInstance) {
       gameInstance.destroy(true);
       gameInstance = null;
@@ -25,7 +24,8 @@ export default function PhaserGame() {
         display: "flex", 
         "justify-content": "center", 
         "align-items": "center", 
-        height: "100vh",
+        height: "100%", // 부모 컨테이너에 맞춤
+        width: "100%",
         "background-color": "#2d2d2d"
       }}
     >

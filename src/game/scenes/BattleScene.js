@@ -48,6 +48,11 @@ import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
 
+// [New] 타격음 파일 임포트
+import hit1 from '../../assets/sounds/Hit1.wav';
+import hit2 from '../../assets/sounds/Hit2.wav';
+import hit3 from '../../assets/sounds/Hit3.wav';
+
 const UnitClasses = {
     'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
     'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 
@@ -67,7 +72,7 @@ const DEFAULT_CONFIG = {
     aiSettings: DEFAULT_AI_SETTINGS, 
     redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
     redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
-    blueTeamRoles: [], // Squad에서 로드됨
+    blueTeamRoles: [], 
     unitCosts: {} 
 };
 
@@ -77,6 +82,8 @@ export default class BattleScene extends BaseScene {
     }
 
     init(data) {
+        this.initData = data; 
+
         let targetIndex = 0;
         this.hasLevelIndexPassed = false; 
 
@@ -126,13 +133,23 @@ export default class BattleScene extends BaseScene {
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
         else this.load.audio('default', BGM_SOURCES['default']);
+
+        // [New] 타격음 로드
+        this.load.audio('hit1', hit1);
+        this.load.audio('hit2', hit2);
+        this.load.audio('hit3', hit3);
     }
 
     create() {
         super.create();
-        let playKey = this.bgmKey;
-        if (!this.cache.audio.exists(playKey)) playKey = 'default';
-        this.playBgm(playKey, 0.5);
+        
+        if (!this.initData || !this.initData.debugConfig) {
+            let playKey = this.bgmKey;
+            if (!this.cache.audio.exists(playKey)) playKey = 'default';
+            this.playBgm(playKey, 0.5);
+        } else {
+            console.log("🔇 [BattleScene] Mock Battle - BGM Skipped");
+        }
 
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
@@ -153,6 +170,16 @@ export default class BattleScene extends BaseScene {
         this.fetchConfigAndStart();
     }
 
+    // [New] 랜덤 타격음 재생 메서드
+    playHitSound() {
+        const hits = ['hit1', 'hit2', 'hit3'];
+        const key = Phaser.Math.RND.pick(hits);
+        if (this.sound && this.cache.audio.exists(key)) {
+            // 약간의 변조(detune)를 주어 자연스럽게 연출
+            this.sound.play(key, { volume: 0.4, detune: Phaser.Math.Between(-100, 100) });
+        }
+    }
+
     toggleDebugMode() {
         if (this.uiManager.isDebugEnabled) {
             this.uiManager.destroyDebugStats();
@@ -165,6 +192,21 @@ export default class BattleScene extends BaseScene {
     }
 
     async fetchConfigAndStart() {
+        if (this.initData && this.initData.debugConfig) {
+            console.log("🛠️ [BattleScene] Using Mock Battle Config!");
+            this.gameConfig = this.initData.debugConfig;
+            const mapKey = LEVEL_KEYS[this.currentLevelIndex] || 'level1';
+            this.uiManager.destroyLoadingText();
+            if (this.passedCoins !== null) {
+                this.playerCoins = this.passedCoins;
+            } else {
+                this.playerCoins = this.gameConfig.gameSettings.initialCoins ?? 50;
+            }
+            this.levelInitialCoins = this.playerCoins;
+            this.startGame(this.gameConfig, mapKey);
+            return;
+        }
+
         let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
@@ -212,7 +254,7 @@ export default class BattleScene extends BaseScene {
         if (!mapKey) {
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
-            // ... (그리드 생성 생략) ...
+            
             const gridGraphics = this.add.graphics();
             gridGraphics.lineStyle(1, 0x333333, 0.5);
             gridGraphics.fillStyle(0x111111, 1);
@@ -229,7 +271,7 @@ export default class BattleScene extends BaseScene {
         } else {
             const map = this.make.tilemap({ key: mapKey });
             const tilesets = [];
-            // ... (타일셋 로드 로직 동일) ...
+            
             if (mapKey === 'stage1') {
                 const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
                 const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
@@ -273,7 +315,6 @@ export default class BattleScene extends BaseScene {
             this.pathfindingManager.setup(map, obstacleLayers);
             this.mapWidth = map.widthInPixels; this.mapHeight = map.heightInPixels;
             
-            // [Modified] 상점 UI가 없으므로 footer 높이만 제외하고 맞춤
             this.fitCameraToMap(); 
 
             this.initializeGameVariables(config);
@@ -281,21 +322,26 @@ export default class BattleScene extends BaseScene {
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
         }
         
-        if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase) {
+        if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
-        
-        // [Modified] 상점 UI 생성 제거
-        // this.uiManager.createShopUI(...); 
     }
 
     fitCameraToMap() {
         if (!this.mapWidth || !this.mapHeight) return;
+
+        const isPC = this.sys.game.device.os.desktop;
+
+        if (isPC) {
+            this.cameras.main.setZoom(1);
+            this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
+            return;
+        }
+
         const { width, height } = this.scale;
         const footerHeight = 80;
         
-        // 상점 UI가 없으므로 Footer만 제외
         const availableHeight = height - footerHeight;
 
         const zoomX = width / this.mapWidth;
@@ -340,7 +386,6 @@ export default class BattleScene extends BaseScene {
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
     }
 
-    // ... (incrementSkillCount, createBlocksDebug, updateCameraBounds 등 유지) ...
     incrementSkillCount() { if (this.battleStarted && !this.isGameOver) { this.playerSkillCount++; } }
     createBlocksDebug() {
         this.blocksDebugGraphics = this.add.graphics().setDepth(1000);
@@ -371,7 +416,6 @@ export default class BattleScene extends BaseScene {
         });
     }
 
-    // [Modified] Squad 기반 스폰
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
         const createUnit = (x, y, team, target, stats, isLeader) => {
@@ -387,7 +431,6 @@ export default class BattleScene extends BaseScene {
             return unit;
         };
 
-        // --- Blue Team Spawn (from Squad) ---
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -402,11 +445,10 @@ export default class BattleScene extends BaseScene {
             }
         }
 
-        // [Modified] 레지스트리에서 스쿼드 가져오기
         const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
         
         playerSquad.forEach((member, i) => {
-            const roleConfig = { role: member.role }; // 필요한 경우 stats 추가
+            const roleConfig = { role: member.role }; 
             let spawnX, spawnY;
             if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
@@ -421,7 +463,6 @@ export default class BattleScene extends BaseScene {
             this.blueTeam.add(unit);
         });
 
-        // --- Red Team Spawn (기존 로직 유지) ---
         const redCount = config.gameSettings.redCount ?? 6;
         const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
         let dogsSpawned = false;
@@ -480,7 +521,6 @@ export default class BattleScene extends BaseScene {
         }
     }
     
-    // [Modified] 상점 제거로 buyUnit 제거 또는 빈 함수 처리 (호출되지 않음)
     buyUnit(role, cost) {}
 
     animateCoinDrop(startX, startY, amount) {
@@ -520,9 +560,7 @@ export default class BattleScene extends BaseScene {
         
         this.uiManager.cleanupBeforeBattle();
 
-        // [Modified] 전투 시작 시 카메라 애니메이션 제거
-        // 기존의 맵 전체 보기 줌/팬 동작을 제거하고 즉시 플레이어 유닛을 따르도록 변경
-        if (this.playerUnit?.active) {
+        if (this.playerUnit?.active && !this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.scale.width * 0.4, this.scale.height * 0.4);
         }
@@ -543,7 +581,11 @@ export default class BattleScene extends BaseScene {
         }
         this.playerUnit = newUnit; newUnit.isLeader = true;
         if (newUnit.active && !newUnit.isDying) newUnit.resetVisuals();
-        this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
+        
+        if (!this.sys.game.device.os.desktop) {
+            this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
+        }
+
         this.updateFormationOffsets();
     }
     transferControlToNextUnit() {

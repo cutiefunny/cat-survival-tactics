@@ -29,10 +29,9 @@ export default class CombatManager {
         return false;
     }
 
-    // [Optimization] 새로운 배열을 만들지 않고 그룹을 직접 순회
     handleRangedAttacks(groups) {
         for (const group of groups) {
-            const units = group.getChildren(); // 참조만 가져옴
+            const units = group.getChildren(); 
             for (const unit of units) {
                 if (unit.active && unit.attackRange > 60 && !unit.isLowHpFleeing) {
                     const target = unit.currentTarget;
@@ -57,7 +56,6 @@ export default class CombatManager {
     }
 
     performAttack(attacker, defender) {
-        // [Fix] 이미 죽어가고 있는 적(isDying)은 공격 대상에서 제외
         if (!attacker.active || !defender.active || defender.isDying) return;
         
         if (attacker.isLowHpFleeing) return;
@@ -69,12 +67,13 @@ export default class CombatManager {
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            // [Fix] 좌표 직접 수정(x+=3) Tween 제거 -> 물리 엔진과 충돌 방지
-            // Shooter의 경우 시각적 효과가 필요하다면 setOffset이나 Scale 등으로 대체 권장
+            // [New] 타격 성공 시, 사운드 재생 요청
+            if (this.scene.playHitSound) {
+                this.scene.playHitSound();
+            }
             
             if (!defender.active || !defender.body || defender.isDying) return;
 
-            // [Knockback] 물리 엔진(velocity)을 통한 넉백만 적용
             const angle = Phaser.Math.Angle.Between(attacker.x, attacker.y, defender.x, defender.y);
             const knockbackForce = (attacker.attackRange > 60) ? 10 : 40; 
             defender.body.velocity.x += Math.cos(angle) * knockbackForce;

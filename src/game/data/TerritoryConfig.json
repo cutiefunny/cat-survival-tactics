@@ -6,6 +6,12 @@
     "bgm": "level1"
   },
   "territories": {
+    "1": {
+      "mapId": "level1",
+      "name": "유니타워",
+      "difficulty": 1,
+      "bgm": "level1"
+    },
     "2": {
       "mapId": "level1",
       "name": "길거리",

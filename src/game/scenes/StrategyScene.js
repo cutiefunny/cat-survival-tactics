@@ -15,7 +15,6 @@ import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
-// [New] 유닛 스탯 데이터 임포트
 import { ROLE_BASE_STATS } from '../data/UnitData';
 
 const UNIT_COSTS = [
@@ -174,6 +173,39 @@ export default class StrategyScene extends BaseScene {
         this.resizeUI();
     }
 
+    createStyledButton(x, y, text, color, onClick) {
+        const btnContainer = this.add.container(x, y);
+        
+        const shadow = this.add.rectangle(4, 4, 160, 50, 0x000000, 0.5).setOrigin(0.5);
+        
+        const bg = this.add.rectangle(0, 0, 160, 50, color).setOrigin(0.5);
+        bg.setStrokeStyle(2, 0xffffff, 0.8);
+        
+        const btnText = this.add.text(0, 0, text, {
+            fontSize: '18px',
+            fontStyle: 'bold',
+            color: '#ffffff'
+        }).setOrigin(0.5);
+
+        const hitArea = this.add.rectangle(0, 0, 160, 50, 0x000000, 0).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        
+        hitArea.on('pointerdown', () => {
+            this.tweens.add({
+                targets: btnContainer,
+                scale: 0.95,
+                duration: 50,
+                yoyo: true,
+                onComplete: onClick
+            });
+        });
+
+        hitArea.on('pointerover', () => { bg.setStrokeStyle(3, 0xffff00, 1); });
+        hitArea.on('pointerout', () => { bg.setStrokeStyle(2, 0xffffff, 0.8); });
+
+        btnContainer.add([shadow, bg, btnText, hitArea]);
+        return { container: btnContainer, textObj: btnText, bgObj: bg };
+    }
+
     createUI() {
         this.uiContainer = this.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
@@ -188,61 +220,73 @@ export default class StrategyScene extends BaseScene {
 
         const w = this.scale.width;
         const h = this.scale.height;
-        const headerH = 60;
-        const footerH = 80;
-        const headerY = h - footerH - headerH;
 
-        // 1. 헤더 영역
-        const headerBg = this.add.rectangle(0, headerY, w, headerH, 0x000000, 0.85).setOrigin(0, 0);
-        const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
-        
-        this.statusText = this.add.text(w - 20, headerY + headerH/2, currentStatusMsg, { 
-            fontSize: '16px', color: '#dddddd', align: 'right' 
-        }).setOrigin(1, 0.5);
+        // [Modified] 모바일 여부 판단 및 반응형 설정
+        const isMobile = w < 600; 
+        const topBarH = isMobile ? 60 : 50; // 모바일이면 높이를 약간 더 여유 있게
+        const fontSize = isMobile ? '13px' : '16px'; // 모바일 폰트 축소
 
-        // 코인 표시
+        // --- 1. Top Status Bar ---
+        const topBarBg = this.add.rectangle(0, 0, w, topBarH, 0x000000, 0.6).setOrigin(0, 0);
+
+        // [Left] 코인
         const coins = this.registry.get('playerCoins');
-        this.coinText = this.add.text(20, headerY + headerH/2, `💰 ${coins}냥`, {
-            fontSize: '20px', color: '#ffd700', fontStyle: 'bold'
+        this.coinText = this.add.text(isMobile ? 10 : 20, topBarH/2, `💰 ${coins}냥`, {
+            fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold'
         }).setOrigin(0, 0.5);
 
-        // 2. 푸터 영역
-        const footerBg = this.add.rectangle(0, h, w, footerH, 0x000000, 0.85).setOrigin(0, 1);
-
-        const btnY = h - footerH/2;
+        // [Right] BGM 버튼
+        this.bgmBtn = this.add.text(w - (isMobile ? 15 : 30), topBarH/2, "🔊", { 
+            fontSize: isMobile ? '20px' : '24px' 
+        }).setOrigin(1, 0.5).setInteractive();
         
-        // 상점 버튼
-        this.shopBtn = this.add.text(60, btnY, '🏰 부대편성', {
-            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#444444', padding: { x: 20, y: 10 }, color: '#ffffff'
-        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-        
-        this.shopBtn.on('pointerdown', () => this.toggleShop());
-
-        // 취소 버튼
-        this.undoBtn = this.add.text(w/2, btnY, '이동 취소', {
-            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#666666', padding: { x: 20, y: 10 }, color: '#ffffff'
-        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-        this.undoBtn.on('pointerdown', () => this.undoMove());
-
-        // 턴 종료 버튼
-        this.endTurnBtn = this.add.text(w - 80, btnY, '턴 종료', {
-            fontSize: '20px', fontStyle: 'bold', backgroundColor: '#cc0000', padding: { x: 20, y: 10 }, color: '#ffffff'
-        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-        
-        this.endTurnBtn.on('pointerdown', () => {
-            if (this.selectedTargetId !== null) this.startBattle();
-            else this.handleTurnEnd();
-        });
-
-        this.uiContainer.add([headerBg, this.statusText, this.coinText, footerBg, this.shopBtn, this.undoBtn, this.endTurnBtn]);
-        
-        // BGM 버튼
-        this.bgmBtn = this.add.text(140, headerY + headerH/2, "🔊", { fontSize: '20px' }).setOrigin(0, 0.5).setInteractive();
         this.bgmBtn.on('pointerdown', () => {
             const isMuted = this.toggleBgmMute();
             this.bgmBtn.setText(isMuted ? "🔇" : "🔊");
         });
-        this.uiContainer.add(this.bgmBtn);
+
+        // [Center] 상태 메시지 (Word Wrap 적용)
+        const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
+        
+        // 텍스트가 표시될 안전한 너비 계산 (전체 너비 - 양쪽 여백)
+        // 왼쪽 코인(약 100px) + 오른쪽 버튼(약 50px) + 여유분 = 약 160~200px 제외
+        const safeTextWidth = w - (isMobile ? 160 : 240); 
+
+        this.statusText = this.add.text(w / 2, topBarH/2, currentStatusMsg, { 
+            fontSize: fontSize, 
+            color: '#ffffff', 
+            align: 'center',
+            // [Key Solution] 너비를 지정하고 자동 줄바꿈 활성화
+            wordWrap: { width: safeTextWidth, useAdvancedWrap: true }
+        }).setOrigin(0.5, 0.5);
+
+        // --- 2. Bottom Buttons ---
+        
+        // 버튼 위치도 모바일일 경우 조금 더 안쪽으로 배치하거나 크기 조정 가능
+        const btnMargin = isMobile ? 50 : 60;
+
+        // [Bottom Right] 턴 종료
+        this.endTurnBtnObj = this.createStyledButton(w - (isMobile ? 85 : 100), h - btnMargin, '턴 종료', 0xcc0000, () => {
+            if (this.selectedTargetId !== null) this.startBattle();
+            else this.handleTurnEnd();
+        });
+        
+        // [Bottom Left] 부대 편성
+        this.shopBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => this.toggleShop());
+
+        // [Bottom Center] 이동 취소
+        this.undoBtnObj = this.createStyledButton(w / 2, h - (btnMargin + 20), '이동 취소', 0x666666, () => this.undoMove());
+        this.undoBtnObj.container.setVisible(false);
+
+        // 모바일인 경우 버튼 크기 살짝 조정 (선택 사항)
+        if (isMobile) {
+            this.endTurnBtnObj.container.setScale(0.85);
+            this.shopBtnObj.container.setScale(0.85);
+            this.undoBtnObj.container.setScale(0.85);
+        }
+
+        this.uiContainer.add([topBarBg, this.coinText, this.bgmBtn, this.statusText]);
+        this.uiContainer.add([this.shopBtnObj.container, this.endTurnBtnObj.container, this.undoBtnObj.container]);
 
         this.updateUIState();
         this.createShopPopup(); 
@@ -300,7 +344,6 @@ export default class StrategyScene extends BaseScene {
             
             btn.add([btnBg, unitSprite, costTxt]);
             
-            // [Modified] 클릭 시 바로 구매가 아니라, 상세 정보 팝업 열기
             btnBg.on('pointerdown', () => this.openUnitDetailPopup(unit));
             
             this.shopPopup.add(btn);
@@ -359,29 +402,19 @@ export default class StrategyScene extends BaseScene {
             `🦵 속도: ${stats.moveSpeed}`
         ];
 
-        // 탱커의 경우 방어력 추가
         if (unitConfig.role === 'Tanker') {
             statsList.splice(2, 0, `🛡️ 방어력: ${stats.defense || 0}`);
-            //스킬 정보 추가
             statsList.push(`\n🛡️ 스킬: 어그로\n10초마다 주위의 적들을 도발한다`);
         }
 
-        //힐러의 경우 '공격력' 대신 '치유량' 표시
         if (unitConfig.role === 'Healer') {
             statsList[1] = `💖 치유량: ${stats.attackPower}`;
             statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
         }
 
-        // 슈터의 경우 사거리 추가
         if (unitConfig.role === 'Shooter') {
             statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
         }
-
-        // // 스킬 정보가 있다면 추가
-        // if (stats.skillCooldown) {
-        //     const cooldownSec = (stats.skillCooldown / 1000).toFixed(1);
-        //     statsList.push(`⚡ 스킬 쿨타임: ${cooldownSec}초`);
-        // }
 
         statsList.forEach((text, i) => {
             const t = this.add.text(-popupW/2 + 40, statY + (i * 20), text, statStyle);
@@ -448,7 +481,6 @@ export default class StrategyScene extends BaseScene {
         if (this.isShopOpen) {
             this.refreshSquadDisplay(); 
         } else {
-            // 상점 닫을 때 상세 팝업도 같이 닫기
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
                 this.unitDetailPopup = null;
@@ -480,22 +512,22 @@ export default class StrategyScene extends BaseScene {
     }
 
     updateUIState() {
-        if (!this.undoBtn || !this.endTurnBtn) return;
+        if (!this.undoBtnObj || !this.endTurnBtnObj || !this.shopBtnObj) return;
 
         if (this.hasMoved && this.previousLeaderId !== null) {
-            this.undoBtn.setVisible(true);
-            this.shopBtn.setVisible(false); 
+            this.undoBtnObj.container.setVisible(true);
+            this.shopBtnObj.container.setVisible(false); 
         } else {
-            this.undoBtn.setVisible(false);
-            this.shopBtn.setVisible(true);
+            this.undoBtnObj.container.setVisible(false);
+            this.shopBtnObj.container.setVisible(true);
         }
 
         if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
-            this.endTurnBtn.setText("전투 시작");
-            this.endTurnBtn.setStyle({ backgroundColor: '#ff0000' });
+            this.endTurnBtnObj.textObj.setText("전투 시작");
+            this.endTurnBtnObj.bgObj.setFillStyle(0xff0000); 
         } else {
-            this.endTurnBtn.setText("턴 종료");
-            this.endTurnBtn.setStyle({ backgroundColor: '#cc0000' });
+            this.endTurnBtnObj.textObj.setText("턴 종료");
+            this.endTurnBtnObj.bgObj.setFillStyle(0xcc0000); 
         }
     }
 
@@ -656,7 +688,7 @@ export default class StrategyScene extends BaseScene {
         }
         if (!existingData && nodes.length > 0) {
             let startNode = nodes.reduce((prev, curr) => { const prevScore = prev.y - prev.x; const currScore = curr.y - curr.x; return (currScore > prevScore) ? curr : prev; });
-            startNode.owner = 'player'; startNode.name = "Main Base";
+            startNode.owner = 'player'; startNode.name = "유니타워";
         }
         nodes.forEach(node => {
             const others = nodes.filter(n => n.id !== node.id).map(n => ({ id: n.id, dist: Phaser.Math.Distance.Between(node.x, node.y, n.x, n.y) }));

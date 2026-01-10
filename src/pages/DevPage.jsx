@@ -1,11 +1,12 @@
-import { createSignal, onMount, For } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createSignal, onMount, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import { useNavigate } from "@solidjs/router";
 import { LEVEL_KEYS } from "../game/managers/LevelManager";
+import PhaserGame from "../components/PhaserGame"; 
 
-// [설정] 역할별 기본 스탯 정의 (defense, killReward 추가)
+// [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
   Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100 },
   Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15 },
@@ -36,7 +37,6 @@ const DEFAULT_CONFIG = {
   unitCosts: DEFAULT_UNIT_COSTS,
   redTeamRoles: [],
   blueTeamRoles: [],
-  // [New] 주둔군 설정 초기값
   territoryArmies: {} 
 };
 
@@ -45,19 +45,19 @@ const DevPage = () => {
   const [config, setConfig] = createStore(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
   const [status, setStatus] = createSignal("Loading...");
   const [feedbacks, setFeedbacks] = createSignal([]);
-  
-  // [New] 주둔군 추가를 위한 임시 입력 상태
   const [newArmyNodeId, setNewArmyNodeId] = createSignal("");
+  
+  // [New] 모의전투 팝업 상태
+  const [showMockBattle, setShowMockBattle] = createSignal(false);
+  const [mockData, setMockData] = createSignal(null);
 
   onMount(async () => {
-    // 1. 설정 로드
     try {
       const docRef = doc(db, "settings", "tacticsConfig");
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        // Deep Merge Simulation
         const merged = { ...DEFAULT_CONFIG, ...data };
         
         if (data.gameSettings) merged.gameSettings = { ...DEFAULT_CONFIG.gameSettings, ...data.gameSettings };
@@ -69,12 +69,10 @@ const DevPage = () => {
         }
         if (data.unitCosts) merged.unitCosts = { ...DEFAULT_UNIT_COSTS, ...data.unitCosts };
         
-        // [New] 주둔군 설정 병합
         if (data.territoryArmies) {
             merged.territoryArmies = { ...DEFAULT_CONFIG.territoryArmies, ...data.territoryArmies };
         }
 
-        // 역할 정의 병합
         if (data.roleDefinitions) {
             Object.keys(DEFAULT_ROLE_DEFS).forEach(role => {
                 if(merged.roleDefinitions[role]) {
@@ -116,7 +114,6 @@ const DevPage = () => {
       setStatus("Error Loading Config ❌");
     }
 
-    // 2. 피드백 로드
     fetchFeedbacks();
   });
 
@@ -189,7 +186,6 @@ const DevPage = () => {
     setConfig("unitCosts", roleName, value);
   };
 
-  // [New] 주둔군 추가 핸들러
   const handleAddTerritoryArmy = () => {
       const id = newArmyNodeId();
       if (!id) return;
@@ -197,24 +193,19 @@ const DevPage = () => {
           alert(`Node ${id} already exists!`);
           return;
       }
-      // 기본값 추가 (NormalDog 3마리)
       setConfig("territoryArmies", id, { type: "NormalDog", count: 3 });
       setNewArmyNodeId("");
   };
 
-  // [New] 주둔군 삭제 핸들러
   const handleDeleteTerritoryArmy = (id) => {
-      // SolidJS Store에서 key 삭제는 undefined로 설정
       setConfig("territoryArmies", id, undefined);
   };
 
   const saveConfig = async () => {
     setStatus("Saving...");
     try {
-      // Store Proxy 객체를 일반 JSON 객체로 변환
       const cleanConfig = JSON.parse(JSON.stringify(config));
       
-      // undefined 필드 제거 (Firestore 오류 방지)
       if (cleanConfig.territoryArmies) {
           Object.keys(cleanConfig.territoryArmies).forEach(key => {
               if (cleanConfig.territoryArmies[key] === undefined) {
@@ -229,6 +220,20 @@ const DevPage = () => {
       console.error(err);
       setStatus("Save Failed ❌");
     }
+  };
+
+  // [New] 모의전투 시작 핸들러
+  const handleStartMockBattle = () => {
+      // 현재 스토어의 설정값과 스쿼드를 복사하여 게임에 전달
+      const currentConfig = JSON.parse(JSON.stringify(config));
+      const squad = JSON.parse(JSON.stringify(config.blueTeamRoles));
+      
+      setMockData({
+          isMock: true,
+          config: currentConfig,
+          squad: squad
+      });
+      setShowMockBattle(true);
   };
 
   const renderUnitRow = (unit, index, teamType) => {
@@ -262,30 +267,18 @@ const DevPage = () => {
             </select>
             <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
                 <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
-                
                 <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
-                
                 <span title="Defense" style={{whiteSpace: "nowrap"}}>🛡️ <span style={{color: "#aaaaff"}}>{unit.defense ?? 0}</span></span>
-                
                 <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
-                
                 <span title="Action Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
-                
                 {unit.skillCooldown > 0 && (
                     <span title="Skill Info" style={{color: "#ff88ff", borderLeft: "1px solid #555", paddingLeft: "10px", whiteSpace: "nowrap"}}>
                         ✨ CD:{unit.skillCooldown/1000}s R:{unit.skillRange}
                     </span>
                 )}
-
                 <span title="Kill Reward" style={{whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
                     💰 <span style={{color: "#ffd700"}}>{unit.killReward ?? 10}</span>
                 </span>
-
-                {unit.role === 'Healer' && (
-                      <span title="Heal Count to Trigger Aggro" style={{color: "#ffaaaa", whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
-                        😡Stack {unit.aggroStackLimit || 10}
-                      </span>
-                )}
             </div>
         </div>
     );
@@ -295,7 +288,13 @@ const DevPage = () => {
     <div style={{ padding: "40px", "background-color": "#1a1a1a", color: "white", "height": "100vh", "overflow-y": "auto", "box-sizing": "border-box", "font-family": "monospace" }}>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "border-bottom": "2px solid #444", "padding-bottom": "10px" }}>
         <h1 style={{ margin: 0 }}>🐱 Tactics Dev Console</h1>
-        <button onClick={() => navigate('/')} style={btnStyle}>⬅ Back to Game</button>
+        <div style={{ display: "flex", gap: "10px" }}>
+            {/* [New] 모의전투 버튼 */}
+            <button onClick={handleStartMockBattle} style={{ ...btnStyle, background: "#ff9900", color: "black", border: "2px solid #ffcc00" }}>
+                ⚔️ Start Mock Battle
+            </button>
+            <button onClick={() => navigate('/')} style={btnStyle}>⬅ Back to Game</button>
+        </div>
       </div>
       
       <div style={{ "margin-top": "20px", "font-size": "1.2em", "font-weight": "bold", color: status().includes("Error") || status().includes("Failed") ? "#ff4444" : "#44ff44" }}>
@@ -384,7 +383,7 @@ const DevPage = () => {
           </div>
         </section>
 
-        {/* --- [New] Territory Armies Configuration --- */}
+        {/* --- Territory Armies Configuration --- */}
         <section style={{ ...cardStyle, gridColumn: "span 2", border: "1px solid #ff5555" }}>
             <h2 style={{ color: "#ff5555", marginTop: 0 }}>🏰 Territory Garrisons (Strategy Map)</h2>
             <div style={{ marginBottom: "15px", background: "#332222", padding: "10px", borderRadius: "5px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -597,6 +596,34 @@ const DevPage = () => {
       <div style={{ "margin-top": "20px", color: "#666" }}>
         * Refresh the game page after saving to apply changes.
       </div>
+
+      {/* [New] Mock Battle Modal */}
+      <Show when={showMockBattle()}>
+          <div style={{
+              position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+              background: "rgba(0,0,0,0.8)", zIndex: 1000,
+              display: "flex", justifyContent: "center", alignItems: "center"
+          }}>
+              <div style={{
+                  width: "90%", height: "90%", background: "#000", border: "2px solid #ff9900",
+                  position: "relative", borderRadius: "10px", overflow: "hidden"
+              }}>
+                  <button 
+                      onClick={() => setShowMockBattle(false)}
+                      style={{
+                          position: "absolute", top: "10px", right: "20px",
+                          background: "#ff4444", color: "white", border: "none",
+                          fontSize: "20px", fontWeight: "bold", cursor: "pointer", zIndex: 2000,
+                          padding: "5px 15px", borderRadius: "5px"
+                      }}
+                  >
+                      CLOSE X
+                  </button>
+                  {/* 모의전투용 PhaserGame 인스턴스 */}
+                  <PhaserGame mockData={mockData()} />
+              </div>
+          </div>
+      </Show>
     </div>
   );
 };
