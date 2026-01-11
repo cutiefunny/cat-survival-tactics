@@ -92,6 +92,8 @@ export default class BattleScene extends BaseScene {
         this.armyConfig = data ? data.armyConfig : null;
         this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
+        this.deadSquadIndices = [];
+
         if (data && data.levelIndex !== undefined) {
             targetIndex = data.levelIndex;
             this.hasLevelIndexPassed = true; 
@@ -134,7 +136,6 @@ export default class BattleScene extends BaseScene {
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
         else this.load.audio('default', BGM_SOURCES['default']);
 
-        // [New] 타격음 로드
         this.load.audio('hit1', hit1);
         this.load.audio('hit2', hit2);
         this.load.audio('hit3', hit3);
@@ -170,13 +171,17 @@ export default class BattleScene extends BaseScene {
         this.fetchConfigAndStart();
     }
 
-    // [New] 랜덤 타격음 재생 메서드
     playHitSound() {
         const hits = ['hit1', 'hit2', 'hit3'];
         const key = Phaser.Math.RND.pick(hits);
         if (this.sound && this.cache.audio.exists(key)) {
-            // 약간의 변조(detune)를 주어 자연스럽게 연출
             this.sound.play(key, { volume: 0.4, detune: Phaser.Math.Between(-100, 100) });
+        }
+    }
+
+    handleUnitDeath(unit) {
+        if (unit.team === 'blue' && unit.squadIndex !== undefined) {
+            this.deadSquadIndices.push(unit.squadIndex);
         }
     }
 
@@ -424,7 +429,33 @@ export default class BattleScene extends BaseScene {
             const baseStats = ROLE_BASE_STATS[stats.role] || {};
             const safeStats = { ...stats };
             if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
+            
             const finalStats = { ...baseStats, ...safeStats };
+
+            // [New] 레벨에 따른 스탯 증가 적용 (Lv.1 기준, 레벨당 공격력+1, 체력+10)
+            const level = safeStats.level || 1;
+            if (level > 1) {
+                finalStats.attackPower += (level - 1) * 1;
+                finalStats.hp += (level - 1) * 10;
+                finalStats.maxHp = finalStats.hp; // 최대 체력도 업데이트
+            }
+
+            // [Modified] 피로도에 따른 스탯 감소 적용 (1 피로도당 5% 감소)
+            if (team === 'blue') {
+                const fatigue = safeStats.fatigue || 0;
+                const penaltyRatio = fatigue * 0.05; // 5% per point
+                const multiplier = Math.max(0, 1 - penaltyRatio);
+
+                if (fatigue > 0) {
+                    finalStats.hp = Math.floor(finalStats.hp * multiplier);
+                    finalStats.attackPower = Math.floor(finalStats.attackPower * multiplier);
+                    if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
+                    finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
+                    
+                    console.log(`📉 [Fatigue] ${stats.role} (Lv.${level}): Fatigue ${fatigue} -> Stats reduced by ${(penaltyRatio*100).toFixed(0)}%`);
+                }
+            }
+
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             unit.setInteractive();
             if (team === 'blue') this.input.setDraggable(unit);
@@ -448,8 +479,6 @@ export default class BattleScene extends BaseScene {
         const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
         
         playerSquad.forEach((member, i) => {
-            // [Fix] 기존 코드: const roleConfig = { role: member.role }; 
-            // -> 수정: 모든 스탯 정보를 유지하도록 spread operator 사용
             const roleConfig = { ...member }; 
             
             let spawnX, spawnY;
@@ -462,6 +491,9 @@ export default class BattleScene extends BaseScene {
             }
             const isLeader = (member.role === 'Leader');
             const unit = createUnit(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
+            
+            unit.squadIndex = i;
+
             if (isLeader) this.playerUnit = unit;
             this.blueTeam.add(unit);
         });
@@ -522,6 +554,8 @@ export default class BattleScene extends BaseScene {
                 this.redTeam.add(unit);
             }
         }
+
+        this.initialRedCount = this.redTeam.getLength();
     }
     
     buyUnit(role, cost) {}
@@ -664,6 +698,46 @@ export default class BattleScene extends BaseScene {
         this.physics.pause();
         this.inputManager.destroy(); 
         if (this.bgm) this.bgm.stop();
+
+        const killedEnemies = Math.max(0, this.initialRedCount - this.redTeam.countActive());
+        const xpGained = killedEnemies * 10;
+
+        const currentSquad = this.registry.get('playerSquad') || [];
+        const fallenUnits = this.registry.get('fallenUnits') || [];
+        const nextSquad = [];
+
+        currentSquad.forEach((member, i) => {
+            if (this.deadSquadIndices.includes(i)) {
+                fallenUnits.push({
+                    ...member,
+                    deathDate: new Date().toISOString(),
+                    cause: 'Killed by Wild Dog',
+                    deathLevel: this.currentLevelIndex + 1
+                });
+            } else {
+                member.xp = (member.xp || 0) + xpGained;
+                
+                // [New] 레벨업 로직
+                // 레벨당 필요 경험치: level * 100
+                // XP가 충분하다면 레벨업하고 XP 차감 (반복)
+                let reqXp = (member.level || 1) * 100;
+                while (member.xp >= reqXp) {
+                    member.xp -= reqXp;
+                    member.level = (member.level || 1) + 1;
+                    reqXp = member.level * 100;
+                    console.log(`🆙 ${member.role} leveled up to ${member.level}!`);
+                }
+
+                member.fatigue = (member.fatigue || 0) + 1;
+                nextSquad.push(member);
+            }
+        });
+
+        this.registry.set('playerSquad', nextSquad);
+        this.registry.set('fallenUnits', fallenUnits);
+
+        console.log(`⚔️ [Battle Result] XP: +${xpGained}, Survivors Fatigue +1`);
+
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
         const endTime = Date.now();
@@ -672,6 +746,7 @@ export default class BattleScene extends BaseScene {
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
+        
         if (this.isStrategyMode) {
             btnText = isWin ? "Return to Map (Victory)" : "Return to Map (Retreat)";
             callback = () => {

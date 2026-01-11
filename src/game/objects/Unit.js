@@ -104,6 +104,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.isDying) return; 
         this.isDying = true;
 
+        // [New] 유닛 사망 시 Scene에 알림 (사망자 명단 기록용)
+        if (this.scene && typeof this.scene.handleUnitDeath === 'function') {
+            this.scene.handleUnitDeath(this);
+        }
+
         this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
 

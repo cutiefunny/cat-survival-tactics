@@ -38,7 +38,6 @@ export default class StrategyScene extends BaseScene {
             this.battleResultData = data.battleResult;
         }
         
-        // 자동 저장된 데이터 로드 (새로고침 대응)
         const savedData = SaveManager.loadGame();
 
         if (this.registry.get('playerCoins') === undefined) {
@@ -100,7 +99,6 @@ export default class StrategyScene extends BaseScene {
         this.fetchStrategyConfig(map);
     }
 
-    // [New] 현재 진행 상황 데이터 추출
     getCurrentGameData() {
         return {
             playerCoins: this.registry.get('playerCoins'),
@@ -112,7 +110,6 @@ export default class StrategyScene extends BaseScene {
         };
     }
 
-    // 자동 저장 (이동/전투 종료 시)
     saveProgress() {
         const data = this.getCurrentGameData();
         SaveManager.saveGame(data);
@@ -271,7 +268,6 @@ export default class StrategyScene extends BaseScene {
         const rightMargin = isMobile ? 15 : 20;
         const btnSpacing = isMobile ? 40 : 50;
 
-        // 시스템 버튼
         this.sysBtn = this.add.text(w - rightMargin, topBarH/2, "⚙️", { fontSize: isMobile ? '20px' : '24px' })
             .setOrigin(1, 0.5)
             .setInteractive();
@@ -280,7 +276,6 @@ export default class StrategyScene extends BaseScene {
             this.toggleSystemModal();
         });
 
-        // 사운드 버튼
         this.bgmBtn = this.add.text(w - rightMargin - btnSpacing, topBarH/2, "🔊", { fontSize: isMobile ? '20px' : '24px' })
             .setOrigin(1, 0.5)
             .setInteractive();
@@ -369,12 +364,10 @@ export default class StrategyScene extends BaseScene {
             }
         });
 
-        // [Modified] 저장 버튼 -> 슬롯 모달 호출
         const saveBtn = createMenuBtn(startY + gap * 2, "💾 저장", 0x4444cc, () => {
             this.createSlotSelectionModal('save');
         });
 
-        // [Modified] 불러오기 버튼 -> 슬롯 모달 호출
         const loadBtn = createMenuBtn(startY + gap * 3, "📂 불러오기", 0x448844, () => {
             this.createSlotSelectionModal('load');
         });
@@ -387,7 +380,6 @@ export default class StrategyScene extends BaseScene {
         this.uiContainer.add(this.systemModal);
     }
 
-    // [New] 슬롯 선택 모달 (저장/불러오기 공용)
     createSlotSelectionModal(mode) {
         if (this.systemModal) this.systemModal.setVisible(false);
         if (this.slotModal) this.slotModal.destroy();
@@ -439,7 +431,6 @@ export default class StrategyScene extends BaseScene {
         this.uiContainer.add(this.slotModal);
     }
 
-    // 슬롯 클릭 핸들러
     handleSlotAction(mode, slotIndex, slotInfo) {
         if (mode === 'save') {
             const confirmMsg = slotInfo.empty ? 
@@ -449,8 +440,6 @@ export default class StrategyScene extends BaseScene {
             if (confirm(confirmMsg)) {
                 const data = this.getCurrentGameData();
                 SaveManager.saveToSlot(slotIndex, data);
-                
-                // 수동 저장 시 자동 저장 슬롯도 갱신하여 연속성 유지
                 SaveManager.saveGame(data);
 
                 this.slotModal.destroy();
@@ -468,10 +457,7 @@ export default class StrategyScene extends BaseScene {
             if (confirm(`슬롯 ${slotIndex+1} 데이터를 불러오시겠습니까?\n(현재 진행 상황은 사라집니다)`)) {
                 const data = SaveManager.loadFromSlot(slotIndex);
                 if (data) {
-                    // 불러온 데이터를 자동 저장 슬롯에 덮어씌워야 새로고침 시에도 유지됨
                     SaveManager.saveGame(data);
-                    
-                    // 게임 재시작 (init에서 데이터를 다시 로드함)
                     this.scene.restart();
                 }
             }
@@ -490,7 +476,6 @@ export default class StrategyScene extends BaseScene {
         }
     }
 
-    // ... 기존 메서드들 유지 (createShopPopup, openUnitDetailPopup, refreshSquadDisplay 등) ...
     createShopPopup() {
         if (this.shopPopup) this.shopPopup.destroy(); 
 
@@ -566,7 +551,7 @@ export default class StrategyScene extends BaseScene {
         this.unitDetailPopup = this.add.container(width/2, height/2).setDepth(2100);
         
         const popupW = 300;
-        const popupH = 400; 
+        const popupH = 420; 
         const bg = this.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x4488ff); 
         this.unitDetailPopup.add(bg);
 
@@ -585,15 +570,44 @@ export default class StrategyScene extends BaseScene {
         const xpText = this.add.text(0, -popupH/2 + 155, `XP: ${xp} / ${reqXp}`, { fontSize: '14px', color: '#aaaaaa' }).setOrigin(0.5);
         this.unitDetailPopup.add([lvText, xpText]);
 
-        let statY = -popupH/2 + 190;
-        const statStyle = { fontSize: '14px', color: '#ffffff', wordWrap: { width: popupW - 80 } };
+        // [Modified] 피로도 정보 (5% 패널티) 및 스탯 반영
+        const fatigue = memberData.fatigue || 0;
+        const penaltyRatio = fatigue * 0.05; 
+        const multiplier = Math.max(0, 1 - penaltyRatio);
         
-        const statsList = [ `❤️ 체력: ${stats.hp}`, `⚔️ 공격력: ${stats.attackPower}`, `🦵 속도: ${stats.moveSpeed}` ];
+        const penaltyPercent = (penaltyRatio * 100).toFixed(0);
+        const fatigueColor = fatigue > 0 ? '#ff5555' : '#55ff55';
+        const fatigueText = this.add.text(0, -popupH/2 + 180, `😓 피로도: ${fatigue} (스탯 -${penaltyPercent}%)`, { fontSize: '15px', color: fatigueColor }).setOrigin(0.5);
+        this.unitDetailPopup.add(fatigueText);
+
+        // [New] 레벨 보너스와 피로도 패널티를 모두 적용한 최종 스탯 계산
+        const levelBonusAtk = (level - 1) * 1;
+        const levelBonusHp = (level - 1) * 10;
+
+        let finalHp = Math.floor((stats.hp + levelBonusHp) * multiplier);
+        let finalAtk = Math.floor((stats.attackPower + levelBonusAtk) * multiplier);
+        let finalSpeed = Math.floor(stats.moveSpeed * multiplier);
+        let finalDef = stats.defense ? Math.floor(stats.defense * multiplier) : 0;
+
+        // 패널티가 있으면 붉은색으로 표시
+        const statColor = fatigue > 0 ? '#ff8888' : '#ffffff';
+        const statStyle = { fontSize: '14px', color: statColor, wordWrap: { width: popupW - 80 } };
+        
+        let statY = -popupH/2 + 210;
+        
+        const statsList = [ `❤️ 체력: ${finalHp}`, `⚔️ 공격력: ${finalAtk}`, `🦵 속도: ${finalSpeed}` ];
 
         switch (role) {
-            case 'Leader': statsList.push(`스킬: 샤우팅\n30초마다 근처 아군의 공격력이 10초간 10% 증가한다.`); break;
-            case 'Tanker': statsList.splice(2, 0, `🛡️ 방어력: ${stats.defense || 0}`); statsList.push(`\n🛡️ 스킬: 어그로\n10초마다 주위의 적들을 도발한다`); break;
-            case 'Healer': statsList[1] = `💖 치유량: ${stats.attackPower}`; break;
+            case 'Leader': 
+                statsList.push(`스킬: 샤우팅\n30초마다 근처 아군의 공격력이 10초간 10% 증가한다.`); 
+                break;
+            case 'Tanker': 
+                statsList.splice(2, 0, `🛡️ 방어력: ${finalDef}`); 
+                statsList.push(`\n🛡️ 스킬: 어그로\n10초마다 주위의 적들을 도발한다`); 
+                break;
+            case 'Healer': 
+                statsList[1] = `💖 치유량: ${finalAtk}`; 
+                break;
         }
 
         let currentY = statY;
@@ -798,15 +812,46 @@ export default class StrategyScene extends BaseScene {
     }
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
     shakeStatusText() { this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 }); }
+
     handleTurnEnd() {
-        this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
-        if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
-        this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
+        const recoveryAmount = this.hasMoved ? 1 : 3;
+        const squad = this.registry.get('playerSquad') || [];
+        
+        let recoveredCount = 0;
+        squad.forEach(unit => {
+            if (unit.fatigue > 0) {
+                unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
+                recoveredCount++;
+            }
+        });
+        
+        this.registry.set('playerSquad', squad);
+        
+        this.hasMoved = false; 
+        this.previousLeaderId = null; 
+        this.selectedTargetId = null; 
+        
+        if (this.selectionTween) { 
+            this.selectionTween.stop(); 
+            this.selectionTween = null; 
+        }
+        
+        this.nodeContainer.getChildren().forEach(c => { 
+            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
+            c.scale = 1; 
+        });
+
         this.cameras.main.flash(500, 0, 0, 0); 
-        this.statusText.setText("🌙 턴 종료. 행동력이 회복되었습니다.");
+        
+        const recoveryMsg = recoveredCount > 0 
+            ? ` (부대원들이 휴식하여 피로도가 ${recoveryAmount} 회복되었습니다)` 
+            : "";
+        this.statusText.setText(`🌙 턴 종료. 행동력이 회복되었습니다.${recoveryMsg}`);
+        
         this.updateUIState();
         this.saveProgress();
     }
+
     startBattle() {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
         if (!targetNode) return;
