@@ -35,11 +35,18 @@ export default class StrategyScene extends BaseScene {
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
         }
+        
+        // [Modified] 초기 부대원 설정 시 레벨/경험치 데이터 추가
         if (!this.registry.get('playerSquad')) {
-            this.registry.set('playerSquad', [{ role: 'Leader' }]);
+            this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
         }
+        
         if (this.registry.get('playerCoins') === undefined) {
             this.registry.set('playerCoins', 50); 
+        }
+
+        if (!this.registry.get('unlockedRoles')) {
+            this.registry.set('unlockedRoles', ['Normal']); 
         }
     }
 
@@ -123,6 +130,8 @@ export default class StrategyScene extends BaseScene {
                     this.registry.set('leaderPosition', targetNodeId);
                 }
                 battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
+                
+                this.handleStoryUnlocks(targetNodeId);
             } else {
                 const lastSafeId = this.registry.get('lastSafeNodeId');
                 if (lastSafeId) {
@@ -168,6 +177,20 @@ export default class StrategyScene extends BaseScene {
         this.prevPinchDistance = 0;
     }
 
+    handleStoryUnlocks(conqueredNodeId) {
+        // 예시: 특정 노드 정복 시 유닛 해금 로직
+    }
+
+    unlockUnit(roleName) {
+        const unlocked = this.registry.get('unlockedRoles') || [];
+        if (!unlocked.includes(roleName)) {
+            unlocked.push(roleName);
+            this.registry.set('unlockedRoles', unlocked);
+            this.statusText.setText(`🎉 새로운 동료 해금: ${roleName}!`);
+            this.cameras.main.flash(500, 255, 255, 0); 
+        }
+    }
+
     handleResize(gameSize) {
         this.updateCameraLayout();
         this.resizeUI();
@@ -175,30 +198,15 @@ export default class StrategyScene extends BaseScene {
 
     createStyledButton(x, y, text, color, onClick) {
         const btnContainer = this.add.container(x, y);
-        
         const shadow = this.add.rectangle(4, 4, 160, 50, 0x000000, 0.5).setOrigin(0.5);
-        
         const bg = this.add.rectangle(0, 0, 160, 50, color).setOrigin(0.5);
         bg.setStrokeStyle(2, 0xffffff, 0.8);
-        
-        const btnText = this.add.text(0, 0, text, {
-            fontSize: '18px',
-            fontStyle: 'bold',
-            color: '#ffffff'
-        }).setOrigin(0.5);
-
+        const btnText = this.add.text(0, 0, text, { fontSize: '18px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
         const hitArea = this.add.rectangle(0, 0, 160, 50, 0x000000, 0).setOrigin(0.5).setInteractive({ useHandCursor: true });
         
         hitArea.on('pointerdown', () => {
-            this.tweens.add({
-                targets: btnContainer,
-                scale: 0.95,
-                duration: 50,
-                yoyo: true,
-                onComplete: onClick
-            });
+            this.tweens.add({ targets: btnContainer, scale: 0.95, duration: 50, yoyo: true, onComplete: onClick });
         });
-
         hitArea.on('pointerover', () => { bg.setStrokeStyle(3, 0xffff00, 1); });
         hitArea.on('pointerout', () => { bg.setStrokeStyle(2, 0xffffff, 0.8); });
 
@@ -220,65 +228,33 @@ export default class StrategyScene extends BaseScene {
 
         const w = this.scale.width;
         const h = this.scale.height;
-
-        // [Modified] 모바일 여부 판단 및 반응형 설정
         const isMobile = w < 600; 
-        const topBarH = isMobile ? 60 : 50; // 모바일이면 높이를 약간 더 여유 있게
-        const fontSize = isMobile ? '13px' : '16px'; // 모바일 폰트 축소
+        const topBarH = isMobile ? 60 : 50;
+        const fontSize = isMobile ? '13px' : '16px'; 
 
-        // --- 1. Top Status Bar ---
         const topBarBg = this.add.rectangle(0, 0, w, topBarH, 0x000000, 0.6).setOrigin(0, 0);
-
-        // [Left] 코인
         const coins = this.registry.get('playerCoins');
-        this.coinText = this.add.text(isMobile ? 10 : 20, topBarH/2, `💰 ${coins}냥`, {
-            fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold'
-        }).setOrigin(0, 0.5);
-
-        // [Right] BGM 버튼
-        this.bgmBtn = this.add.text(w - (isMobile ? 15 : 30), topBarH/2, "🔊", { 
-            fontSize: isMobile ? '20px' : '24px' 
-        }).setOrigin(1, 0.5).setInteractive();
-        
+        this.coinText = this.add.text(isMobile ? 10 : 20, topBarH/2, `💰 ${coins}냥`, { fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(0, 0.5);
+        this.bgmBtn = this.add.text(w - (isMobile ? 15 : 30), topBarH/2, "🔊", { fontSize: isMobile ? '20px' : '24px' }).setOrigin(1, 0.5).setInteractive();
         this.bgmBtn.on('pointerdown', () => {
             const isMuted = this.toggleBgmMute();
             this.bgmBtn.setText(isMuted ? "🔇" : "🔊");
         });
 
-        // [Center] 상태 메시지 (Word Wrap 적용)
         const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
-        
-        // 텍스트가 표시될 안전한 너비 계산 (전체 너비 - 양쪽 여백)
-        // 왼쪽 코인(약 100px) + 오른쪽 버튼(약 50px) + 여유분 = 약 160~200px 제외
         const safeTextWidth = w - (isMobile ? 160 : 240); 
+        this.statusText = this.add.text(w / 2, topBarH/2, currentStatusMsg, { fontSize: fontSize, color: '#ffffff', align: 'center', wordWrap: { width: safeTextWidth, useAdvancedWrap: true } }).setOrigin(0.5, 0.5);
 
-        this.statusText = this.add.text(w / 2, topBarH/2, currentStatusMsg, { 
-            fontSize: fontSize, 
-            color: '#ffffff', 
-            align: 'center',
-            // [Key Solution] 너비를 지정하고 자동 줄바꿈 활성화
-            wordWrap: { width: safeTextWidth, useAdvancedWrap: true }
-        }).setOrigin(0.5, 0.5);
-
-        // --- 2. Bottom Buttons ---
-        
-        // 버튼 위치도 모바일일 경우 조금 더 안쪽으로 배치하거나 크기 조정 가능
         const btnMargin = isMobile ? 50 : 60;
-
-        // [Bottom Right] 턴 종료
         this.endTurnBtnObj = this.createStyledButton(w - (isMobile ? 85 : 100), h - btnMargin, '턴 종료', 0xcc0000, () => {
             if (this.selectedTargetId !== null) this.startBattle();
             else this.handleTurnEnd();
         });
         
-        // [Bottom Left] 부대 편성
         this.shopBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => this.toggleShop());
-
-        // [Bottom Center] 이동 취소
         this.undoBtnObj = this.createStyledButton(w / 2, h - (btnMargin + 20), '이동 취소', 0x666666, () => this.undoMove());
         this.undoBtnObj.container.setVisible(false);
 
-        // 모바일인 경우 버튼 크기 살짝 조정 (선택 사항)
         if (isMobile) {
             this.endTurnBtnObj.container.setScale(0.85);
             this.shopBtnObj.container.setScale(0.85);
@@ -287,28 +263,25 @@ export default class StrategyScene extends BaseScene {
 
         this.uiContainer.add([topBarBg, this.coinText, this.bgmBtn, this.statusText]);
         this.uiContainer.add([this.shopBtnObj.container, this.endTurnBtnObj.container, this.undoBtnObj.container]);
-
         this.updateUIState();
         this.createShopPopup(); 
     }
 
-    // 상점(부대 편성) 팝업 생성
     createShopPopup() {
+        if (this.shopPopup) this.shopPopup.destroy(); 
+
         const { width, height } = this.scale;
         this.shopPopup = this.add.container(width/2, height/2).setDepth(2000).setVisible(false);
         
         const popupW = Math.min(600, width * 0.95);
         const popupH = Math.min(450, height * 0.8);
-        
         const bg = this.add.rectangle(0, 0, popupW, popupH, 0x222222).setStrokeStyle(4, 0xffcc00);
         const title = this.add.text(0, -popupH/2 + 30, "용병 고용\n", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
-        
         const closeBtn = this.add.text(popupW/2 - 30, -popupH/2 + 30, "X", { fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5).setInteractive();
         closeBtn.on('pointerdown', () => this.toggleShop());
 
         this.shopPopup.add([bg, title, closeBtn]);
 
-        // Role과 텍스처 키 매핑
         this.roleToTexture = {
             'Tanker': 'tanker_token',
             'Shooter': 'shooter_token',
@@ -319,7 +292,6 @@ export default class StrategyScene extends BaseScene {
             'Leader': 'leader_token'
         };
 
-        // 유닛 리스트
         const cols = 3;
         const gapX = 120;
         const gapY = 100;
@@ -327,25 +299,29 @@ export default class StrategyScene extends BaseScene {
         const startX = -totalWidth / 2 + gapX / 2;
         const startY = -popupH/2 + 80;
 
+        const unlockedRoles = this.registry.get('unlockedRoles') || ['Normal'];
+
         UNIT_COSTS.forEach((unit, index) => {
             const row = Math.floor(index / cols);
             const col = index % cols;
             const x = startX + col * gapX;
             const y = startY + row * gapY;
-            
             const btn = this.add.container(x, y);
-            const btnBg = this.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
-            
-            const textureKey = this.roleToTexture[unit.role] || 'leader_token';
-            const unitSprite = this.add.sprite(0, -10, textureKey, 1);
-            unitSprite.setDisplaySize(50, 50);
-            
-            const costTxt = this.add.text(0, 25, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
-            
-            btn.add([btnBg, unitSprite, costTxt]);
-            
-            btnBg.on('pointerdown', () => this.openUnitDetailPopup(unit));
-            
+            const isUnlocked = unlockedRoles.includes(unit.role);
+
+            if (isUnlocked) {
+                const btnBg = this.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
+                const textureKey = this.roleToTexture[unit.role] || 'leader_token';
+                const unitSprite = this.add.sprite(0, -10, textureKey, 1);
+                unitSprite.setDisplaySize(50, 50);
+                const costTxt = this.add.text(0, 25, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
+                btn.add([btnBg, unitSprite, costTxt]);
+                btnBg.on('pointerdown', () => this.openUnitDetailPopup(unit));
+            } else {
+                const btnBg = this.add.rectangle(0, 0, 100, 80, 0x222222).setStrokeStyle(1, 0x555555);
+                const lockText = this.add.text(0, 0, "🔒\n???", { align: 'center', fontSize: '18px', color: '#555555', fontStyle: 'bold' }).setOrigin(0.5);
+                btn.add([btnBg, lockText]);
+            }
             this.shopPopup.add(btn);
         });
         
@@ -359,42 +335,52 @@ export default class StrategyScene extends BaseScene {
         this.uiContainer.add(this.shopPopup);
     }
 
-    // [New] 유닛 상세 정보 팝업
-    openUnitDetailPopup(unitConfig) {
-        if (this.unitDetailPopup) {
-            this.unitDetailPopup.destroy();
-        }
+    // [New] 보유 유닛 정보 모달 (구매 버튼 없음, 레벨/XP 표시)
+    openOwnedUnitDetailPopup(memberData) {
+        if (this.unitDetailPopup) this.unitDetailPopup.destroy();
 
         const { width, height } = this.scale;
-        const stats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
-        
+        const role = memberData.role;
+        // UNIT_COSTS에 정보가 있으면 사용하고, 없으면(리더 등) 기본값 사용
+        const shopInfo = UNIT_COSTS.find(u => u.role === role) || { 
+            name: (role === 'Leader' ? '지휘관' : role), 
+            desc: "나의 소중한 동료입니다." 
+        };
+        const stats = ROLE_BASE_STATS[role] || ROLE_BASE_STATS['Normal'];
+
         this.unitDetailPopup = this.add.container(width/2, height/2).setDepth(2100);
         
         const popupW = 300;
-        const popupH = 380;
-        
-        // 배경
-        const bg = this.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x888888);
+        const popupH = 400; // 높이 약간 증가
+        const bg = this.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x4488ff); // 파란색 테두리 (보유 중임을 표시)
         this.unitDetailPopup.add(bg);
 
         // 타이틀
-        const titleText = this.add.text(0, -popupH/2 + 30, unitConfig.name, { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
+        const titleText = this.add.text(0, -popupH/2 + 30, `${shopInfo.name}`, { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
         this.unitDetailPopup.add(titleText);
 
-        // 이미지
-        const textureKey = this.roleToTexture[unitConfig.role] || 'leader_token';
+        // 유닛 이미지
+        const textureKey = this.roleToTexture[role] || 'leader_token';
         const unitImg = this.add.sprite(0, -popupH/2 + 80, textureKey, 0).setDisplaySize(60, 60);
         this.unitDetailPopup.add(unitImg);
 
-        // 설명
-        const descText = this.add.text(0, -popupH/2 + 130, unitConfig.desc || "...", { 
-            fontSize: '14px', color: '#cccccc', align: 'center', wordWrap: { width: popupW - 40 } 
-        }).setOrigin(0.5);
-        this.unitDetailPopup.add(descText);
+        // 레벨 및 경험치 표시 (핵심 요구사항)
+        const level = memberData.level || 1;
+        const xp = memberData.xp || 0;
+        // 예시: 레벨업 필요 경험치 = 레벨 * 100
+        const reqXp = level * 100; 
 
-        // 스탯 정보 표시
-        let statY = -popupH/2 + 170;
-        const statStyle = { fontSize: '14px', color: '#ffffff' };
+        const lvText = this.add.text(0, -popupH/2 + 130, `Lv.${level}`, { fontSize: '24px', color: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
+        const xpText = this.add.text(0, -popupH/2 + 155, `XP: ${xp} / ${reqXp}`, { fontSize: '14px', color: '#aaaaaa' }).setOrigin(0.5);
+        this.unitDetailPopup.add([lvText, xpText]);
+
+        // 스탯 정보
+        let statY = -popupH/2 + 190;
+        const statStyle = { 
+        fontSize: '14px', 
+        color: '#ffffff',
+        wordWrap: { width: popupW - 80 } 
+    };
         
         const statsList = [
             `❤️ 체력: ${stats.hp}`,
@@ -402,18 +388,19 @@ export default class StrategyScene extends BaseScene {
             `🦵 속도: ${stats.moveSpeed}`
         ];
 
-        if (unitConfig.role === 'Tanker') {
-            statsList.splice(2, 0, `🛡️ 방어력: ${stats.defense || 0}`);
-            statsList.push(`\n🛡️ 스킬: 어그로\n10초마다 주위의 적들을 도발한다`);
-        }
-
-        if (unitConfig.role === 'Healer') {
-            statsList[1] = `💖 치유량: ${stats.attackPower}`;
-            statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
-        }
-
-        if (unitConfig.role === 'Shooter') {
-            statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
+        switch (role) {
+            case 'Leader':
+                statsList.push(`스킬: 샤우팅\n30초마다 근처 아군의 공격력이 10초간 10% 증가한다.`);
+                break;
+            case 'Tanker':
+                statsList.splice(2, 0, `🛡️ 방어력: ${stats.defense || 0}`);
+                statsList.push(`스킬: 어그로\n10초마다 주위의 적들을 도발한다`);
+                break;
+            case 'Healer':
+                statsList[1] = `💖 치유량: ${stats.attackPower}`;
+                break;
+            default:
+                break;
         }
 
         statsList.forEach((text, i) => {
@@ -421,13 +408,84 @@ export default class StrategyScene extends BaseScene {
             this.unitDetailPopup.add(t);
         });
 
-        // 구매 버튼
+        // 닫기 버튼만 존재 (구매 버튼 없음)
+        const closeBtn = this.add.text(popupW/2 - 20, -popupH/2 + 20, "X", { fontSize: '20px', color: '#ff5555' }).setOrigin(0.5).setInteractive();
+        closeBtn.on('pointerdown', () => {
+            this.unitDetailPopup.destroy();
+            this.unitDetailPopup = null;
+        });
+        this.unitDetailPopup.add(closeBtn);
+        
+        // 하단 닫기 버튼 (편의성)
+        const closeBtnBottom = this.add.container(0, popupH/2 - 40);
+        const closeBg = this.add.rectangle(0, 0, 100, 40, 0x444444).setInteractive();
+        const closeTxt = this.add.text(0, 0, "닫기", { fontSize: '16px' }).setOrigin(0.5);
+        closeBtnBottom.add([closeBg, closeTxt]);
+        closeBg.on('pointerdown', () => {
+             this.unitDetailPopup.destroy();
+             this.unitDetailPopup = null;
+        });
+        this.unitDetailPopup.add(closeBtnBottom);
+
+        this.uiContainer.add(this.unitDetailPopup);
+    }
+
+    // 상점에서 고용할 때 보는 팝업 (구매 버튼 있음)
+    openUnitDetailPopup(unitConfig) {
+        if (this.unitDetailPopup) this.unitDetailPopup.destroy();
+
+        const { width, height } = this.scale;
+        const stats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
+        this.unitDetailPopup = this.add.container(width/2, height/2).setDepth(2100);
+        
+        const popupW = 300;
+        const popupH = 380;
+        const bg = this.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x888888);
+        this.unitDetailPopup.add(bg);
+
+        const titleText = this.add.text(0, -popupH/2 + 30, unitConfig.name, { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
+        this.unitDetailPopup.add(titleText);
+        const textureKey = this.roleToTexture[unitConfig.role] || 'leader_token';
+        const unitImg = this.add.sprite(0, -popupH/2 + 80, textureKey, 0).setDisplaySize(60, 60);
+        this.unitDetailPopup.add(unitImg);
+
+        const descText = this.add.text(0, -popupH/2 + 130, unitConfig.desc || "...", { fontSize: '14px', color: '#cccccc', align: 'center', wordWrap: { width: popupW - 40 } }).setOrigin(0.5);
+        this.unitDetailPopup.add(descText);
+
+        let statY = -popupH/2 + 170;
+        const statStyle = { fontSize: '14px', color: '#ffffff', wordWrap: { width: popupW - 80 }  };
+        
+        const statsList = [
+            `❤️ 체력: ${stats.hp}`,
+            `⚔️ 공격력: ${stats.attackPower}`,
+            `🦵 속도: ${stats.moveSpeed}`
+        ];
+        switch (unitConfig.role) {
+            case 'Tanker':
+                statsList.splice(2, 0, `🛡️ 방어력: ${stats.defense || 0}`);
+                statsList.push(`스킬: 어그로\n10초마다 주위의 적들을 도발한다`);
+                break;
+            case 'Healer':
+                statsList[1] = `💖 치유량: ${stats.attackPower}`;
+                statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
+                break;
+            case 'Shooter':
+                statsList.push(`🎯 사거리: ${stats.attackRange || 0}`);
+                break;
+            default:
+                break;
+        }
+
+        statsList.forEach((text, i) => {
+            const t = this.add.text(-popupW/2 + 40, statY + (i * 20), text, statStyle);
+            this.unitDetailPopup.add(t);
+        });
+
         const buyBtnY = popupH/2 - 50;
         const buyBtn = this.add.container(0, buyBtnY);
         const buyBtnBg = this.add.rectangle(0, 0, 140, 40, 0x00aa00).setInteractive();
         const buyBtnText = this.add.text(0, 0, `구매 (${unitConfig.cost}냥)`, { fontSize: '18px', fontStyle: 'bold' }).setOrigin(0.5);
         buyBtn.add([buyBtnBg, buyBtnText]);
-        
         buyBtnBg.on('pointerdown', () => {
             this.buyUnit(unitConfig);
             this.unitDetailPopup.destroy();
@@ -435,14 +493,12 @@ export default class StrategyScene extends BaseScene {
         });
         this.unitDetailPopup.add(buyBtn);
 
-        // 닫기 버튼
         const closeBtn = this.add.text(popupW/2 - 20, -popupH/2 + 20, "X", { fontSize: '20px', color: '#ff5555' }).setOrigin(0.5).setInteractive();
         closeBtn.on('pointerdown', () => {
             this.unitDetailPopup.destroy();
             this.unitDetailPopup = null;
         });
         this.unitDetailPopup.add(closeBtn);
-
         this.uiContainer.add(this.unitDetailPopup);
     }
 
@@ -456,7 +512,6 @@ export default class StrategyScene extends BaseScene {
         const iconSize = 40;
         const gap = 5;
         const maxCols = 12; 
-
         const totalW = Math.min(squad.length, maxCols) * (iconSize + gap);
         const startX = -totalW / 2 + iconSize / 2;
 
@@ -468,19 +523,33 @@ export default class StrategyScene extends BaseScene {
             const y = row * (iconSize + gap);
             
             const icon = this.add.sprite(x, y, textureKey, 0);
-            icon.setDisplaySize(iconSize, iconSize);
+            
+            // 리더 10% 확대
+            const isLeader = (member.role === 'Leader');
+            const finalSize = isLeader ? iconSize * 1.1 : iconSize;
+            icon.setDisplaySize(finalSize, finalSize);
+            
+            // [Modified] 클릭 이벤트 추가 -> 보유 유닛 정보 모달 열기
+            icon.setInteractive({ useHandCursor: true });
+            icon.on('pointerdown', () => {
+                this.openOwnedUnitDetailPopup(member);
+            });
+
             this.squadContainer.add(icon);
         });
     }
 
     toggleShop() {
-        if (!this.shopPopup) return;
+        if (!this.shopPopup) {
+            this.createShopPopup(); 
+        }
         this.isShopOpen = !this.isShopOpen;
-        this.shopPopup.setVisible(this.isShopOpen);
-        
         if (this.isShopOpen) {
+            this.createShopPopup();
+            this.shopPopup.setVisible(true);
             this.refreshSquadDisplay(); 
         } else {
+            this.shopPopup.setVisible(false);
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
                 this.unitDetailPopup = null;
@@ -496,12 +565,12 @@ export default class StrategyScene extends BaseScene {
             this.coinText.setText(`💰 ${newCoins}냥`);
             
             const squad = this.registry.get('playerSquad');
-            squad.push({ role: unitConfig.role });
+            // [Modified] 유닛 구매 시 레벨1, 경험치0 초기화
+            squad.push({ role: unitConfig.role, level: 1, xp: 0 });
             this.registry.set('playerSquad', squad);
             
             this.refreshSquadDisplay();
-            
-            this.cameras.main.shake(50, 0.005);
+            //this.cameras.main.shake(50, 0.005);
         } else {
             this.cameras.main.shake(100, 0.01); 
         }
@@ -513,7 +582,6 @@ export default class StrategyScene extends BaseScene {
 
     updateUIState() {
         if (!this.undoBtnObj || !this.endTurnBtnObj || !this.shopBtnObj) return;
-
         if (this.hasMoved && this.previousLeaderId !== null) {
             this.undoBtnObj.container.setVisible(true);
             this.shopBtnObj.container.setVisible(false); 
@@ -521,7 +589,6 @@ export default class StrategyScene extends BaseScene {
             this.undoBtnObj.container.setVisible(false);
             this.shopBtnObj.container.setVisible(true);
         }
-
         if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
             this.endTurnBtnObj.textObj.setText("전투 시작");
             this.endTurnBtnObj.bgObj.setFillStyle(0xff0000); 

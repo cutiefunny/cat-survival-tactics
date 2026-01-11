@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import { ROLE_TEXTURES } from '../data/UnitData'; 
 import UnitAI from './UnitAI'; 
 
-// [Frame Constants]
 const FRAME_IDLE = 0;
 const FRAME_ATTACK = 3;
 const FRAME_HIT = 4;
@@ -10,7 +9,6 @@ const FRAME_SKILL = 5;
 
 export default class Unit extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader = false) {
-        // [Visual Config]
         const roleKey = stats.role || 'Normal';
         const assignedTexture = ROLE_TEXTURES[roleKey] || (team === 'red' ? 'dog' : 'leader');
 
@@ -22,9 +20,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.targetGroup = targetGroup;
         this.isLeader = isLeader;
 
-        // [Stats]
         this.role = roleKey;
-        this.baseSize = (this.role === 'Tanker') ? 60 : 50;
+        // [Modified] 리더라면 baseSize를 10% 증가시킴
+        let size = (this.role === 'Tanker') ? 60 : 50;
+        if (this.isLeader) {
+            size *= 1.15; 
+        }
+        this.baseSize = size;
 
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
@@ -33,10 +35,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.attackPower = this.baseAttackPower;
         this.moveSpeed = stats.moveSpeed;
         
-        // [New] 방어력 추가 (기본값 0)
         this.defense = stats.defense || 0;
-        
-        // [New] 처치 보상 추가 (기본값 10)
         this.killReward = stats.killReward || 10;
 
         this.attackRange = stats.attackRange || 50;
@@ -45,13 +44,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset = { x: 0, y: 0 };
         this.savedRelativePos = { x: 0, y: 0 };
 
-        // [Position Validation]
         this.lastValidPosition = { x: x, y: y };
 
-        // [AI System Delegation]
         this.ai = new UnitAI(this);
 
-        // [Combat]
         this.attackCooldown = stats.attackCooldown || 500;
         this.lastAttackTime = 0;
 
@@ -62,50 +58,38 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.skillTimer = 0;
         this.isUsingSkill = false;
 
-        // [Status Flags]
         this.isDying = false; 
         this.isAttacking = false;
         this.isTakingDamage = false;
 
-        // [Aggro System]
         this.noCombatTimer = 0;
 
-        // [Optimization]
         this._tempVec = new Phaser.Math.Vector2();
 
-        // [Debug UI]
         this.debugText = null;
         this.debugGraphic = null;
         this.lastDrawnHpPct = 1;
 
-        // [Physics Init]
         scene.add.existing(this);
         scene.physics.add.existing(this);
         this.setCollideWorldBounds(true);
         this.setBounce(0); 
         this.setDrag(200);
 
-        // [Components Init]
         this.hpBar = scene.add.graphics().setDepth(100);
         this.initVisuals();
 
-        // [Interaction] 플레이어 선택 및 스킬 발동 (PC/Mobile 공통)
         this.on('pointerdown', () => {
             if (this.team === 'blue' && this.scene.battleStarted) {
-                // 이미 선택된 유닛(PlayerUnit)을 다시 터치하면 스킬 발동
                 if (this.scene.playerUnit === this) {
                     this.tryUseSkill();
                 } else {
-                    // 다른 유닛이라면 해당 유닛 선택
                     this.scene.selectPlayerUnit(this);
                 }
             }
         });
     }
 
-    // =================================================================
-    // [Getter/Setter] CombatManager 등 외부 호환성 유지
-    // =================================================================
     get currentTarget() {
         return this.ai ? this.ai.currentTarget : null;
     }
@@ -123,7 +107,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.destroyDebugObjects();
         if (this.hpBar) this.hpBar.destroy();
 
-        // [Modified] 적군(red) 사망 시 설정된 killReward 만큼 코인 드랍
         if (this.team === 'red' && this.scene && typeof this.scene.animateCoinDrop === 'function') {
             const dropAmount = this.killReward; 
             this.scene.animateCoinDrop(this.x, this.y, dropAmount);
@@ -235,7 +218,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.updateAnimation();
     }
 
-    // [Modified] NPC 로직 수정: 적군(Red)은 정찰(Roaming) 체크 후 AI 실행
     updateNpcLogic(delta) {
         if (!this.scene.battleStarted) {
             this.ai.followLeader();
@@ -253,9 +235,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 }
             }
         } else {
-            // [Red Team Logic]
-            // updateRoaming이 true를 반환하면(전투 모드), 구체적인 전투 AI(updateAI)를 실행
-            // false를 반환하면(정찰 모드), 전투 AI를 건너뜀 (배회 중)
             if (this.ai.updateRoaming(delta)) {
                 this.updateAI(delta);
             }
@@ -284,7 +263,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updatePlayerLogic(delta) {
         this.updatePlayerMovement();
         const isMovingManually = (this.body.velocity.x !== 0 || this.body.velocity.y !== 0);
-        // 수동 조작 중이 아닐 때만 AI 가동 (Auto Battle)
         if (!isMovingManually && this.scene.isAutoBattle && this.scene.battleStarted) {
             this.updateAI(delta);
         }
@@ -303,13 +281,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    // [Modified] 모바일 가상 조이스틱 입력 처리 및 디버깅 로그 추가
     updatePlayerMovement() {
         this.setVelocity(0);
         if (!this.scene.cursors) return;
         
         const cursors = this.scene.cursors; 
-        const joyCursors = this.scene.joystickCursors; // InputManager에서 연결된 가상 커서
+        const joyCursors = this.scene.joystickCursors; 
         
         let vx = 0, vy = 0;
 
@@ -325,7 +302,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
-    // --- Visuals ---
     initVisuals() {
         this.setFrame(FRAME_IDLE);
         if (this.team === 'blue') {
@@ -402,11 +378,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     takeDamage(amount) {
         if (!this.scene.battleStarted || this.isDying) return; 
         
-        // [New] 방어력 적용 (최소 1 데미지 보장)
         const damage = Math.max(1, amount - this.defense);
         
         this.hp -= damage;
         this.onTakeDamage(); 
+
+        if (this.scene && typeof this.scene.playHitSound === 'function') {
+            this.scene.playHitSound();
+        }
         
         this.isTakingDamage = true;
         this.setFrame(FRAME_HIT);

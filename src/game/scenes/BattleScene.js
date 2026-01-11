@@ -448,7 +448,10 @@ export default class BattleScene extends BaseScene {
         const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
         
         playerSquad.forEach((member, i) => {
-            const roleConfig = { role: member.role }; 
+            // [Fix] 기존 코드: const roleConfig = { role: member.role }; 
+            // -> 수정: 모든 스탯 정보를 유지하도록 spread operator 사용
+            const roleConfig = { ...member }; 
+            
             let spawnX, spawnY;
             if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
