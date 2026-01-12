@@ -21,7 +21,7 @@ export default class SystemModal {
         const { width, height } = this.scene.scale;
         this.container = this.scene.add.container(width / 2, height / 2).setDepth(3000).setVisible(false);
         const modalW = 280;
-        const modalH = 380;
+        const modalH = 320;
 
         const bg = this.scene.add.rectangle(0, 0, modalW, modalH, 0x111111, 0.95).setStrokeStyle(3, 0xaaaaaa);
         const title = this.scene.add.text(0, -modalH / 2 + 30, "시스템 메뉴", { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
@@ -38,7 +38,7 @@ export default class SystemModal {
         const gap = 55;
 
         const buttons = [
-            { text: "🔑 로그인 (Device ID)", color: 0x444444, callback: () => this.showDeviceId() },
+            // { text: "🔑 로그인 (Device ID)", color: 0x444444, callback: () => this.showDeviceId() },
             { text: "✨ 새 게임", color: 0xcc4444, callback: () => this.resetGame() },
             { text: "💾 저장", color: 0x4444cc, callback: () => this.createSlotSelectionModal('save') },
             { text: "📂 불러오기", color: 0x448844, callback: () => this.createSlotSelectionModal('load') },

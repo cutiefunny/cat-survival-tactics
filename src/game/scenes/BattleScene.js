@@ -1,3 +1,4 @@
+// src/game/scenes/BattleScene.js
 import Phaser from 'phaser';
 import BaseScene from './BaseScene'; 
 
@@ -13,7 +14,7 @@ import Healer from '../objects/roles/Healer';
 import Raccoon from '../objects/roles/Raccoon';
 
 // [Data & Config]
-import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
+import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS, getRandomUnitName } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; 
@@ -37,6 +38,8 @@ import tilesetStreet1Img from '../../assets/tilesets/street1.png';
 import tilesetStreet2Img from '../../assets/tilesets/street2.png';
 import tilesetStreet3Img from '../../assets/tilesets/street3.png';
 import tilesetStreet4Img from '../../assets/tilesets/street4.png';
+
+// [Unit Sprites]
 import leaderSheet from '../../assets/units/leader.png';
 import dogSheet from '../../assets/units/dog.png';
 import raccoonSheet from '../../assets/units/raccoon.png';
@@ -44,11 +47,13 @@ import shooterSheet from '../../assets/units/shooter.png';
 import tankerSheet from '../../assets/units/tanker.png';
 import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
+import normalSheet from '../../assets/units/normal.png'; // [New] 일반냥 이미지 추가
+
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
 
-// [New] 타격음 파일 임포트
+// [Sounds]
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
 import hit3 from '../../assets/sounds/Hit3.wav';
@@ -116,6 +121,7 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('tanker', tankerSheet, sheetConfig);
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
+        this.load.spritesheet('normal', normalSheet, sheetConfig); // [New] 일반냥 로드
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.tilemapTiledJSON('level4', level4Data); 
@@ -406,8 +412,10 @@ export default class BattleScene extends BaseScene {
         if (!this.mapWidth) return;
         this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
     }
+    
+    // [Modified] 애니메이션 생성에 'normal' 추가
     createStandardAnimations() {
-        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer']; 
+        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal']; 
         unitTextures.forEach(key => {
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
                 const frameRate = (key === 'healer') ? 3 : 6;
@@ -421,55 +429,63 @@ export default class BattleScene extends BaseScene {
         });
     }
 
+    createUnitInstance(x, y, team, target, stats, isLeader) {
+        if (this.gameConfig && this.gameConfig.aiSettings) {
+            stats.aiConfig = this.gameConfig.aiSettings;
+        } else {
+            stats.aiConfig = DEFAULT_AI_SETTINGS;
+        }
+
+        const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
+        const baseStats = ROLE_BASE_STATS[stats.role] || {};
+        const safeStats = { ...stats };
+        if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
+        
+        const finalStats = { ...baseStats, ...safeStats };
+
+        const level = safeStats.level || 1;
+        if (level > 1) {
+            finalStats.attackPower += (level - 1) * 1;
+            finalStats.hp += (level - 1) * 10;
+            finalStats.maxHp = finalStats.hp; 
+        }
+
+        let applyFatigueTint = false;
+
+        if (team === 'blue') {
+            const fatigue = safeStats.fatigue || 0;
+            const penaltyRatio = fatigue * 0.05; 
+            const multiplier = Math.max(0, 1 - penaltyRatio);
+
+            if (fatigue > 0) {
+                finalStats.hp = Math.floor(finalStats.hp * multiplier);
+                finalStats.attackPower = Math.floor(finalStats.attackPower * multiplier);
+                if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
+                finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
+                
+                applyFatigueTint = true; 
+                console.log(`📉 [Fatigue] ${stats.role} (Lv.${level}): Fatigue ${fatigue} -> Stats reduced by ${(penaltyRatio*100).toFixed(0)}%`);
+            }
+        }
+
+        const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
+        unit.setInteractive();
+        
+        if (stats.name) {
+            unit.unitName = stats.name;
+        }
+
+        if (team === 'blue') {
+            this.input.setDraggable(unit);
+            if (applyFatigueTint) {
+                unit.setTint(0x999999); 
+            }
+        }
+        return unit;
+    }
+
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
-        const createUnit = (x, y, team, target, stats, isLeader) => {
-            stats.aiConfig = config.aiSettings;
-            const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-            const baseStats = ROLE_BASE_STATS[stats.role] || {};
-            const safeStats = { ...stats };
-            if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
-            
-            const finalStats = { ...baseStats, ...safeStats };
-
-            // [New] 레벨에 따른 스탯 증가 적용 (Lv.1 기준, 레벨당 공격력+1, 체력+10)
-            const level = safeStats.level || 1;
-            if (level > 1) {
-                finalStats.attackPower += (level - 1) * 1;
-                finalStats.hp += (level - 1) * 10;
-                finalStats.maxHp = finalStats.hp; // 최대 체력도 업데이트
-            }
-
-            let applyFatigueTint = false;
-
-            // [Modified] 피로도에 따른 스탯 감소 적용 (1 피로도당 5% 감소)
-            if (team === 'blue') {
-                const fatigue = safeStats.fatigue || 0;
-                const penaltyRatio = fatigue * 0.05; // 5% per point
-                const multiplier = Math.max(0, 1 - penaltyRatio);
-
-                if (fatigue > 0) {
-                    finalStats.hp = Math.floor(finalStats.hp * multiplier);
-                    finalStats.attackPower = Math.floor(finalStats.attackPower * multiplier);
-                    if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
-                    finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
-                    
-                    applyFatigueTint = true; // 틴트 적용 플래그 설정
-                    console.log(`📉 [Fatigue] ${stats.role} (Lv.${level}): Fatigue ${fatigue} -> Stats reduced by ${(penaltyRatio*100).toFixed(0)}%`);
-                }
-            }
-
-            const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
-            unit.setInteractive();
-            if (team === 'blue') {
-                this.input.setDraggable(unit);
-                // [Visual] 피로도가 있으면 회색조(Darker)로 표시
-                if (applyFatigueTint) {
-                    unit.setTint(0x999999); 
-                }
-            }
-            return unit;
-        };
 
         let spawnZone = null;
         if (map) {
@@ -490,6 +506,10 @@ export default class BattleScene extends BaseScene {
         playerSquad.forEach((member, i) => {
             const roleConfig = { ...member }; 
             
+            if (!roleConfig.name) {
+                roleConfig.name = getRandomUnitName(roleConfig.role);
+            }
+
             let spawnX, spawnY;
             if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
@@ -499,7 +519,8 @@ export default class BattleScene extends BaseScene {
                 spawnY = startY + (i * spawnGap);
             }
             const isLeader = (member.role === 'Leader');
-            const unit = createUnit(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
+            
+            const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
             
             unit.squadIndex = i;
 
@@ -530,7 +551,7 @@ export default class BattleScene extends BaseScene {
                     spawnX = (this.mapWidth || 2000) - 250 + Phaser.Math.Between(-30, 30);
                     spawnY = startY + (i * spawnGap);
                 }
-                const unit = createUnit(spawnX, spawnY, 'red', this.blueTeam, armyStats, false);
+                const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, armyStats, false);
                 this.redTeam.add(unit);
             }
             dogsSpawned = true;
@@ -543,13 +564,13 @@ export default class BattleScene extends BaseScene {
                         const stats = defaultRedRoles[i % defaultRedRoles.length];
                         const spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
                         const spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
-                        const unit = createUnit(spawnX, spawnY, 'red', this.blueTeam, stats, false);
+                        const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, stats, false);
                         this.redTeam.add(unit);
                     }
                 } else {
                     dogLayer.objects.forEach((obj, index) => {
                         const stats = defaultRedRoles[index % defaultRedRoles.length];
-                        const unit = createUnit(obj.x, obj.y, 'red', this.blueTeam, stats, false);
+                        const unit = this.createUnitInstance(obj.x, obj.y, 'red', this.blueTeam, stats, false);
                         this.redTeam.add(unit);
                     });
                 }
@@ -559,7 +580,7 @@ export default class BattleScene extends BaseScene {
         if (!dogsSpawned) {
             for (let i = 0; i < redCount; i++) {
                 const stats = defaultRedRoles[i % defaultRedRoles.length];
-                const unit = createUnit(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
+                const unit = this.createUnitInstance(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
                 this.redTeam.add(unit);
             }
         }
@@ -567,7 +588,48 @@ export default class BattleScene extends BaseScene {
         this.initialRedCount = this.redTeam.getLength();
     }
     
-    buyUnit(role, cost) {}
+    buyUnit(role, cost) {
+        if (this.playerCoins < cost) {
+            console.log("💰 Not enough coins!");
+            return;
+        }
+
+        this.playerCoins -= cost;
+        if (this.uiManager) {
+            this.uiManager.updateCoins(this.playerCoins);
+        }
+
+        const unitName = getRandomUnitName(role);
+        
+        const newUnitData = {
+            role: role,
+            name: unitName,
+            level: 1,
+            xp: 0,
+            fatigue: 0
+        };
+
+        const currentSquad = this.registry.get('playerSquad') || [];
+        currentSquad.push(newUnitData);
+        this.registry.set('playerSquad', currentSquad);
+
+        let spawnX = 400;
+        let spawnY = 300;
+        
+        if (this.placementZone) {
+            spawnX = Phaser.Math.Between(this.placementZone.x + 20, this.placementZone.right - 20);
+            spawnY = Phaser.Math.Between(this.placementZone.y + 20, this.placementZone.bottom - 20);
+        } else if (this.playerUnit && this.playerUnit.active) {
+            spawnX = this.playerUnit.x + Phaser.Math.Between(-50, 50);
+            spawnY = this.playerUnit.y + Phaser.Math.Between(-50, 50);
+        }
+
+        const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, newUnitData, false);
+        unit.squadIndex = currentSquad.length - 1;
+        this.blueTeam.add(unit);
+
+        console.log(`✨ Hired Mercenary: ${role} named "${unitName}"`);
+    }
 
     animateCoinDrop(startX, startY, amount) {
         const coin = this.add.graphics();
@@ -727,8 +789,6 @@ export default class BattleScene extends BaseScene {
                 member.xp = (member.xp || 0) + xpGained;
                 let leveledUp = false;
                 
-                // [New] 레벨업 로직
-                // 레벨당 필요 경험치: level * 100
                 let reqXp = (member.level || 1) * 100;
                 while (member.xp >= reqXp) {
                     member.xp -= reqXp;
@@ -738,15 +798,12 @@ export default class BattleScene extends BaseScene {
                     console.log(`🆙 ${member.role} leveled up to ${member.level}!`);
                 }
 
-                // [Visual] 레벨업 시 해당 유닛 머리 위에 텍스트 표시 (승리 시)
                 if (leveledUp && isWin) {
-                    // 현재 살아있는 유닛 중 squadIndex가 i인 유닛 찾기
                     const survivor = this.blueTeam.getChildren().find(u => u.squadIndex === i && u.active);
                     if (survivor) {
                         const levelText = this.add.text(survivor.x, survivor.y - 60, "LEVEL UP!", {
                             fontFamily: 'Arial', fontSize: '20px', color: '#00FF00', stroke: '#000000', strokeThickness: 4, fontWeight: 'bold'
                         }).setOrigin(0.5);
-                        // Scene이 Pause 상태여도 UI적으로 보여지도록 Depth 조정
                         levelText.setDepth(2000); 
                     }
                 }
@@ -773,7 +830,7 @@ export default class BattleScene extends BaseScene {
         if (this.isStrategyMode) {
             btnText = isWin ? "맵으로" : "맵으로";
             callback = () => {
-                const bonusCoins = isWin ? Math.floor(totalScore / 100) : 0;
+                const bonusCoins = isWin ? Math.floor(totalScore / 1000) : 0;
                 const finalCoins = this.playerCoins + bonusCoins;
                 this.scene.stop('UIScene'); 
                 this.scene.start('StrategyScene', {
@@ -802,7 +859,7 @@ export default class BattleScene extends BaseScene {
     }
     nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
-        const bonusCoins = Math.floor(score / 100);
+        const bonusCoins = Math.floor(score / 1000);
         const nextCoins = this.playerCoins + bonusCoins; 
         console.log(`🎉 [nextLevel] Score: ${score}, BonusCoins: ${bonusCoins}, NextCoins: ${nextCoins}`);
         const centerX = this.scale.width / 2;

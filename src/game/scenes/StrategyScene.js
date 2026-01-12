@@ -10,6 +10,7 @@ import tankerImg from '../../assets/units/tanker.png';
 import shooterImg from '../../assets/units/shooter.png';
 import healerImg from '../../assets/units/healer.png';
 import raccoonImg from '../../assets/units/raccoon.png';
+import normalImg from '../../assets/units/normal.png';
 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
@@ -36,7 +37,7 @@ export default class StrategyScene extends BaseScene {
         const savedData = SaveManager.loadGame();
 
         if (this.registry.get('playerCoins') === undefined) {
-            this.registry.set('playerCoins', savedData?.playerCoins ?? 50);
+            this.registry.set('playerCoins', savedData?.playerCoins ?? 10);
         }
 
         if (!this.registry.get('playerSquad')) {
@@ -67,6 +68,7 @@ export default class StrategyScene extends BaseScene {
         this.load.spritesheet('shooter_token', shooterImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('healer_token', healerImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('raccoon_token', raccoonImg, { frameWidth: 100, frameHeight: 100 });
+        this.load.spritesheet('normal_token', normalImg, { frameWidth: 100, frameHeight: 100 }); // <--- 추가된 부분
 
         this.load.audio('opening_bgm', openingBgm);
     }

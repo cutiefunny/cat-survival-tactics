@@ -1,4 +1,4 @@
-import { UNIT_COSTS, ROLE_BASE_STATS } from '../data/UnitData';
+import { UNIT_COSTS, ROLE_BASE_STATS, getRandomUnitName } from '../data/UnitData'; 
 
 export default class ShopModal {
     constructor(scene, parentContainer) {
@@ -8,9 +8,15 @@ export default class ShopModal {
         this.unitDetailPopup = null;
         this.isOpen = false;
 
+        // [Modified] 'Normal'의 텍스처를 'leader_token'에서 'normal'로 변경
         this.roleToTexture = {
-            'Tanker': 'tanker_token', 'Shooter': 'shooter_token', 'Healer': 'healer_token',
-            'Raccoon': 'raccoon_token', 'Runner': 'runner_token', 'Normal': 'leader_token', 'Leader': 'leader_token'
+            'Tanker': 'tanker_token', 
+            'Shooter': 'shooter_token', 
+            'Healer': 'healer_token',
+            'Raccoon': 'raccoon_token', 
+            'Runner': 'runner_token', 
+            'Normal': 'normal_token',
+            'Leader': 'leader_token'
         };
     }
 
@@ -72,6 +78,7 @@ export default class ShopModal {
             if (isUnlocked) {
                 const btnBg = this.scene.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
                 const textureKey = this.roleToTexture[unit.role] || 'leader_token';
+                // [Check] 스프라이트 시트의 1번 프레임을 아이콘으로 사용
                 const unitSprite = this.scene.add.sprite(0, -10, textureKey, 1).setDisplaySize(50, 50);
                 const costTxt = this.scene.add.text(0, 25, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
                 
@@ -117,14 +124,12 @@ export default class ShopModal {
             icon.setDisplaySize(finalSize, finalSize);
             icon.setInteractive({ useHandCursor: true });
             
-            // 보유 유닛 클릭 시: index 정보도 함께 전달하여 정확한 해고 가능
             icon.on('pointerdown', () => { this.openOwnedUnitDetailPopup(member, index); });
             
             this.squadContainer.add(icon);
         });
     }
 
-    // 구매용 상세 팝업
     openUnitDetailPopup(unitConfig) {
         if (this.unitDetailPopup) this.unitDetailPopup.destroy();
         const { width, height } = this.scene.scale;
@@ -143,7 +148,6 @@ export default class ShopModal {
         this.unitDetailPopup.add([bg, titleText, unitImg, descText]);
         this.renderStats(this.unitDetailPopup, stats, unitConfig.role, popupW, popupH, -popupH/2 + 170);
 
-        // 구매 버튼
         const buyBtnY = popupH / 2 - 50;
         const buyBtn = this.scene.add.container(0, buyBtnY);
         const buyBtnBg = this.scene.add.rectangle(0, 0, 140, 40, 0x00aa00).setInteractive();
@@ -161,24 +165,41 @@ export default class ShopModal {
         this.parentContainer.add(this.unitDetailPopup);
     }
 
-    // 보유 유닛 상세 팝업 (피로도/레벨/해고 포함)
     openOwnedUnitDetailPopup(memberData, squadIndex) {
         if (this.unitDetailPopup) this.unitDetailPopup.destroy();
         const { width, height } = this.scene.scale;
         const role = memberData.role;
-        const shopInfo = UNIT_COSTS.find(u => u.role === role) || { name: role, desc: "..." };
+        
+        let displayName = memberData.name;
+        if (!displayName) {
+            if (role === 'Leader') displayName = "김냐냐";
+            else {
+                const shopInfo = UNIT_COSTS.find(u => u.role === role) || { name: role };
+                displayName = shopInfo.name;
+            }
+        }
+
+        const shopInfo = UNIT_COSTS.find(u => u.role === role) || { name: role };
+        const roleText = (displayName !== shopInfo.name) ? `(${shopInfo.name})` : '';
+
         const stats = ROLE_BASE_STATS[role] || ROLE_BASE_STATS['Normal'];
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
         const popupW = 300;
-        const popupH = 450; // 높이 약간 증가 (해고 버튼 공간)
+        const popupH = 450; 
 
         const bg = this.scene.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x4488ff);
-        const titleText = this.scene.add.text(0, -popupH / 2 + 30, shopInfo.name, { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
-        const textureKey = this.roleToTexture[role] || 'leader_token';
-        const unitImg = this.scene.add.sprite(0, -popupH / 2 + 80, textureKey, 0).setDisplaySize(60, 60);
+        
+        const titleText = this.scene.add.text(0, -popupH / 2 + 30, displayName, { fontSize: '24px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
+        
+        if (roleText) {
+            const subText = this.scene.add.text(0, -popupH / 2 + 60, roleText, { fontSize: '14px', color: '#aaaaaa' }).setOrigin(0.5);
+            this.unitDetailPopup.add(subText);
+        }
 
-        // 레벨 및 피로도 계산
+        const textureKey = this.roleToTexture[role] || 'leader_token';
+        const unitImg = this.scene.add.sprite(0, -popupH / 2 + 100, textureKey, 0).setDisplaySize(60, 60);
+
         const level = memberData.level || 1;
         const xp = memberData.xp || 0;
         const reqXp = level * 100;
@@ -186,14 +207,13 @@ export default class ShopModal {
         const penaltyRatio = fatigue * 0.05;
         const multiplier = Math.max(0, 1 - penaltyRatio);
         
-        const lvText = this.scene.add.text(0, -popupH/2 + 130, `Lv.${level}`, { fontSize: '24px', color: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
-        const xpText = this.scene.add.text(0, -popupH/2 + 155, `XP: ${xp} / ${reqXp}`, { fontSize: '14px', color: '#aaaaaa' }).setOrigin(0.5);
+        const lvText = this.scene.add.text(0, -popupH/2 + 150, `Lv.${level}`, { fontSize: '24px', color: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
+        const xpText = this.scene.add.text(0, -popupH/2 + 175, `XP: ${xp} / ${reqXp}`, { fontSize: '14px', color: '#aaaaaa' }).setOrigin(0.5);
         const fatigueColor = fatigue > 0 ? '#ff5555' : '#55ff55';
-        const fatigueText = this.scene.add.text(0, -popupH/2 + 180, `😓 피로도: ${fatigue} (스탯 -${(penaltyRatio*100).toFixed(0)}%)`, { fontSize: '15px', color: fatigueColor }).setOrigin(0.5);
+        const fatigueText = this.scene.add.text(0, -popupH/2 + 200, `😓 피로도: ${fatigue} (스탯 -${(penaltyRatio*100).toFixed(0)}%)`, { fontSize: '15px', color: fatigueColor }).setOrigin(0.5);
 
         this.unitDetailPopup.add([bg, titleText, unitImg, lvText, xpText, fatigueText]);
 
-        // 스탯 계산
         const computedStats = { ...stats };
         const levelBonusHp = (level - 1) * 10;
         const levelBonusAtk = (level - 1) * 1;
@@ -203,9 +223,8 @@ export default class ShopModal {
         computedStats.moveSpeed = Math.floor(stats.moveSpeed * multiplier);
         if(stats.defense) computedStats.defense = Math.floor(stats.defense * multiplier);
 
-        this.renderStats(this.unitDetailPopup, computedStats, role, popupW, popupH, -popupH/2 + 210, fatigue > 0);
+        this.renderStats(this.unitDetailPopup, computedStats, role, popupW, popupH, -popupH/2 + 230, fatigue > 0);
 
-        // 해고 버튼 (리더는 해고 불가)
         if (role !== 'Leader') {
             const dismissBtnY = popupH / 2 - 50;
             const dismissBtn = this.scene.add.container(0, dismissBtnY);
@@ -256,9 +275,21 @@ export default class ShopModal {
             this.scene.updateCoinText(newCoins); 
             
             const squad = this.scene.registry.get('playerSquad');
-            squad.push({ role: unitConfig.role, level: 1, xp: 0 });
+            
+            const randomName = getRandomUnitName(unitConfig.role);
+
+            squad.push({ 
+                role: unitConfig.role, 
+                level: 1, 
+                xp: 0,
+                fatigue: 0,
+                name: randomName
+            });
+
             this.scene.registry.set('playerSquad', squad);
             
+            console.log(`✨ 고용 완료: ${unitConfig.role} (이름: ${randomName})`);
+
             this.refreshSquadDisplay();
             this.scene.saveProgress();
             
@@ -271,23 +302,15 @@ export default class ShopModal {
         }
     }
 
-    // [New] 유닛 해고 로직
     dismissUnit(squadIndex) {
         const squad = this.scene.registry.get('playerSquad');
         if (squadIndex >= 0 && squadIndex < squad.length) {
             const dismissedUnit = squad[squadIndex];
-            
-            // 리더는 해고 불가 (이중 방어)
             if (dismissedUnit.role === 'Leader') return;
-
             squad.splice(squadIndex, 1);
             this.scene.registry.set('playerSquad', squad);
-            
-            console.log(`👋 [Shop] Dismissed ${dismissedUnit.role}`);
-            
             this.refreshSquadDisplay();
             this.scene.saveProgress();
-            
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
                 this.unitDetailPopup = null;

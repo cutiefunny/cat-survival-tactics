@@ -6,11 +6,49 @@ export const ROLE_TEXTURES = {
     'Runner': 'runner',
     'Dealer': 'leader',
     'Leader': 'leader',
-    'Normal': 'leader',
+    'Normal': 'normal',
     'Healer': 'healer',
     'Raccoon': 'raccoon',
     'NormalDog': 'dog'
 };
+
+export const NORMAL_NAMES = [
+  "나비", "야옹", "미미", "초코", "보리",
+  "루나", "코코", "두부", "망고", "레오",
+  "별이", "달이", "콩이", "사랑", "행복",
+  "구름", "하늘", "바람", "바다", "산이",
+  "강산", "호랑", "사자", "치즈", "크림",
+  "라떼", "모카", "쿠키", "캔디", "젤리",
+  "푸딩", "만두", "찐빵", "호떡", "밤이",
+  "감이", "귤이", "자두", "앵두", "포도",
+  "체리", "키위", "멜론", "수박", "땅콩",
+  "호두", "대추", "쌀이", "보라", "연두"
+];
+
+export const RUNNER_NAMES = [
+    "번개", "질주", "스피드", "돌풍", "화살", "레이서",
+    "질주왕", "빠름이", "순간이동", "질풍", "광속"
+];
+
+export const RACCOON_NAMES = [
+    "도둑이", "꾸러기", "꼬마도둑", "야행성", "은신술사",
+    "먹보", "탐험가", "모험가", "숨바꼭질", "밤도둑"
+];
+
+export const TANKER_NAMES = [
+    "철벽", "방패", "수호자", "강철이", "튼튼이",
+    "거인", "대장장이", "수문장", "보호자", "방어왕"
+];
+
+export const SHOOTER_NAMES = [
+    "명사수", "저격수", "호크아이", "원거리", "정조준", "데드샷",
+    "총잡이", "사격왕", "스나이퍼", "원샷"
+];
+
+export const HEALER_NAMES = [
+    "치유냥", "힐러냥", "뿌뿌뿡", "회복왕", "의사냥",
+    "치료냥", "보건냥", "수호냥", "회복냥"
+];
 
 export const UNIT_COSTS = [
     { role: 'Tanker', name: '탱커', cost: 10, desc: "높은 체력과 방어력으로 아군을 보호합니다." },
@@ -82,4 +120,22 @@ export const DEFAULT_AI_SETTINGS = {
     runner: { ambushDistance: 60, fleeDuration: 1500 },
     dealer: { safeDistance: 150, followDistance: 50 },
     shooter: { attackRange: 250, kiteDistance: 200 } // AI 이동 목표 거리
+};
+
+// [New] 랜덤 이름 생성 헬퍼 함수
+export const getRandomUnitName = (role) => {
+    let pool = NORMAL_NAMES;
+
+    switch (role) {
+        case 'Runner': pool = RUNNER_NAMES; break;
+        case 'Raccoon': pool = RACCOON_NAMES; break;
+        case 'Tanker': pool = TANKER_NAMES; break;
+        case 'Shooter': pool = SHOOTER_NAMES; break;
+        case 'Healer': pool = HEALER_NAMES; break;
+        default: pool = NORMAL_NAMES; break;
+    }
+
+    // 풀에서 랜덤하게 하나 선택
+    if (!pool || pool.length === 0) return "이름없음";
+    return pool[Math.floor(Math.random() * pool.length)];
 };
