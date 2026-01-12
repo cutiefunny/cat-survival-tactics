@@ -440,6 +440,8 @@ export default class BattleScene extends BaseScene {
                 finalStats.maxHp = finalStats.hp; // 최대 체력도 업데이트
             }
 
+            let applyFatigueTint = false;
+
             // [Modified] 피로도에 따른 스탯 감소 적용 (1 피로도당 5% 감소)
             if (team === 'blue') {
                 const fatigue = safeStats.fatigue || 0;
@@ -452,13 +454,20 @@ export default class BattleScene extends BaseScene {
                     if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
                     finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
                     
+                    applyFatigueTint = true; // 틴트 적용 플래그 설정
                     console.log(`📉 [Fatigue] ${stats.role} (Lv.${level}): Fatigue ${fatigue} -> Stats reduced by ${(penaltyRatio*100).toFixed(0)}%`);
                 }
             }
 
             const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
             unit.setInteractive();
-            if (team === 'blue') this.input.setDraggable(unit);
+            if (team === 'blue') {
+                this.input.setDraggable(unit);
+                // [Visual] 피로도가 있으면 회색조(Darker)로 표시
+                if (applyFatigueTint) {
+                    unit.setTint(0x999999); 
+                }
+            }
             return unit;
         };
 
@@ -716,16 +725,30 @@ export default class BattleScene extends BaseScene {
                 });
             } else {
                 member.xp = (member.xp || 0) + xpGained;
+                let leveledUp = false;
                 
                 // [New] 레벨업 로직
                 // 레벨당 필요 경험치: level * 100
-                // XP가 충분하다면 레벨업하고 XP 차감 (반복)
                 let reqXp = (member.level || 1) * 100;
                 while (member.xp >= reqXp) {
                     member.xp -= reqXp;
                     member.level = (member.level || 1) + 1;
                     reqXp = member.level * 100;
+                    leveledUp = true;
                     console.log(`🆙 ${member.role} leveled up to ${member.level}!`);
+                }
+
+                // [Visual] 레벨업 시 해당 유닛 머리 위에 텍스트 표시 (승리 시)
+                if (leveledUp && isWin) {
+                    // 현재 살아있는 유닛 중 squadIndex가 i인 유닛 찾기
+                    const survivor = this.blueTeam.getChildren().find(u => u.squadIndex === i && u.active);
+                    if (survivor) {
+                        const levelText = this.add.text(survivor.x, survivor.y - 60, "LEVEL UP!", {
+                            fontFamily: 'Arial', fontSize: '20px', color: '#00FF00', stroke: '#000000', strokeThickness: 4, fontWeight: 'bold'
+                        }).setOrigin(0.5);
+                        // Scene이 Pause 상태여도 UI적으로 보여지도록 Depth 조정
+                        levelText.setDepth(2000); 
+                    }
                 }
 
                 member.fatigue = (member.fatigue || 0) + 1;
