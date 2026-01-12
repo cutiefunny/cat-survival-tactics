@@ -497,9 +497,13 @@ export default class StrategyScene extends BaseScene {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
         if (!targetNode) return;
         const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
+        
+        // [Fixed] 0원일 때 || 연산자로 인해 100원으로 초기화되는 문제 수정 (?? 사용)
+        const currentCoins = this.registry.get('playerCoins') ?? 0;
+
         this.scene.start('BattleScene', {
             isStrategyMode: true, targetNodeId: this.selectedTargetId, levelIndex: selectedLevelIndex,
-            currentCoins: this.registry.get('playerCoins') || 100, armyConfig: targetNode.army || null, bgmKey: targetNode.bgm 
+            currentCoins: currentCoins, armyConfig: targetNode.army || null, bgmKey: targetNode.bgm 
         });
     }
 

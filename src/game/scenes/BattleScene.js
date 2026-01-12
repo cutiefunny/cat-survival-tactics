@@ -632,12 +632,21 @@ export default class BattleScene extends BaseScene {
     }
 
     animateCoinDrop(startX, startY, amount) {
+        // [Log] 드랍 로그
+        console.log(`💰 [Coin] Drop occurred! Amount: ${amount}, Pre-Total: ${this.playerCoins}`);
+        
         const coin = this.add.graphics();
         coin.fillStyle(0xFFD700, 1); coin.fillCircle(0, 0, 8); coin.lineStyle(2, 0xFFFFFF, 1); coin.strokeCircle(0, 0, 8);
         coin.setPosition(startX, startY); coin.setDepth(900); 
         this.tweens.add({
             targets: coin, y: startY - 60, alpha: 0, duration: 800, ease: 'Power1',
-            onComplete: () => { coin.destroy(); this.playerCoins += amount; if(this.uiManager) this.uiManager.updateCoins(this.playerCoins); }
+            onComplete: () => { 
+                coin.destroy(); 
+                this.playerCoins += amount; 
+                // [Log] 획득 로그
+                console.log(`💰 [Coin] Collected! New Total: ${this.playerCoins}`);
+                if(this.uiManager) this.uiManager.updateCoins(this.playerCoins); 
+            }
         });
         this.showFloatingCoinText(startX, startY, amount);
     }
@@ -826,11 +835,18 @@ export default class BattleScene extends BaseScene {
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
+
+        // [Log] 점수 계산 상세 로그
+        console.log(`🏁 [Score] Survivors: ${survivors} (Score: ${survivorScore})`);
+        console.log(`🏁 [Score] Time: ${durationSec}s (Score: ${timeScore})`);
+        console.log(`🏁 [Score] Total Score: ${totalScore}`);
         
         if (this.isStrategyMode) {
             btnText = isWin ? "맵으로" : "맵으로";
             callback = () => {
                 const bonusCoins = isWin ? Math.floor(totalScore / 1000) : 0;
+                // [Log] 전략 모드 보너스 코인 로그
+                console.log(`🏁 [Score -> Coin] Strategy Bonus: ${bonusCoins}`);
                 const finalCoins = this.playerCoins + bonusCoins;
                 this.scene.stop('UIScene'); 
                 this.scene.start('StrategyScene', {
@@ -860,6 +876,9 @@ export default class BattleScene extends BaseScene {
     nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
         const bonusCoins = Math.floor(score / 1000);
+        // [Log] 다음 레벨 보너스 코인 로그
+        console.log(`🏁 [Score -> Coin] Next Level Bonus: ${bonusCoins}`);
+
         const nextCoins = this.playerCoins + bonusCoins; 
         console.log(`🎉 [nextLevel] Score: ${score}, BonusCoins: ${bonusCoins}, NextCoins: ${nextCoins}`);
         const centerX = this.scale.width / 2;
