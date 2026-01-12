@@ -8,7 +8,6 @@ export default class ShopModal {
         this.unitDetailPopup = null;
         this.isOpen = false;
 
-        // 텍스처 매핑 (Scene에서 정의했던 것과 동일)
         this.roleToTexture = {
             'Tanker': 'tanker_token', 'Shooter': 'shooter_token', 'Healer': 'healer_token',
             'Raccoon': 'raccoon_token', 'Runner': 'runner_token', 'Normal': 'leader_token', 'Leader': 'leader_token'
@@ -117,7 +116,9 @@ export default class ShopModal {
             
             icon.setDisplaySize(finalSize, finalSize);
             icon.setInteractive({ useHandCursor: true });
-            icon.on('pointerdown', () => { this.openOwnedUnitDetailPopup(member); });
+            
+            // 보유 유닛 클릭 시: index 정보도 함께 전달하여 정확한 해고 가능
+            icon.on('pointerdown', () => { this.openOwnedUnitDetailPopup(member, index); });
             
             this.squadContainer.add(icon);
         });
@@ -160,8 +161,8 @@ export default class ShopModal {
         this.parentContainer.add(this.unitDetailPopup);
     }
 
-    // 보유 유닛 상세 팝업 (피로도/레벨 포함)
-    openOwnedUnitDetailPopup(memberData) {
+    // 보유 유닛 상세 팝업 (피로도/레벨/해고 포함)
+    openOwnedUnitDetailPopup(memberData, squadIndex) {
         if (this.unitDetailPopup) this.unitDetailPopup.destroy();
         const { width, height } = this.scene.scale;
         const role = memberData.role;
@@ -170,7 +171,7 @@ export default class ShopModal {
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
         const popupW = 300;
-        const popupH = 420;
+        const popupH = 450; // 높이 약간 증가 (해고 버튼 공간)
 
         const bg = this.scene.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0x4488ff);
         const titleText = this.scene.add.text(0, -popupH / 2 + 30, shopInfo.name, { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
@@ -192,7 +193,7 @@ export default class ShopModal {
 
         this.unitDetailPopup.add([bg, titleText, unitImg, lvText, xpText, fatigueText]);
 
-        // 스탯 계산 (레벨 보너스 + 피로도 패널티)
+        // 스탯 계산
         const computedStats = { ...stats };
         const levelBonusHp = (level - 1) * 10;
         const levelBonusAtk = (level - 1) * 1;
@@ -203,6 +204,18 @@ export default class ShopModal {
         if(stats.defense) computedStats.defense = Math.floor(stats.defense * multiplier);
 
         this.renderStats(this.unitDetailPopup, computedStats, role, popupW, popupH, -popupH/2 + 210, fatigue > 0);
+
+        // 해고 버튼 (리더는 해고 불가)
+        if (role !== 'Leader') {
+            const dismissBtnY = popupH / 2 - 50;
+            const dismissBtn = this.scene.add.container(0, dismissBtnY);
+            const dismissBtnBg = this.scene.add.rectangle(0, 0, 140, 40, 0xaa0000).setInteractive();
+            const dismissBtnText = this.scene.add.text(0, 0, `해고하기`, { fontSize: '18px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
+            
+            dismissBtn.add([dismissBtnBg, dismissBtnText]);
+            dismissBtnBg.on('pointerdown', () => this.dismissUnit(squadIndex));
+            this.unitDetailPopup.add(dismissBtn);
+        }
 
         const closeBtn = this.createCloseButton(popupW, popupH, () => {
             this.unitDetailPopup.destroy();
@@ -240,7 +253,7 @@ export default class ShopModal {
         if (currentCoins >= unitConfig.cost) {
             const newCoins = currentCoins - unitConfig.cost;
             this.scene.registry.set('playerCoins', newCoins);
-            this.scene.updateCoinText(newCoins); // Scene에 메서드 필요
+            this.scene.updateCoinText(newCoins); 
             
             const squad = this.scene.registry.get('playerSquad');
             squad.push({ role: unitConfig.role, level: 1, xp: 0 });
@@ -255,6 +268,30 @@ export default class ShopModal {
             }
         } else {
             this.scene.cameras.main.shake(100, 0.01);
+        }
+    }
+
+    // [New] 유닛 해고 로직
+    dismissUnit(squadIndex) {
+        const squad = this.scene.registry.get('playerSquad');
+        if (squadIndex >= 0 && squadIndex < squad.length) {
+            const dismissedUnit = squad[squadIndex];
+            
+            // 리더는 해고 불가 (이중 방어)
+            if (dismissedUnit.role === 'Leader') return;
+
+            squad.splice(squadIndex, 1);
+            this.scene.registry.set('playerSquad', squad);
+            
+            console.log(`👋 [Shop] Dismissed ${dismissedUnit.role}`);
+            
+            this.refreshSquadDisplay();
+            this.scene.saveProgress();
+            
+            if (this.unitDetailPopup) {
+                this.unitDetailPopup.destroy();
+                this.unitDetailPopup = null;
+            }
         }
     }
 }

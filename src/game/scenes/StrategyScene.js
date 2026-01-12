@@ -15,7 +15,7 @@ import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
-import { ROLE_BASE_STATS } from '../data/UnitData'; // UNIT_COSTS는 제거됨 (UnitData로 이동)
+import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData'; 
 
 import SaveManager from '../managers/SaveManager';
 
@@ -132,9 +132,6 @@ export default class StrategyScene extends BaseScene {
         this.previousLeaderId = null;
         this.selectedTargetId = null; 
         
-        // [Modified] 모달 상태 관리는 각 모달 클래스 내부 혹은 인스턴스에서 확인
-        // this.isShopOpen, this.isSystemOpen 변수 삭제 (모달 객체의 isOpen 사용)
-
         this.playBgm('opening_bgm', 0.5);
 
         this.parseMapData(map, dbArmyData);
@@ -238,7 +235,6 @@ export default class StrategyScene extends BaseScene {
         return { container: btnContainer, textObj: btnText, bgObj: bg };
     }
 
-    // [New] ShopModal 등 외부에서 코인 UI를 갱신할 때 호출
     updateCoinText(amount) {
         if(this.coinText) {
             this.coinText.setText(`💰 ${amount}냥`);
@@ -249,7 +245,6 @@ export default class StrategyScene extends BaseScene {
         this.uiContainer = this.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
 
-        // [New] 모달 인스턴스 생성
         this.shopModal = new ShopModal(this, this.uiContainer);
         this.systemModal = new SystemModal(this, this.uiContainer);
 
@@ -258,22 +253,7 @@ export default class StrategyScene extends BaseScene {
 
     drawUIElements() {
         if (this.uiContainer.list.length > 0) {
-            // uiContainer를 완전히 비우면 모달 컨테이너도 날아가므로 주의해야 하지만,
-            // 여기서는 drawUIElements가 초기 1회 또는 resize 시 호출되므로
-            // 기존 모달 컨테이너를 유지하거나 다시 생성해야 합니다.
-            // 간단하게는 모달이 생성되어 있다면 유지하도록 필터링하거나, 
-            // 모달 클래스 내부에서 컨테이너를 다시 add하도록 설계할 수 있습니다.
-            // 현재 구조에서는 uiContainer.removeAll()을 호출하면 shopModal.container도 사라지므로
-            // shopModal.create()를 다시 호출하거나 컨테이너를 보존해야 합니다.
-            
-            // 안전하게는 TopBar 요소들만 별도 컨테이너로 관리하는 것이 좋으나,
-            // 여기서는 코드를 단순화하기 위해 필요한 요소만 다시 그립니다.
-            
-            // 기존 요소 중 모달 컨테이너를 제외하고 삭제하는 로직이 복잡하므로,
-            // uiContainer를 비우고 모달들도 다시 생성하도록 합니다. (가장 안전)
             this.uiContainer.removeAll(true);
-            
-            // 모달 다시 초기화 (컨테이너가 파괴되었으므로)
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
         }
@@ -296,7 +276,6 @@ export default class StrategyScene extends BaseScene {
             .setInteractive();
         
         this.sysBtn.on('pointerdown', () => {
-            // 시스템 메뉴 토글 (상점이 열려있으면 닫음)
             if (this.shopModal.isOpen) this.shopModal.toggle();
             this.systemModal.toggle();
         });
@@ -321,7 +300,6 @@ export default class StrategyScene extends BaseScene {
         });
         
         this.shopBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
-            // 상점 토글 (시스템 메뉴가 열려있으면 닫음)
             if (this.systemModal.isOpen) this.systemModal.toggle();
             this.shopModal.toggle();
         });
@@ -337,10 +315,6 @@ export default class StrategyScene extends BaseScene {
 
         this.uiContainer.add([topBarBg, this.coinText, this.bgmBtn, this.sysBtn, this.statusText]);
         this.uiContainer.add([this.shopBtnObj.container, this.endTurnBtnObj.container, this.undoBtnObj.container]);
-        
-        // 모달 생성 시점에서는 컨테이너에 아직 추가되지 않았으므로 (class 내부에서 create 시 추가됨)
-        // toggle 시점에 create가 호출되거나, 미리 create를 호출해두고 visible을 false로 할 수 있음.
-        // 현재 Modal 클래스 구조상 toggle() 호출 시 create()가 호출되므로 여기서는 추가 작업 불필요.
         
         this.updateUIState();
     }
@@ -425,19 +399,52 @@ export default class StrategyScene extends BaseScene {
     shakeStatusText() { this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 }); }
 
     handleTurnEnd() {
-        const recoveryAmount = this.hasMoved ? 1 : 3;
         const squad = this.registry.get('playerSquad') || [];
+        const recoveryAmount = this.hasMoved ? 1 : 3;
         
+        // 1. 피로도 회복 및 유지비 계산
         let recoveredCount = 0;
+        let totalMaintenanceCost = 0;
+
         squad.forEach(unit => {
+            // 피로도 회복
             if (unit.fatigue > 0) {
                 unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
                 recoveredCount++;
             }
+            
+            // 유지비 계산
+            if (unit.role === 'Leader') {
+                totalMaintenanceCost += 3; // [Modified] 리더 급식비 3냥 고정
+            } else {
+                const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
+                const baseCost = shopInfo ? shopInfo.cost : 100;
+                totalMaintenanceCost += Math.floor(baseCost * 0.2);
+            }
         });
         
-        this.registry.set('playerSquad', squad);
+        // 2. 유지비 차감
+        let currentCoins = this.registry.get('playerCoins');
+        let isBankrupt = false;
         
+        currentCoins -= totalMaintenanceCost;
+        console.log(`💸 [Maintenance] Cost: ${totalMaintenanceCost}, Remaining: ${currentCoins}`);
+
+        if (currentCoins < 0) {
+            isBankrupt = true;
+            currentCoins = 0;
+            
+            // 파산 시 리더 제외 전원 해고
+            const leaderOnly = squad.filter(u => u.role === 'Leader');
+            this.registry.set('playerSquad', leaderOnly);
+            console.warn("⚠️ [Bankruptcy] Mercenaries dismissed.");
+        } else {
+            this.registry.set('playerSquad', squad);
+        }
+
+        this.registry.set('playerCoins', currentCoins);
+        this.updateCoinText(currentCoins);
+
         this.hasMoved = false; 
         this.previousLeaderId = null; 
         this.selectedTargetId = null; 
@@ -452,15 +459,36 @@ export default class StrategyScene extends BaseScene {
             c.scale = 1; 
         });
 
+        // 3. UI 피드백
         this.cameras.main.flash(500, 0, 0, 0); 
         
-        const recoveryMsg = recoveredCount > 0 
-            ? ` (부대원들이 휴식하여 피로도가 ${recoveryAmount} 회복되었습니다)` 
-            : "";
-        this.statusText.setText(`🌙 턴 종료. 행동력이 회복되었습니다.${recoveryMsg}`);
+        if (isBankrupt) {
+            this.statusText.setText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`);
+            this.statusText.setColor('#ff4444');
+        } else {
+            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (급식비 ${totalMaintenanceCost}냥 지출)` : "";
+            this.statusText.setText(`🌙 턴 종료. 행동력 회복.${maintenanceMsg}`);
+            this.statusText.setColor('#ffffff');
+            
+            // 급식비 지출 플로팅 텍스트
+            if (totalMaintenanceCost > 0) {
+                this.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥`, '#ff4444');
+            }
+        }
         
         this.updateUIState();
         this.saveProgress();
+    }
+
+    showFloatingText(x, y, message, color) {
+        const text = this.add.text(x, y, message, {
+            fontSize: '32px', color: color, stroke: '#000000', strokeThickness: 4, fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(3000);
+        
+        this.tweens.add({
+            targets: text, y: y - 100, alpha: 0, duration: 2000, ease: 'Power2',
+            onComplete: () => text.destroy()
+        });
     }
 
     startBattle() {

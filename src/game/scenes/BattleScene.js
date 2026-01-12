@@ -688,8 +688,8 @@ export default class BattleScene extends BaseScene {
             this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
             const blueCount = this.blueTeam.countActive();
             const redCount = this.redTeam.countActive();
-            if (blueCount === 0) { this.finishGame("Defeat...", '#ff4444', false); } 
-            else if (redCount === 0) { this.finishGame("Victory!", '#4488ff', true); } 
+            if (blueCount === 0) { this.finishGame("패배!", '#ff4444', false); } 
+            else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); } 
             else { this.uiManager.updateScore(blueCount, redCount); }
         }
     }
@@ -771,7 +771,7 @@ export default class BattleScene extends BaseScene {
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
         
         if (this.isStrategyMode) {
-            btnText = isWin ? "Return to Map (Victory)" : "Return to Map (Retreat)";
+            btnText = isWin ? "맵으로" : "맵으로";
             callback = () => {
                 const bonusCoins = isWin ? Math.floor(totalScore / 100) : 0;
                 const finalCoins = this.playerCoins + bonusCoins;
