@@ -36,11 +36,38 @@
       "difficulty": 2,
       "bgm": "level2"
     },
+    "8": {
+      "mapId": "level4",
+      "name": "합정파 근거지",
+      "difficulty": 2,
+      "bgm": "level2",
+      "neutral": true,
+      "unit": "Runner",
+      "text": "여기는 합정파의 영역이다냥!"
+    },
+    "9": {
+      "mapId": "level4",
+      "name": "레드로드",
+      "difficulty": 2,
+      "bgm": "level2",
+      "neutral": true,
+      "unit": "Tanker",
+      "text": "이 곳은 중간보스 '탱크'가 지키고 있다."
+    },
     "10": {
       "mapId": "level2",
       "name": "공원",
       "difficulty": 2,
       "bgm": "level2"
+    },
+    "15": {
+      "mapId": "level4",
+      "name": "한강파 근거지",
+      "difficulty": 2,
+      "bgm": "level2",
+      "neutral": true,
+      "unit": "Shooter",
+      "text": "이 곳은 한강파의 영역이다냥!"
     }
   }
 }

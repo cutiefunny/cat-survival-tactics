@@ -28,6 +28,7 @@ export default class StrategyScene extends BaseScene {
         super('StrategyScene'); 
     }
 
+    // ... (init, preload, create, getCurrentGameData, saveProgress, fetchStrategyConfig, initializeGameWorld 등은 기존 유지)
     init(data) {
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
@@ -118,7 +119,7 @@ export default class StrategyScene extends BaseScene {
 
     async fetchStrategyConfig(map) {
         let armyData = {};
-        this.strategySettings = null; // 설정 저장용
+        this.strategySettings = null; 
 
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
@@ -127,7 +128,6 @@ export default class StrategyScene extends BaseScene {
                 const data = docSnap.data();
                 if (data.territoryArmies) armyData = data.territoryArmies;
                 
-                // 설정 로드 (증원 주기, 역할 정의 등)
                 this.strategySettings = {
                     gameSettings: data.gameSettings || {},
                     roleDefinitions: data.roleDefinitions || {}
@@ -383,7 +383,7 @@ export default class StrategyScene extends BaseScene {
         const node = circleObj.nodeData;
         const currentLeaderId = this.registry.get('leaderPosition');
         const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
-        if (node.owner === 'neutral') { this.statusText.setText("⛔ 아직 지나갈 수 없다! 여기는 합정파의 영역이다냥!"); this.shakeNode(circleObj); return; }
+        if (node.owner === 'neutral') { this.statusText.setText(node.text); this.shakeNode(circleObj); return; }
         if (this.hasMoved) {
             if (this.previousLeaderId !== null && node.id === this.previousLeaderId) { this.undoMove(); return; }
             this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요."); this.shakeStatusText(); return;
@@ -419,7 +419,6 @@ export default class StrategyScene extends BaseScene {
         let recoveredCount = 0;
         let totalMaintenanceCost = 0;
 
-        // [Modified] DB에서 불러온 역할 정의 사용 (없으면 기본값)
         const roleDefs = this.strategySettings?.roleDefinitions || ROLE_BASE_STATS;
 
         squad.forEach(unit => {
@@ -427,13 +426,10 @@ export default class StrategyScene extends BaseScene {
                 unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
                 recoveredCount++;
             }
-            
-            // [Modified] 유지비 계산 (설정값 우선)
             let maintenance = 0;
             if (roleDefs[unit.role] && roleDefs[unit.role].maintenance !== undefined) {
                 maintenance = roleDefs[unit.role].maintenance;
             } else {
-                // Fallback
                 if (unit.role === 'Leader') maintenance = 3;
                 else {
                     const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
@@ -481,7 +477,6 @@ export default class StrategyScene extends BaseScene {
         turnCount++;
         this.registry.set('turnCount', turnCount);
 
-        // [Modified] 증원 주기 설정값 적용 (기본값 3턴)
         const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
 
         let warningMsg = "";
@@ -489,7 +484,7 @@ export default class StrategyScene extends BaseScene {
         
         if (turnCount % reinforceInterval === 0) {
             this.mapNodes.forEach(node => {
-                if (node.owner !== 'player' && node.army) {
+                if (node.owner !== 'player' && node.owner !== 'neutral' && node.army) {
                     node.army.count = (node.army.count || 1) + 1;
                     enemiesIncreased = true;
                 }
@@ -598,6 +593,7 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
+    // [Modified] Config 기반 파싱 로직 적용
     parseMapData(map, dbArmyData = {}) {
         const existingData = this.registry.get('worldMapData');
         let objectLayer = map.getObjectLayer('territory');
@@ -609,13 +605,27 @@ export default class StrategyScene extends BaseScene {
         if (objectLayer && objectLayer.objects) {
             nodes = objectLayer.objects.map(obj => {
                 const config = territoryConfig.territories[obj.id.toString()] || territoryConfig.default;
+                
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
-                if (obj.id === 6) { return { id: obj.id, x: obj.x, y: obj.y, name: "???", owner: 'neutral', connectedTo: [], levelIndex: 0, desc: "Locked Path", army: { type: 'runner', count: 1 } }; }
                 
+                // 1. 소유자 결정 (Config 'neutral' 체크)
+                let initialOwner = 'enemy';
+                let text = "";
+                if (config.neutral) {
+                    initialOwner = 'neutral';
+                    text = config.text || "";
+                }
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
-                const owner = savedNode ? savedNode.owner : 'enemy';
+                const owner = savedNode ? savedNode.owner : initialOwner;
                 
+                // 2. 초기 병력 결정
+                // Config에 "unit"이 있으면 기본 병력으로 설정 (예: "Runner" -> type: "runner")
+                let configArmy = null;
+                if (config.unit) {
+                    configArmy = { type: config.unit.toLowerCase(), count: config.count || 1 };
+                }
+
                 let armyData = null;
                 if (savedNode) {
                     if (savedNode.owner === 'player') {
@@ -625,17 +635,22 @@ export default class StrategyScene extends BaseScene {
                     } else {
                         if (dbArmyData && dbArmyData[obj.id.toString()]) {
                             armyData = dbArmyData[obj.id.toString()];
+                        } else {
+                            armyData = configArmy; // 저장된게 없으면 Config 사용
                         }
                     }
                 } else {
                     if (dbArmyData && dbArmyData[obj.id.toString()]) {
                         armyData = dbArmyData[obj.id.toString()];
+                    } else {
+                        armyData = configArmy; // DB도 없으면 Config 사용
                     }
                 }
 
                 return {
                     id: obj.id, x: obj.x, y: obj.y, name: config.name || obj.name || `Territory ${obj.id}`,
                     owner: owner, connectedTo: [], levelIndex: finalLevelIndex, desc: config.description || "",
+                    text: text,
                     army: armyData, bgm: config.bgm || "stage1_bgm" 
                 };
             });
@@ -659,6 +674,7 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
 
+    // [Modified] 다양한 유닛 토큰 지원
     createEnemyTokens() {
         if (!this.mapNodes) return;
         
@@ -673,7 +689,18 @@ export default class StrategyScene extends BaseScene {
 
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
-                let textureKey = 'dog_token'; if (node.army.type === 'runner') textureKey = 'runner_token'; else if (node.army.type === 'dog') textureKey = 'dog_token';
+                // army.type 값에 맞춰 토큰 텍스처 결정 (기본: dog_token)
+                let textureKey = 'dog_token';
+                const type = node.army.type ? node.army.type.toLowerCase() : 'dog';
+                
+                // 매핑 로직
+                if (type === 'runner') textureKey = 'runner_token';
+                else if (type === 'dog') textureKey = 'dog_token';
+                else if (type === 'tanker') textureKey = 'tanker_token';
+                else if (type === 'shooter') textureKey = 'shooter_token';
+                else if (type === 'healer') textureKey = 'healer_token';
+                else if (type === 'raccoon') textureKey = 'raccoon_token';
+                else if (type === 'normal') textureKey = 'normal_token';
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 
@@ -682,14 +709,24 @@ export default class StrategyScene extends BaseScene {
                 }
 
                 let finalSize = 60;
-                if (node.owner === 'neutral') { finalSize = 60; } 
+                if (node.owner === 'neutral') { finalSize = 55; if (type === 'tanker') { finalSize = 70; }} 
                 else { 
                     const armyCount = node.army.count || 1; 
                     finalSize = 50 + (armyCount - 5) * 5; 
                     finalSize = Phaser.Math.Clamp(finalSize, 30, 90); 
                 }
                 enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
-                if (node.army.type === 'runner') enemyObj.play('runner_idle'); else enemyObj.play('dog_idle');
+                
+                // 애니메이션 재생 (타입별)
+                if (type === 'runner') enemyObj.play('runner_idle');
+                else if (type === 'tanker') enemyObj.play('tanker_idle');
+                else if (type === 'shooter') enemyObj.play('shooter_idle');
+                else if (type === 'healer') enemyObj.play('healer_idle');
+                else if (type === 'raccoon') enemyObj.play('raccoon_idle');
+                else if (type === 'normal') enemyObj.play('normal_idle');
+                else if (type === 'dog') enemyObj.play('dog_idle');
+                // 나머지는 idle 애니메이션이 있다면 재생 (없으면 멈춤)
+                
                 this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
                 
                 this.enemyTokens.push(enemyObj);
