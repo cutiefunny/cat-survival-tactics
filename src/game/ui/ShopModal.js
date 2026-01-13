@@ -8,7 +8,6 @@ export default class ShopModal {
         this.unitDetailPopup = null;
         this.isOpen = false;
 
-        // [Modified] 'Normal'의 텍스처를 'leader_token'에서 'normal'로 변경
         this.roleToTexture = {
             'Tanker': 'tanker_token', 
             'Shooter': 'shooter_token', 
@@ -41,18 +40,19 @@ export default class ShopModal {
         const { width, height } = this.scene.scale;
         this.container = this.scene.add.container(width / 2, height / 2).setDepth(2000);
         
+        // [Modified] 부대원이 많아질 것을 대비해 팝업 높이를 80% -> 90%로 확대
         const popupW = Math.min(600, width * 0.95);
-        const popupH = Math.min(450, height * 0.8);
+        const popupH = Math.min(600, height * 0.9);
         
         const bg = this.scene.add.rectangle(0, 0, popupW, popupH, 0x222222).setStrokeStyle(4, 0xffcc00);
-        const title = this.scene.add.text(0, -popupH / 2 + 30, "용병 고용\n", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
+        const title = this.scene.add.text(0, -popupH / 2 + 30, "용병 고용", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
         const closeBtn = this.scene.add.text(popupW / 2 - 30, -popupH / 2 + 30, "X", { fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5).setInteractive();
         closeBtn.on('pointerdown', () => this.toggle());
 
         this.container.add([bg, title, closeBtn]);
 
         this.createUnitButtons(popupW, popupH);
-        this.createSquadInfo(popupH);
+        this.createSquadInfo(popupW, popupH);
 
         this.parentContainer.add(this.container);
     }
@@ -60,9 +60,10 @@ export default class ShopModal {
     createUnitButtons(popupW, popupH) {
         const cols = 3;
         const gapX = 120;
-        const gapY = 100;
+        const gapY = 90; // [Modified] 상단 버튼 간격을 조금 좁혀 하단 공간 확보
         const startX = -((cols * gapX) / 2) + gapX / 2;
-        const startY = -popupH / 2 + 80;
+        // [Modified] 버튼 시작 위치를 위로 조금 올림
+        const startY = -popupH / 2 + 90;
 
         const unlockedRoles = this.scene.registry.get('unlockedRoles') || ['Normal'];
 
@@ -93,8 +94,11 @@ export default class ShopModal {
         });
     }
 
-    createSquadInfo(popupH) {
-        const squadInfoY = popupH / 2 - 80;
+    createSquadInfo(popupW, popupH) {
+        // [Modified] 하단 부대원 목록 영역 위치 설정 (팝업 하단 기준에서 역산하여 공간 확보)
+        // 약 3~4줄의 유닛이 들어갈 수 있도록 여유를 둠
+        const squadInfoY = popupH / 2 - 160; 
+        
         this.squadCountText = this.scene.add.text(0, squadInfoY, `현재 부대원: 0명`, { fontSize: '18px', color: '#aaaaaa' }).setOrigin(0.5);
         this.container.add(this.squadCountText);
 
@@ -108,14 +112,25 @@ export default class ShopModal {
         const squad = this.scene.registry.get('playerSquad') || [];
         this.squadCountText.setText(`현재 부대원: ${squad.length}명`);
         
-        const iconSize = 40; const gap = 5; const maxCols = 12;
-        const totalW = Math.min(squad.length, maxCols) * (iconSize + gap);
+        const iconSize = 40; 
+        const gap = 8; 
+        // [Modified] 한 줄에 10명 표시 (10명 초과시 다음 줄로 이동)
+        const maxCols = 10; 
+
+        // 전체 그리드의 너비 계산 (최대 10개 기준 중앙 정렬을 위함)
+        const colsInRow = Math.min(squad.length, maxCols);
+        const totalW = colsInRow * (iconSize + gap) - gap;
         const startX = -totalW / 2 + iconSize / 2;
 
         squad.forEach((member, index) => {
             const textureKey = this.roleToTexture[member.role] || 'leader_token';
-            const col = index % maxCols; const row = Math.floor(index / maxCols);
-            const x = startX + col * (iconSize + gap); const y = row * (iconSize + gap);
+            
+            // [Modified] 행(row)과 열(col) 계산 로직
+            const col = index % maxCols; 
+            const row = Math.floor(index / maxCols);
+            
+            const x = startX + col * (iconSize + gap); 
+            const y = row * (iconSize + gap); // 줄바꿈 적용
             
             const icon = this.scene.add.sprite(x, y, textureKey, 0);
             const isLeader = (member.role === 'Leader');

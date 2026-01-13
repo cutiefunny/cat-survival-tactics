@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import GameOverModal from '../ui/GameOverModal'; // [New] 분리된 모달 클래스 임포트
 
 export default class UIScene extends Phaser.Scene {
     constructor() {
@@ -14,9 +15,10 @@ export default class UIScene extends Phaser.Scene {
         this.startBtn = null;
         this.msgText = null;
         this.debugStats = null;
-        // this.shopContainer = null; // 제거됨
-        // this.coinText = null; // 제거됨
         
+        // [New] 모달 인스턴스 생성
+        this.gameOverModal = new GameOverModal(this);
+
         const battleScene = this.scene.get('BattleScene');
         if (battleScene) {
             battleScene.events.off('updateUI'); 
@@ -47,8 +49,6 @@ export default class UIScene extends Phaser.Scene {
         
         this.repositionFooterElements();
     }
-
-    // createShopUI, repositionShopElements, updateCoins, hideShopUI 제거됨
 
     createAutoButton() {
         this.autoBtn = this.add.container(0, 0);
@@ -127,71 +127,17 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
+    // [Modified] 모달 클래스로 위임
     createGameOverUI(data, callback) {
-        const { width, height } = this.scale;
-        const isWin = data.isWin;
-        const title = data.title;
-        const color = data.color;
-        const btnText = data.btnText;
-        const stats = data.stats || {}; 
-        const overlay = this.add.rectangle(width/2, height/2, width, height, 0x000000, 0.85).setDepth(2999).setInteractive();
-        const panelWidth = Math.min(400, width * 0.9);
-        const panelHeight = Math.min(600, height * 0.9); 
-        const panel = this.add.container(width/2, height/2).setDepth(3000);
-        const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x222222).setStrokeStyle(4, 0xffffff);
-        panel.add(bg);
-        const titleText = this.add.text(0, -panelHeight * 0.4, title, { fontSize: '48px', fontStyle: 'bold', fill: color, stroke: '#ffffff', strokeThickness: 4 }).setOrigin(0.5);
-        panel.add(titleText);
-        if (isWin && stats.score !== undefined) {
-            const startY = -panelHeight * 0.25;
-            const gapY = 40; 
-            const labelStyle = { fontSize: '20px', fill: '#aaaaaa' };
-            const valStyle = { fontSize: '20px', fill: '#ffffff', fontStyle: 'bold' };
-            const timeStr = `${Math.floor(stats.time / 60)}m ${stats.time % 60}s`;
-            const l1 = this.add.text(-panelWidth*0.4, startY, "클리어 시간", labelStyle).setOrigin(0, 0.5);
-            const v1 = this.add.text(panelWidth*0.4, startY, timeStr, valStyle).setOrigin(1, 0.5);
-            const l2 = this.add.text(-panelWidth*0.4, startY + gapY, "생존 유닛", labelStyle).setOrigin(0, 0.5);
-            const v2 = this.add.text(panelWidth*0.4, startY + gapY, `${stats.survivors}`, valStyle).setOrigin(1, 0.5);
-            panel.add([l1, v1, l2, v2]);
-            const line = this.add.rectangle(0, startY + gapY*1.8, panelWidth * 0.8, 2, 0x555555);
-            panel.add(line);
-            const scoreLabel = this.add.text(0, startY + gapY*3, "TOTAL SCORE", { fontSize: '16px', fill: '#888888' }).setOrigin(0.5);
-            const scoreVal = this.add.text(0, startY + gapY*4, `${stats.score}`, { fontSize: '36px', fill: '#ffff00', fontStyle: 'bold' }).setOrigin(0.5);
-            const rankText = this.add.text(0, startY + gapY*6, `RANK ${stats.rank}`, { fontSize: '48px', fill: stats.rank === 'S' ? '#ff00ff' : (stats.rank === 'A' ? '#00ff00' : '#ffffff'), fontStyle: 'bold', stroke: '#000000', strokeThickness: 6 }).setOrigin(0.5);
-            this.tweens.add({ targets: rankText, scale: { from: 2, to: 1 }, alpha: { from: 0, to: 1 }, duration: 500, ease: 'Bounce' });
-            panel.add([scoreLabel, scoreVal, rankText]);
+        if (this.gameOverModal) {
+            this.gameOverModal.show(data, callback);
         }
-        const btnY = panelHeight * 0.3; 
-        const btnBg = this.add.rectangle(0, btnY, 200, 50, 0x4444ff).setStrokeStyle(2, 0xffffff);
-        const btnTxt = this.add.text(0, btnY, btnText, { fontSize: '22px', fontStyle: 'bold' }).setOrigin(0.5);
-        const btnContainer = this.add.container(0, 0, [btnBg, btnTxt]);
-        btnBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-            this.tweens.add({
-                targets: btnContainer, scale: 0.9, duration: 50, yoyo: true,
-                onComplete: () => {
-                    if (isWin && btnText.includes("Next")) { if (callback) callback(); } 
-                    else { if (callback) callback(); this.scene.restart(); }
-                }
-            });
-        });
-        panel.add(btnContainer);
-        const feedbackY = btnY + 70; 
-        const fbBg = this.add.rectangle(0, feedbackY, 200, 40, 0x333333).setStrokeStyle(1, 0xaaaaaa);
-        const fbTxt = this.add.text(0, feedbackY, "피드백 남기기", { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
-        const fbContainer = this.add.container(0, 0, [fbBg, fbTxt]);
-        fbBg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-            this.tweens.add({ targets: fbContainer, scale: 0.9, duration: 50, yoyo: true });
-            window.open('https://musclecat-studio.com/thread', '_blank');
-        });
-        panel.add(fbContainer);
-        panel.setScale(0);
-        this.tweens.add({ targets: panel, scale: 1, duration: 400, ease: 'Back.out' });
     }
 
     playCoinAnimation(startX, startY, amount, onComplete) {
         const coinCount = 10; 
         const targetX = this.scale.width - 50;   
-        const targetY = 50; // [Modified] 상단 UI 위치로 변경
+        const targetY = 50; 
         
         if (amount > 0) {
             const amountText = this.add.text(startX, startY, `+${amount}냥`, { 

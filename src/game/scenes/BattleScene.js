@@ -1,4 +1,3 @@
-// src/game/scenes/BattleScene.js
 import Phaser from 'phaser';
 import BaseScene from './BaseScene'; 
 
@@ -47,7 +46,7 @@ import shooterSheet from '../../assets/units/shooter.png';
 import tankerSheet from '../../assets/units/tanker.png';
 import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
-import normalSheet from '../../assets/units/normal.png'; // [New] 일반냥 이미지 추가
+import normalSheet from '../../assets/units/normal.png'; 
 
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
@@ -121,7 +120,7 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('tanker', tankerSheet, sheetConfig);
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
-        this.load.spritesheet('normal', normalSheet, sheetConfig); // [New] 일반냥 로드
+        this.load.spritesheet('normal', normalSheet, sheetConfig);
 
         this.load.tilemapTiledJSON('stage1', stage1Data);
         this.load.tilemapTiledJSON('level4', level4Data); 
@@ -413,7 +412,6 @@ export default class BattleScene extends BaseScene {
         this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
     }
     
-    // [Modified] 애니메이션 생성에 'normal' 추가
     createStandardAnimations() {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal']; 
         unitTextures.forEach(key => {
@@ -632,7 +630,6 @@ export default class BattleScene extends BaseScene {
     }
 
     animateCoinDrop(startX, startY, amount) {
-        // [Log] 드랍 로그
         console.log(`💰 [Coin] Drop occurred! Amount: ${amount}, Pre-Total: ${this.playerCoins}`);
         
         const coin = this.add.graphics();
@@ -643,7 +640,6 @@ export default class BattleScene extends BaseScene {
             onComplete: () => { 
                 coin.destroy(); 
                 this.playerCoins += amount; 
-                // [Log] 획득 로그
                 console.log(`💰 [Coin] Collected! New Total: ${this.playerCoins}`);
                 if(this.uiManager) this.uiManager.updateCoins(this.playerCoins); 
             }
@@ -772,6 +768,7 @@ export default class BattleScene extends BaseScene {
         }
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
+
     finishGame(message, color, isWin) {
         if (this.isGameOver) return; 
         this.isGameOver = true;
@@ -785,8 +782,16 @@ export default class BattleScene extends BaseScene {
         const currentSquad = this.registry.get('playerSquad') || [];
         const fallenUnits = this.registry.get('fallenUnits') || [];
         const nextSquad = [];
+        
+        const leveledUpUnits = [];
+        const deadUnits = [];
 
         currentSquad.forEach((member, i) => {
+            // [Modified] 리더 이름 강제 고정
+            if (member.role === 'Leader') {
+                member.name = '김냐냐';
+            }
+
             if (this.deadSquadIndices.includes(i)) {
                 fallenUnits.push({
                     ...member,
@@ -794,11 +799,13 @@ export default class BattleScene extends BaseScene {
                     cause: 'Killed by Wild Dog',
                     deathLevel: this.currentLevelIndex + 1
                 });
+                deadUnits.push({ name: member.name, role: member.role });
             } else {
                 member.xp = (member.xp || 0) + xpGained;
                 let leveledUp = false;
+                let oldLevel = member.level || 1;
                 
-                let reqXp = (member.level || 1) * 100;
+                let reqXp = oldLevel * 100;
                 while (member.xp >= reqXp) {
                     member.xp -= reqXp;
                     member.level = (member.level || 1) + 1;
@@ -807,14 +814,13 @@ export default class BattleScene extends BaseScene {
                     console.log(`🆙 ${member.role} leveled up to ${member.level}!`);
                 }
 
-                if (leveledUp && isWin) {
-                    const survivor = this.blueTeam.getChildren().find(u => u.squadIndex === i && u.active);
-                    if (survivor) {
-                        const levelText = this.add.text(survivor.x, survivor.y - 60, "LEVEL UP!", {
-                            fontFamily: 'Arial', fontSize: '20px', color: '#00FF00', stroke: '#000000', strokeThickness: 4, fontWeight: 'bold'
-                        }).setOrigin(0.5);
-                        levelText.setDepth(2000); 
-                    }
+                if (leveledUp) {
+                    leveledUpUnits.push({ 
+                        name: member.name, 
+                        role: member.role, 
+                        oldLevel: oldLevel, 
+                        newLevel: member.level 
+                    });
                 }
 
                 member.fatigue = (member.fatigue || 0) + 1;
@@ -825,41 +831,33 @@ export default class BattleScene extends BaseScene {
         this.registry.set('playerSquad', nextSquad);
         this.registry.set('fallenUnits', fallenUnits);
 
-        console.log(`⚔️ [Battle Result] XP: +${xpGained}, Survivors Fatigue +1`);
-
-        let btnText = "Tap to Restart";
-        let callback = () => this.restartLevel();
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
         const survivors = this.blueTeam.countActive();
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
-
-        // [Log] 점수 계산 상세 로그
-        console.log(`🏁 [Score] Survivors: ${survivors} (Score: ${survivorScore})`);
-        console.log(`🏁 [Score] Time: ${durationSec}s (Score: ${timeScore})`);
-        console.log(`🏁 [Score] Total Score: ${totalScore}`);
         
+        // [Modified] 코인 계산: (전투중 획득한 코인) + (점수 보너스 코인)
+        // this.playerCoins에는 이미 animateCoinDrop으로 획득한 코인이 들어있음
+        const battleEarnings = Math.max(0, this.playerCoins - this.levelInitialCoins);
+        const scoreBonus = isWin ? Math.floor(totalScore / 1000) : 0;
+        const totalRewardCoins = battleEarnings + scoreBonus;
+
+        let btnText = "Tap to Restart";
+        let callback = () => this.restartLevel();
+
         if (this.isStrategyMode) {
             btnText = isWin ? "맵으로" : "맵으로";
             callback = () => {
-                const bonusCoins = isWin ? Math.floor(totalScore / 1000) : 0;
-                // [Log] 전략 모드 보너스 코인 로그
-                console.log(`🏁 [Score -> Coin] Strategy Bonus: ${bonusCoins}`);
-                const finalCoins = this.playerCoins + bonusCoins;
+                const finalCoins = this.playerCoins + scoreBonus; // playerCoins에는 이미 battleEarnings가 포함됨
                 this.scene.stop('UIScene'); 
                 this.scene.start('StrategyScene', {
                     battleResult: { isWin: isWin, targetNodeId: this.targetNodeId, remainingCoins: finalCoins, score: totalScore }
                 });
             };
         } else {
-            let rank = 'F';
             if (isWin) {
-                if (totalScore >= 3500) rank = 'S';
-                else if (totalScore >= 2500) rank = 'A';
-                else if (totalScore >= 1500) rank = 'B';
-                else rank = 'C';
                 if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
                     btnText = "Next Level ▶️"; callback = () => this.nextLevel(totalScore); 
                 } else {
@@ -867,24 +865,29 @@ export default class BattleScene extends BaseScene {
                 }
             }
         }
+        
         const resultData = {
-            isWin: isWin, title: message, color: color, btnText: btnText,
-            stats: { time: durationSec, survivors: survivors, score: totalScore, rank: isWin ? 'S' : 'F' }
+            isWin: isWin, 
+            title: message, 
+            color: color, 
+            btnText: btnText,
+            stats: { 
+                rewardCoins: totalRewardCoins, // 합산된 코인량 전달
+                leveledUpUnits: leveledUpUnits,
+                deadUnits: deadUnits
+            }
         };
         this.uiManager.createGameOverUI(resultData, callback);
     }
+
     nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
         const bonusCoins = Math.floor(score / 1000);
-        // [Log] 다음 레벨 보너스 코인 로그
-        console.log(`🏁 [Score -> Coin] Next Level Bonus: ${bonusCoins}`);
-
         const nextCoins = this.playerCoins + bonusCoins; 
-        console.log(`🎉 [nextLevel] Score: ${score}, BonusCoins: ${bonusCoins}, NextCoins: ${nextCoins}`);
+        
         const centerX = this.scale.width / 2;
         const centerY = this.scale.height / 2;
         this.uiManager.playCoinAnimation(centerX, centerY, bonusCoins, () => {
-            console.log("➡️ [nextLevel] Callback Triggered - Restarting Scene...");
             this.scene.restart({ levelIndex: nextIndex, currentCoins: nextCoins });
         });
     }

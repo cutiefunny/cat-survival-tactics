@@ -20,7 +20,6 @@ import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData';
 
 import SaveManager from '../managers/SaveManager';
 
-// [New] 분리된 모달 클래스 임포트
 import ShopModal from '../ui/ShopModal';
 import SystemModal from '../ui/SystemModal';
 
@@ -55,6 +54,10 @@ export default class StrategyScene extends BaseScene {
         if (savedData && savedData.leaderPosition) {
             this.registry.set('leaderPosition', savedData.leaderPosition);
         }
+
+        if (this.registry.get('turnCount') === undefined) {
+            this.registry.set('turnCount', savedData?.turnCount ?? 1);
+        }
     }
 
     preload() {
@@ -68,7 +71,7 @@ export default class StrategyScene extends BaseScene {
         this.load.spritesheet('shooter_token', shooterImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('healer_token', healerImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('raccoon_token', raccoonImg, { frameWidth: 100, frameHeight: 100 });
-        this.load.spritesheet('normal_token', normalImg, { frameWidth: 100, frameHeight: 100 }); // <--- 추가된 부분
+        this.load.spritesheet('normal_token', normalImg, { frameWidth: 100, frameHeight: 100 });
 
         this.load.audio('opening_bgm', openingBgm);
     }
@@ -103,7 +106,8 @@ export default class StrategyScene extends BaseScene {
             unlockedRoles: this.registry.get('unlockedRoles'),
             worldMapData: this.registry.get('worldMapData'),
             leaderPosition: this.registry.get('leaderPosition'),
-            lastSafeNodeId: this.registry.get('lastSafeNodeId')
+            lastSafeNodeId: this.registry.get('lastSafeNodeId'),
+            turnCount: this.registry.get('turnCount')
         };
     }
 
@@ -134,6 +138,8 @@ export default class StrategyScene extends BaseScene {
         this.previousLeaderId = null;
         this.selectedTargetId = null; 
         
+        this.enemyTokens = [];
+
         this.playBgm('opening_bgm', 0.5);
 
         this.parseMapData(map, dbArmyData);
@@ -177,10 +183,14 @@ export default class StrategyScene extends BaseScene {
 
         this.drawConnections();
         this.createTerritoryNodes();
+        
+        // 토큰 생성
         this.createEnemyTokens();
         this.createPlayerToken();
 
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+        
+        // [Important] 초기 생성된 모든 월드 오브젝트를 UI 카메라에서 무시
         this.uiCamera.ignore(this.children.list);
         
         this.createUI(); 
@@ -404,20 +414,16 @@ export default class StrategyScene extends BaseScene {
         const squad = this.registry.get('playerSquad') || [];
         const recoveryAmount = this.hasMoved ? 1 : 3;
         
-        // 1. 피로도 회복 및 유지비 계산
         let recoveredCount = 0;
         let totalMaintenanceCost = 0;
 
         squad.forEach(unit => {
-            // 피로도 회복
             if (unit.fatigue > 0) {
                 unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
                 recoveredCount++;
             }
-            
-            // 유지비 계산
             if (unit.role === 'Leader') {
-                totalMaintenanceCost += 3; // [Modified] 리더 급식비 3냥 고정
+                totalMaintenanceCost += 3;
             } else {
                 const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
                 const baseCost = shopInfo ? shopInfo.cost : 100;
@@ -425,7 +431,6 @@ export default class StrategyScene extends BaseScene {
             }
         });
         
-        // 2. 유지비 차감
         let currentCoins = this.registry.get('playerCoins');
         let isBankrupt = false;
         
@@ -435,8 +440,6 @@ export default class StrategyScene extends BaseScene {
         if (currentCoins < 0) {
             isBankrupt = true;
             currentCoins = 0;
-            
-            // 파산 시 리더 제외 전원 해고
             const leaderOnly = squad.filter(u => u.role === 'Leader');
             this.registry.set('playerSquad', leaderOnly);
             console.warn("⚠️ [Bankruptcy] Mercenaries dismissed.");
@@ -461,18 +464,42 @@ export default class StrategyScene extends BaseScene {
             c.scale = 1; 
         });
 
-        // 3. UI 피드백
-        this.cameras.main.flash(500, 0, 0, 0); 
+        // 턴 증가 및 적군 증원 로직
+        let turnCount = this.registry.get('turnCount') || 0;
+        turnCount++;
+        this.registry.set('turnCount', turnCount);
+
+        let warningMsg = "";
+        let enemiesIncreased = false; 
+        
+        if (turnCount % 3 === 0) {
+            this.mapNodes.forEach(node => {
+                if (node.owner !== 'player' && node.army) {
+                    node.army.count = (node.army.count || 1) + 1;
+                    enemiesIncreased = true;
+                }
+            });
+
+            if (enemiesIncreased) {
+                this.registry.set('worldMapData', this.mapNodes);
+                this.createEnemyTokens(); // 토큰 UI 갱신
+                warningMsg = "\n⚠️ 적군 세력 강화! (3턴 경과)";
+                this.cameras.main.flash(500, 255, 0, 0); 
+            }
+        }
+
+        if (!isBankrupt && !enemiesIncreased) {
+            this.cameras.main.flash(500, 0, 0, 0); 
+        }
         
         if (isBankrupt) {
             this.statusText.setText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`);
             this.statusText.setColor('#ff4444');
         } else {
             const maintenanceMsg = totalMaintenanceCost > 0 ? ` (급식비 ${totalMaintenanceCost}냥 지출)` : "";
-            this.statusText.setText(`🌙 턴 종료. 행동력 회복.${maintenanceMsg}`);
-            this.statusText.setColor('#ffffff');
+            this.statusText.setText(`🌙 턴 종료. 행동력 회복.${maintenanceMsg}${warningMsg}`);
+            this.statusText.setColor(warningMsg ? '#ffaaaa' : '#ffffff');
             
-            // 급식비 지출 플로팅 텍스트
             if (totalMaintenanceCost > 0) {
                 this.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥`, '#ff4444');
             }
@@ -498,7 +525,6 @@ export default class StrategyScene extends BaseScene {
         if (!targetNode) return;
         const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
         
-        // [Fixed] 0원일 때 || 연산자로 인해 100원으로 초기화되는 문제 수정 (?? 사용)
         const currentCoins = this.registry.get('playerCoins') ?? 0;
 
         this.scene.start('BattleScene', {
@@ -557,6 +583,7 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
+    // [Modified] parseMapData: 저장된 데이터 우선순위 적용
     parseMapData(map, dbArmyData = {}) {
         const existingData = this.registry.get('worldMapData');
         let objectLayer = map.getObjectLayer('territory');
@@ -574,11 +601,28 @@ export default class StrategyScene extends BaseScene {
                 
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : 'enemy';
+                
                 let armyData = null;
+                
+                // [Modified] 저장된 army 정보가 있으면 그것을 최우선 사용
                 if (savedNode) {
-                    if (savedNode.owner === 'player' || savedNode.army === null) { armyData = null; } 
-                    else { if (dbArmyData && dbArmyData[obj.id.toString()]) { armyData = dbArmyData[obj.id.toString()]; } else { armyData = savedNode.army; } }
-                } else { if (dbArmyData && dbArmyData[obj.id.toString()]) { armyData = dbArmyData[obj.id.toString()]; } }
+                    if (savedNode.owner === 'player') {
+                        armyData = null; 
+                    } else if (savedNode.army) {
+                        armyData = savedNode.army; // 증원된 적군 정보 유지
+                    } else {
+                        // 저장된 데이터는 있지만 army가 없는 경우 DB 체크
+                        if (dbArmyData && dbArmyData[obj.id.toString()]) {
+                            armyData = dbArmyData[obj.id.toString()];
+                        }
+                    }
+                } else {
+                    // 저장된 데이터가 아예 없는 경우 DB 체크
+                    if (dbArmyData && dbArmyData[obj.id.toString()]) {
+                        armyData = dbArmyData[obj.id.toString()];
+                    }
+                }
+
                 return {
                     id: obj.id, x: obj.x, y: obj.y, name: config.name || obj.name || `Territory ${obj.id}`,
                     owner: owner, connectedTo: [], levelIndex: finalLevelIndex, desc: config.description || "",
@@ -607,16 +651,41 @@ export default class StrategyScene extends BaseScene {
 
     createEnemyTokens() {
         if (!this.mapNodes) return;
+        
+        // 기존 토큰 제거
+        if (this.enemyTokens && this.enemyTokens.length > 0) {
+            this.enemyTokens.forEach(token => {
+                if (token && token.active) {
+                    token.destroy();
+                }
+            });
+        }
+        this.enemyTokens = [];
+
+        // 토큰 재생성 및 UI 카메라 제외
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
                 let textureKey = 'dog_token'; if (node.army.type === 'runner') textureKey = 'runner_token'; else if (node.army.type === 'dog') textureKey = 'dog_token';
+                
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
+                
+                // [Important] 새 토큰은 UI 카메라에 렌더링되지 않도록 명시적으로 제외
+                if (this.uiCamera) {
+                    this.uiCamera.ignore(enemyObj);
+                }
+
                 let finalSize = 60;
                 if (node.owner === 'neutral') { finalSize = 60; } 
-                else { const armyCount = node.army.count || 1; finalSize = 50 + (armyCount - 5) * 5; finalSize = Phaser.Math.Clamp(finalSize, 30, 90); }
+                else { 
+                    const armyCount = node.army.count || 1; 
+                    finalSize = 50 + (armyCount - 5) * 5; 
+                    finalSize = Phaser.Math.Clamp(finalSize, 30, 90); 
+                }
                 enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
                 if (node.army.type === 'runner') enemyObj.play('runner_idle'); else enemyObj.play('dog_idle');
                 this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
+                
+                this.enemyTokens.push(enemyObj);
             }
         });
     }
@@ -646,7 +715,6 @@ export default class StrategyScene extends BaseScene {
             const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
             circle.setAlpha(0.5); circle.nodeData = node; circle.setDepth(100); 
             circle.on('pointerdown', () => {
-                // 모달이 열려있으면 닫기
                 if(this.shopModal.isOpen) this.shopModal.toggle();
                 if(this.systemModal.isOpen) this.systemModal.toggle();
                 this.selectTerritory(circle);
