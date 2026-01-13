@@ -118,14 +118,20 @@ export default class StrategyScene extends BaseScene {
 
     async fetchStrategyConfig(map) {
         let armyData = {};
+        this.strategySettings = null; // 설정 저장용
+
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                if (data.territoryArmies) {
-                    armyData = data.territoryArmies;
-                }
+                if (data.territoryArmies) armyData = data.territoryArmies;
+                
+                // 설정 로드 (증원 주기, 역할 정의 등)
+                this.strategySettings = {
+                    gameSettings: data.gameSettings || {},
+                    roleDefinitions: data.roleDefinitions || {}
+                };
             }
         } catch (e) {
             console.error("❌ Failed to load strategy config:", e);
@@ -183,14 +189,10 @@ export default class StrategyScene extends BaseScene {
 
         this.drawConnections();
         this.createTerritoryNodes();
-        
-        // 토큰 생성
         this.createEnemyTokens();
         this.createPlayerToken();
 
         this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
-        
-        // [Important] 초기 생성된 모든 월드 오브젝트를 UI 카메라에서 무시
         this.uiCamera.ignore(this.children.list);
         
         this.createUI(); 
@@ -417,18 +419,29 @@ export default class StrategyScene extends BaseScene {
         let recoveredCount = 0;
         let totalMaintenanceCost = 0;
 
+        // [Modified] DB에서 불러온 역할 정의 사용 (없으면 기본값)
+        const roleDefs = this.strategySettings?.roleDefinitions || ROLE_BASE_STATS;
+
         squad.forEach(unit => {
             if (unit.fatigue > 0) {
                 unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
                 recoveredCount++;
             }
-            if (unit.role === 'Leader') {
-                totalMaintenanceCost += 3;
+            
+            // [Modified] 유지비 계산 (설정값 우선)
+            let maintenance = 0;
+            if (roleDefs[unit.role] && roleDefs[unit.role].maintenance !== undefined) {
+                maintenance = roleDefs[unit.role].maintenance;
             } else {
-                const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
-                const baseCost = shopInfo ? shopInfo.cost : 100;
-                totalMaintenanceCost += Math.floor(baseCost * 0.2);
+                // Fallback
+                if (unit.role === 'Leader') maintenance = 3;
+                else {
+                    const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
+                    const baseCost = shopInfo ? shopInfo.cost : 100;
+                    maintenance = Math.floor(baseCost * 0.2);
+                }
             }
+            totalMaintenanceCost += maintenance;
         });
         
         let currentCoins = this.registry.get('playerCoins');
@@ -464,15 +477,17 @@ export default class StrategyScene extends BaseScene {
             c.scale = 1; 
         });
 
-        // 턴 증가 및 적군 증원 로직
         let turnCount = this.registry.get('turnCount') || 0;
         turnCount++;
         this.registry.set('turnCount', turnCount);
 
+        // [Modified] 증원 주기 설정값 적용 (기본값 3턴)
+        const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
+
         let warningMsg = "";
         let enemiesIncreased = false; 
         
-        if (turnCount % 3 === 0) {
+        if (turnCount % reinforceInterval === 0) {
             this.mapNodes.forEach(node => {
                 if (node.owner !== 'player' && node.army) {
                     node.army.count = (node.army.count || 1) + 1;
@@ -482,8 +497,8 @@ export default class StrategyScene extends BaseScene {
 
             if (enemiesIncreased) {
                 this.registry.set('worldMapData', this.mapNodes);
-                this.createEnemyTokens(); // 토큰 UI 갱신
-                warningMsg = "\n⚠️ 적군 세력 강화! (3턴 경과)";
+                this.createEnemyTokens(); 
+                warningMsg = `\n⚠️ 적군 세력 강화! (${reinforceInterval}턴 경과)`;
                 this.cameras.main.flash(500, 255, 0, 0); 
             }
         }
@@ -583,7 +598,6 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
-    // [Modified] parseMapData: 저장된 데이터 우선순위 적용
     parseMapData(map, dbArmyData = {}) {
         const existingData = this.registry.get('worldMapData');
         let objectLayer = map.getObjectLayer('territory');
@@ -603,21 +617,17 @@ export default class StrategyScene extends BaseScene {
                 const owner = savedNode ? savedNode.owner : 'enemy';
                 
                 let armyData = null;
-                
-                // [Modified] 저장된 army 정보가 있으면 그것을 최우선 사용
                 if (savedNode) {
                     if (savedNode.owner === 'player') {
                         armyData = null; 
                     } else if (savedNode.army) {
-                        armyData = savedNode.army; // 증원된 적군 정보 유지
+                        armyData = savedNode.army; 
                     } else {
-                        // 저장된 데이터는 있지만 army가 없는 경우 DB 체크
                         if (dbArmyData && dbArmyData[obj.id.toString()]) {
                             armyData = dbArmyData[obj.id.toString()];
                         }
                     }
                 } else {
-                    // 저장된 데이터가 아예 없는 경우 DB 체크
                     if (dbArmyData && dbArmyData[obj.id.toString()]) {
                         armyData = dbArmyData[obj.id.toString()];
                     }
@@ -652,7 +662,6 @@ export default class StrategyScene extends BaseScene {
     createEnemyTokens() {
         if (!this.mapNodes) return;
         
-        // 기존 토큰 제거
         if (this.enemyTokens && this.enemyTokens.length > 0) {
             this.enemyTokens.forEach(token => {
                 if (token && token.active) {
@@ -662,14 +671,12 @@ export default class StrategyScene extends BaseScene {
         }
         this.enemyTokens = [];
 
-        // 토큰 재생성 및 UI 카메라 제외
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
                 let textureKey = 'dog_token'; if (node.army.type === 'runner') textureKey = 'runner_token'; else if (node.army.type === 'dog') textureKey = 'dog_token';
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 
-                // [Important] 새 토큰은 UI 카메라에 렌더링되지 않도록 명시적으로 제외
                 if (this.uiCamera) {
                     this.uiCamera.ignore(enemyObj);
                 }

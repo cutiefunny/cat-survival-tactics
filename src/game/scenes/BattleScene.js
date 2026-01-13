@@ -427,6 +427,7 @@ export default class BattleScene extends BaseScene {
         });
     }
 
+    // [Modified] createUnitInstance: 성장률 및 피로도 패널티 적용
     createUnitInstance(x, y, team, target, stats, isLeader) {
         if (this.gameConfig && this.gameConfig.aiSettings) {
             stats.aiConfig = this.gameConfig.aiSettings;
@@ -441,10 +442,14 @@ export default class BattleScene extends BaseScene {
         
         const finalStats = { ...baseStats, ...safeStats };
 
+        // [Modified] 레벨업 스탯 증가량 설정값 적용
+        const growthHp = this.gameConfig?.gameSettings?.growthHp ?? 10;
+        const growthAtk = this.gameConfig?.gameSettings?.growthAtk ?? 1;
+
         const level = safeStats.level || 1;
         if (level > 1) {
-            finalStats.attackPower += (level - 1) * 1;
-            finalStats.hp += (level - 1) * 10;
+            finalStats.attackPower += (level - 1) * growthAtk;
+            finalStats.hp += (level - 1) * growthHp;
             finalStats.maxHp = finalStats.hp; 
         }
 
@@ -452,7 +457,9 @@ export default class BattleScene extends BaseScene {
 
         if (team === 'blue') {
             const fatigue = safeStats.fatigue || 0;
-            const penaltyRatio = fatigue * 0.05; 
+            // [Modified] 피로도 패널티 비율 설정값 적용
+            const penaltyRate = this.gameConfig?.gameSettings?.fatiguePenaltyRate ?? 0.05;
+            const penaltyRatio = fatigue * penaltyRate; 
             const multiplier = Math.max(0, 1 - penaltyRatio);
 
             if (fatigue > 0) {
@@ -787,7 +794,6 @@ export default class BattleScene extends BaseScene {
         const deadUnits = [];
 
         currentSquad.forEach((member, i) => {
-            // [Modified] 리더 이름 강제 고정
             if (member.role === 'Leader') {
                 member.name = '김냐냐';
             }
@@ -838,8 +844,6 @@ export default class BattleScene extends BaseScene {
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
         
-        // [Modified] 코인 계산: (전투중 획득한 코인) + (점수 보너스 코인)
-        // this.playerCoins에는 이미 animateCoinDrop으로 획득한 코인이 들어있음
         const battleEarnings = Math.max(0, this.playerCoins - this.levelInitialCoins);
         const scoreBonus = isWin ? Math.floor(totalScore / 1000) : 0;
         const totalRewardCoins = battleEarnings + scoreBonus;
@@ -850,7 +854,7 @@ export default class BattleScene extends BaseScene {
         if (this.isStrategyMode) {
             btnText = isWin ? "맵으로" : "맵으로";
             callback = () => {
-                const finalCoins = this.playerCoins + scoreBonus; // playerCoins에는 이미 battleEarnings가 포함됨
+                const finalCoins = this.playerCoins + scoreBonus; 
                 this.scene.stop('UIScene'); 
                 this.scene.start('StrategyScene', {
                     battleResult: { isWin: isWin, targetNodeId: this.targetNodeId, remainingCoins: finalCoins, score: totalScore }
@@ -872,7 +876,7 @@ export default class BattleScene extends BaseScene {
             color: color, 
             btnText: btnText,
             stats: { 
-                rewardCoins: totalRewardCoins, // 합산된 코인량 전달
+                rewardCoins: totalRewardCoins, 
                 leveledUpUnits: leveledUpUnits,
                 deadUnits: deadUnits
             }

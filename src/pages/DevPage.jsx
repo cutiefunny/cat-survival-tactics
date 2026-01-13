@@ -6,17 +6,17 @@ import { useNavigate } from "@solidjs/router";
 import { LEVEL_KEYS } from "../game/managers/LevelManager";
 import PhaserGame from "../components/PhaserGame"; 
 
-// [설정] 역할별 기본 스탯 정의
+// [설정] 역할별 기본 스탯 정의 (maintenance 추가)
 const DEFAULT_ROLE_DEFS = {
-  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100 },
-  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15 },
-  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20 },
-  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30 },
-  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20 },
-  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25 },
-  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20 },
-  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10 },
-  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10 }
+  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3 },
+  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2 },
+  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20, maintenance: 2 },
+  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30, maintenance: 2 },
+  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4 },
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25, maintenance: 5 },
+  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20, maintenance: 2 },
+  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 1 },
+  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 0 }
 };
 
 // [설정] 기본 유닛 가격
@@ -26,7 +26,15 @@ const DEFAULT_UNIT_COSTS = {
 
 const DEFAULT_CONFIG = {
   showDebugStats: false, 
-  gameSettings: { blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, initialCoins: 50 },
+  // [New] 신규 설정 필드 추가
+  gameSettings: { 
+      blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, 
+      initialCoins: 50, 
+      reinforcementInterval: 3, // 적군 증원 주기 (턴)
+      fatiguePenaltyRate: 0.05, // 피로도 1당 패널티 비율
+      growthHp: 10, // 레벨업당 체력 증가
+      growthAtk: 1  // 레벨업당 공격력 증가
+  },
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
@@ -47,7 +55,6 @@ const DevPage = () => {
   const [feedbacks, setFeedbacks] = createSignal([]);
   const [newArmyNodeId, setNewArmyNodeId] = createSignal("");
   
-  // [New] 모의전투 팝업 상태
   const [showMockBattle, setShowMockBattle] = createSignal(false);
   const [mockData, setMockData] = createSignal(null);
 
@@ -90,12 +97,13 @@ const DevPage = () => {
         merged.gameSettings.blueCount = bCount;
         merged.gameSettings.redCount = rCount;
         
-        if (merged.gameSettings.startLevelIndex === undefined) {
-            merged.gameSettings.startLevelIndex = 0;
-        }
-        if (merged.gameSettings.initialCoins === undefined) {
-            merged.gameSettings.initialCoins = 50;
-        }
+        // [New] 기본값 보장 로직 추가
+        if (merged.gameSettings.reinforcementInterval === undefined) merged.gameSettings.reinforcementInterval = 3;
+        if (merged.gameSettings.fatiguePenaltyRate === undefined) merged.gameSettings.fatiguePenaltyRate = 0.05;
+        if (merged.gameSettings.growthHp === undefined) merged.gameSettings.growthHp = 10;
+        if (merged.gameSettings.growthAtk === undefined) merged.gameSettings.growthAtk = 1;
+        if (merged.gameSettings.startLevelIndex === undefined) merged.gameSettings.startLevelIndex = 0;
+        if (merged.gameSettings.initialCoins === undefined) merged.gameSettings.initialCoins = 50;
 
         merged.blueTeamRoles = syncArrayLength(merged.blueTeamRoles || [], bCount, "Normal", merged.roleDefinitions);
         merged.redTeamRoles = syncArrayLength(merged.redTeamRoles || [], rCount, "NormalDog", merged.roleDefinitions);
@@ -222,43 +230,27 @@ const DevPage = () => {
     }
   };
 
-  // [New] 모의전투 시작 핸들러
   const handleStartMockBattle = () => {
-      // 현재 스토어의 설정값과 스쿼드를 복사하여 게임에 전달
       const currentConfig = JSON.parse(JSON.stringify(config));
       const squad = JSON.parse(JSON.stringify(config.blueTeamRoles));
-      
-      setMockData({
-          isMock: true,
-          config: currentConfig,
-          squad: squad
-      });
+      setMockData({ isMock: true, config: currentConfig, squad: squad });
       setShowMockBattle(true);
   };
 
   const renderUnitRow = (unit, index, teamType) => {
     return (
         <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
-            background: teamType === 'blue' ? "#112233" : "#331111", 
-            padding: "8px 12px", 
-            borderRadius: "4px", 
-            borderLeft: `4px solid ${teamType === 'blue' ? '#88ccff' : '#ff8888'}`,
-            marginBottom: "6px",
-            width: "100%",      
-            boxSizing: "border-box"
+            display: "flex", alignItems: "center", background: teamType === 'blue' ? "#112233" : "#331111", 
+            padding: "8px 12px", borderRadius: "4px", borderLeft: `4px solid ${teamType === 'blue' ? '#88ccff' : '#ff8888'}`,
+            marginBottom: "6px", width: "100%", boxSizing: "border-box"
         }}>
             <span style={{ minWidth: "25px", color: "#666", fontWeight: "bold" }}>#{index+1}</span>
             <select 
                 value={unit.role} 
                 onInput={(e) => handleRoleChange(teamType, index, e.target.value)}
                 style={{ 
-                    padding: "5px", borderRadius: "4px", 
-                    border: `1px solid ${teamType === 'blue' ? '#446688' : '#884444'}`, 
-                    background: teamType === 'blue' ? "#001122" : "#220000", 
-                    color: "white", width: "110px", marginRight: "10px", fontWeight: "bold", fontSize: "0.9em",
-                    flexShrink: 0
+                    padding: "5px", borderRadius: "4px", border: `1px solid ${teamType === 'blue' ? '#446688' : '#884444'}`, 
+                    background: teamType === 'blue' ? "#001122" : "#220000", color: "white", width: "110px", marginRight: "10px", fontWeight: "bold", fontSize: "0.9em", flexShrink: 0
                 }}
             >
                 <For each={Object.keys(config.roleDefinitions)}>
@@ -266,19 +258,10 @@ const DevPage = () => {
                 </For>
             </select>
             <div style={{ display: "flex", gap: "15px", fontSize: "0.85em", color: "#ccc", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
-                <span title="Health" style={{whiteSpace: "nowrap"}}>❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
-                <span title="Attack/Heal Power" style={{whiteSpace: "nowrap"}}>{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
-                <span title="Defense" style={{whiteSpace: "nowrap"}}>🛡️ <span style={{color: "#aaaaff"}}>{unit.defense ?? 0}</span></span>
-                <span title="Move Speed" style={{whiteSpace: "nowrap"}}>👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
-                <span title="Action Cooldown" style={{whiteSpace: "nowrap"}}>⏱️ <span style={{color: "#66bb6a"}}>{unit.attackCooldown}</span></span>
-                {unit.skillCooldown > 0 && (
-                    <span title="Skill Info" style={{color: "#ff88ff", borderLeft: "1px solid #555", paddingLeft: "10px", whiteSpace: "nowrap"}}>
-                        ✨ CD:{unit.skillCooldown/1000}s R:{unit.skillRange}
-                    </span>
-                )}
-                <span title="Kill Reward" style={{whiteSpace: "nowrap", borderLeft: "1px solid #555", paddingLeft: "10px"}}>
-                    💰 <span style={{color: "#ffd700"}}>{unit.killReward ?? 10}</span>
-                </span>
+                <span title="Health">❤️ <span style={{color: "#fff"}}>{unit.hp}</span></span>
+                <span title="Power">{unit.role === 'Healer' ? '💊' : '⚔️'} <span style={{color: "#ffca28"}}>{unit.attackPower}</span></span>
+                <span title="Defense">🛡️ <span style={{color: "#aaaaff"}}>{unit.defense ?? 0}</span></span>
+                <span title="Speed">👟 <span style={{color: "#42a5f5"}}>{unit.moveSpeed}</span></span>
             </div>
         </div>
     );
@@ -289,10 +272,7 @@ const DevPage = () => {
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "border-bottom": "2px solid #444", "padding-bottom": "10px" }}>
         <h1 style={{ margin: 0 }}>🐱 Tactics Dev Console</h1>
         <div style={{ display: "flex", gap: "10px" }}>
-            {/* [New] 모의전투 버튼 */}
-            <button onClick={handleStartMockBattle} style={{ ...btnStyle, background: "#ff9900", color: "black", border: "2px solid #ffcc00" }}>
-                ⚔️ Start Mock Battle
-            </button>
+            <button onClick={handleStartMockBattle} style={{ ...btnStyle, background: "#ff9900", color: "black", border: "2px solid #ffcc00" }}>⚔️ Start Mock Battle</button>
             <button onClick={() => navigate('/')} style={btnStyle}>⬅ Back to Game</button>
         </div>
       </div>
@@ -303,7 +283,7 @@ const DevPage = () => {
 
       <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "20px", "margin-top": "30px" }}>
         
-        {/* --- Global & AI Settings --- */}
+        {/* --- Global Settings --- */}
         <section style={cardStyle}>
           <h2 style={sectionHeaderStyle}>⚙️ Global Settings</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -314,9 +294,7 @@ const DevPage = () => {
                     onChange={(e) => setConfig("showDebugStats", e.target.checked)} 
                     style={{marginRight: "10px", transform: "scale(1.2)"}}
                 />
-                <span style={{color: config.showDebugStats ? "#44ff44" : "#888", fontWeight: "bold"}}>
-                    Show Debug Stats (FPS/Mem)
-                </span>
+                <span style={{color: config.showDebugStats ? "#44ff44" : "#888", fontWeight: "bold"}}>Show Debug Stats</span>
             </label>
 
             <label style={rowStyle}>
@@ -335,13 +313,25 @@ const DevPage = () => {
 
             <label style={rowStyle}>
                 <span style={{ color: "#ffdd00", fontWeight: "bold", marginRight: "10px" }}>💰 Initial Coins:</span>
-                <input 
-                    type="number" 
-                    value={config.gameSettings.initialCoins}
-                    onInput={(e) => setConfig("gameSettings", "initialCoins", parseInt(e.target.value))}
-                    style={inputStyle}
-                />
+                <input type="number" value={config.gameSettings.initialCoins} onInput={(e) => setConfig("gameSettings", "initialCoins", parseInt(e.target.value))} style={inputStyle} />
             </label>
+
+            <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
+                <label style={rowStyle}>
+                    <span style={{ color: "#ffaaaa", fontWeight: "bold", marginRight: "5px" }}>⚠️ Enemy Reinforce (Turns):</span>
+                    <input type="number" min="1" value={config.gameSettings.reinforcementInterval} onInput={(e) => setConfig("gameSettings", "reinforcementInterval", parseInt(e.target.value))} style={{...inputStyle, width: "60px"}} />
+                </label>
+                <label style={rowStyle}>
+                    <span style={{ color: "#aaaaff", fontWeight: "bold", marginRight: "5px" }}>📉 Fatigue Penalty (0~1):</span>
+                    <input type="number" step="0.01" max="1" value={config.gameSettings.fatiguePenaltyRate} onInput={(e) => setConfig("gameSettings", "fatiguePenaltyRate", parseFloat(e.target.value))} style={{...inputStyle, width: "60px"}} />
+                </label>
+            </div>
+
+            <div style={{ display: "flex", gap: "15px", flexWrap: "wrap", background: "#334433", padding: "10px", borderRadius: "5px" }}>
+                <span style={{ color: "#aaffaa", fontWeight: "bold", width: "100%" }}>📈 Growth per Level</span>
+                <label>HP+: <input type="number" value={config.gameSettings.growthHp} onInput={(e) => setConfig("gameSettings", "growthHp", parseInt(e.target.value))} style={{...inputStyle, width: "50px"}} /></label>
+                <label>ATK+: <input type="number" value={config.gameSettings.growthAtk} onInput={(e) => setConfig("gameSettings", "growthAtk", parseInt(e.target.value))} style={{...inputStyle, width: "50px"}} /></label>
+            </div>
 
             <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap", marginTop: "10px" }}>
                 <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px", ...inputStyle }} /></label>
@@ -357,25 +347,11 @@ const DevPage = () => {
              <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
                  <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
                  <div style={{display: "flex", gap: "15px", flexWrap: "wrap"}}>
-                     <label title="HP % to trigger fleeing">
-                         Flee HP% <br/>
-                         <input type="number" step="0.05" min="0" max="1" 
-                             value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} 
-                             onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} 
-                             style={{ width: "60px", marginTop: "5px", ...inputStyle }} 
-                         />
-                     </label>
-                     <label title="HP % regenerated per second when idle">
-                         Idle Regen/s <br/>
-                         <input type="number" step="0.005" min="0" max="0.5" 
-                             value={config.aiSettings.common?.hpRegenRate ?? 0.01} 
-                             onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} 
-                             style={{ width: "60px", marginTop: "5px", ...inputStyle }} 
-                         />
-                     </label>
+                     <label>Flee HP% <input type="number" step="0.05" value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
+                     <label>Idle Regen/s <input type="number" step="0.005" value={config.aiSettings.common?.hpRegenRate ?? 0.01} onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
                  </div>
              </div>
-
+             
              <div style={{display: "flex", gap: "20px"}}>
                 <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
                 <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
@@ -437,56 +413,39 @@ const DevPage = () => {
             </div>
         </section>
 
-        {/* --- Class Base Stats & Skills --- */}
+        {/* --- Class Base Stats & Economy --- */}
         <section style={{ background: "#222", padding: "20px", "border-radius": "8px", "grid-column": "span 2", border: "1px solid #444" }}>
-            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Base Stats & Cost</h2>
-            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(300px, 1fr))", gap: "15px" }}>
+            <h2 style={{ color: "#ffd700", "margin-top": 0 }}>📊 Class Stats & Economy</h2>
+            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(320px, 1fr))", gap: "15px" }}>
                 <For each={Object.keys(config.roleDefinitions)}>
                     {(role) => (
-                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${role === 'Shooter' ? '#d8f' : role === 'Tanker' ? '#48f' : role === 'Healer' ? '#8f8' : role === 'Leader' ? '#ffd700' : role === 'Raccoon' ? '#ff8844' : '#aaa'}` }}>
+                    <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid #888` }}>
                         <div style={{display: "flex", "justify-content": "space-between", "margin-bottom": "10px"}}>
                             <h4 style={{ margin: "0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
-                            <label style={{ fontSize: "0.9em", color: "#ffdd00" }}>
-                                💵Cost: 
-                                <input 
-                                    type="number" 
-                                    value={config.unitCosts?.[role] ?? 0} 
-                                    onInput={(e) => handleCostChange(role, parseInt(e.target.value))}
-                                    style={{ width: "50px", marginLeft:"5px", ...inputStyle, borderColor: "#aa8800" }} 
-                                />
-                            </label>
+                            <div style={{display: "flex", gap: "10px"}}>
+                                <label style={{ fontSize: "0.8em", color: "#ffdd00" }}>
+                                    Buy: <input type="number" value={config.unitCosts?.[role] ?? 0} onInput={(e) => handleCostChange(role, parseInt(e.target.value))} style={{ width: "40px", ...inputStyle, borderColor: "#aa8800" }} />
+                                </label>
+                                <label style={{ fontSize: "0.8em", color: "#ff8888" }}>
+                                    Maint: <input type="number" value={config.roleDefinitions[role].maintenance ?? 0} onInput={(e) => handleStatChange(role, "maintenance", parseInt(e.target.value))} style={{ width: "40px", ...inputStyle, borderColor: "#884444" }} />
+                                </label>
+                            </div>
                         </div>
                         
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
                             <label style={statLabelStyle}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={statInputStyle} /></label>
-                            
-                            <label style={statLabelStyle}>
-                                {role === 'Healer' ? 'Heal Amt' : 'ATK'}
-                                <input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} />
-                            </label>
-                            
+                            <label style={statLabelStyle}>ATK<input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} /></label>
                             <label style={statLabelStyle}>DEF<input type="number" value={config.roleDefinitions[role].defense ?? 0} onInput={(e) => handleStatChange(role, "defense", parseInt(e.target.value))} style={statInputStyle} /></label>
-
                             <label style={statLabelStyle}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={statInputStyle} /></label>
                             
                             <label style={{...statLabelStyle, color: "#aaffaa"}}>
                                 {role === 'Healer' ? 'Motion CD' : 'ATK CD'}
-                                <input 
-                                    type="number" 
-                                    value={config.roleDefinitions[role].attackCooldown || 500} 
-                                    onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} 
-                                    style={{ ...statInputStyle, background: "#112211", borderColor: "#484", color: "#afa" }} 
-                                />
+                                <input type="number" value={config.roleDefinitions[role].attackCooldown || 500} onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#112211", borderColor: "#484", color: "#afa" }} />
                             </label>
 
                             <label style={{...statLabelStyle, color: "#ffd700"}}>
                                 Kill Reward
-                                <input 
-                                    type="number" 
-                                    value={config.roleDefinitions[role].killReward ?? 10} 
-                                    onInput={(e) => handleStatChange(role, "killReward", parseInt(e.target.value))} 
-                                    style={{ ...statInputStyle, background: "#221100", borderColor: "#aa8800", color: "#ffd700" }} 
-                                />
+                                <input type="number" value={config.roleDefinitions[role].killReward ?? 10} onInput={(e) => handleStatChange(role, "killReward", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#221100", borderColor: "#aa8800", color: "#ffd700" }} />
                             </label>
                             
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
@@ -500,10 +459,7 @@ const DevPage = () => {
                             )}
                             
                             {config.roleDefinitions[role].aggroStackLimit !== undefined && (
-                                <label style={{...statLabelStyle, color: "#ffaaaa"}}>
-                                    Aggro Stack
-                                    <input type="number" value={config.roleDefinitions[role].aggroStackLimit} onInput={(e) => handleStatChange(role, "aggroStackLimit", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220000", borderColor: "#844", color: "#faa" }} />
-                                </label>
+                                <label style={{...statLabelStyle, color: "#ffaaaa"}}>Aggro Stack<input type="number" value={config.roleDefinitions[role].aggroStackLimit} onInput={(e) => handleStatChange(role, "aggroStackLimit", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220000", borderColor: "#844", color: "#faa" }} /></label>
                             )}
 
                             {config.roleDefinitions[role].attackRange !== undefined && (
@@ -520,13 +476,7 @@ const DevPage = () => {
         <section style={{ background: "#223344", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
             <h2 style={{ color: "#88ccff", margin: 0 }}>🛡️ Blue Team</h2>
-            <label>Count: 
-                <input type="number" min="1" max="12" 
-                    value={config.gameSettings.blueCount} 
-                    onInput={(e) => handleCountChange('blue', parseInt(e.target.value))}
-                    style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} 
-                />
-            </label>
+            <label>Count: <input type="number" min="1" max="12" value={config.gameSettings.blueCount} onInput={(e) => handleCountChange('blue', parseInt(e.target.value))} style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} /></label>
           </div>
           <div style={{ display: "block" }}>
             <For each={config.blueTeamRoles}>
@@ -539,13 +489,7 @@ const DevPage = () => {
         <section style={{ background: "#442222", padding: "20px", "border-radius": "8px" }}>
           <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px"}}>
             <h2 style={{ color: "#ff8888", margin: 0 }}>🐺 Red Team (Default)</h2>
-            <label>Count: 
-                <input type="number" min="1" max="12"
-                    value={config.gameSettings.redCount} 
-                    onInput={(e) => handleCountChange('red', parseInt(e.target.value))}
-                    style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} 
-                />
-            </label>
+            <label>Count: <input type="number" min="1" max="12" value={config.gameSettings.redCount} onInput={(e) => handleCountChange('red', parseInt(e.target.value))} style={{ marginLeft: "10px", width: "50px", padding: "5px", ...inputStyle }} /></label>
           </div>
           <div style={{ display: "block" }}>
             <For each={config.redTeamRoles}>
@@ -564,17 +508,12 @@ const DevPage = () => {
                 {feedbacks().length === 0 ? <div style={{color: "#888"}}>No feedbacks yet.</div> : (
                     <For each={feedbacks()}>
                         {(item) => (
-                        <div style={{ 
-                            background: "#444", padding: "10px", marginBottom: "8px", borderRadius: "4px",
-                            display: "flex", justifyContent: "space-between", alignItems: "center"
-                        }}>
+                        <div style={{ background: "#444", padding: "10px", marginBottom: "8px", borderRadius: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <div>
                                 <div style={{color: "#fff", fontWeight: "bold"}}>{item.message}</div>
                                 <div style={{color: "#aaa", fontSize: "0.8em"}}>{new Date(item.timestamp).toLocaleString()}</div>
                             </div>
-                            <button onClick={() => handleDeleteFeedback(item.id)} style={{
-                                background: "#ff4444", color: "white", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer"
-                            }}>Delete</button>
+                            <button onClick={() => handleDeleteFeedback(item.id)} style={{ background: "#ff4444", color: "white", border: "none", borderRadius: "4px", padding: "5px 10px", cursor: "pointer" }}>Delete</button>
                         </div>
                         )}
                     </For>
@@ -583,43 +522,12 @@ const DevPage = () => {
         </section>
 
       </div>
-
-      <button onClick={saveConfig} style={{
-        "margin-top": "40px", padding: "15px 40px", "font-size": "20px", 
-        "background-color": "#007bff", color: "white", border: "none", 
-        "border-radius": "8px", cursor: "pointer", "font-weight": "bold",
-        "margin-bottom": "80px"
-      }}>
-        💾 Save Config to DB
-      </button>
-
-      <div style={{ "margin-top": "20px", color: "#666" }}>
-        * Refresh the game page after saving to apply changes.
-      </div>
-
-      {/* [New] Mock Battle Modal */}
+      <button onClick={saveConfig} style={{ "margin-top": "40px", padding: "15px 40px", "font-size": "20px", "background-color": "#007bff", color: "white", border: "none", "border-radius": "8px", cursor: "pointer", "font-weight": "bold", "margin-bottom": "80px" }}>💾 Save Config to DB</button>
+      
       <Show when={showMockBattle()}>
-          <div style={{
-              position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
-              background: "rgba(0,0,0,0.8)", zIndex: 1000,
-              display: "flex", justifyContent: "center", alignItems: "center"
-          }}>
-              <div style={{
-                  width: "90%", height: "90%", background: "#000", border: "2px solid #ff9900",
-                  position: "relative", borderRadius: "10px", overflow: "hidden"
-              }}>
-                  <button 
-                      onClick={() => setShowMockBattle(false)}
-                      style={{
-                          position: "absolute", top: "10px", right: "20px",
-                          background: "#ff4444", color: "white", border: "none",
-                          fontSize: "20px", fontWeight: "bold", cursor: "pointer", zIndex: 2000,
-                          padding: "5px 15px", borderRadius: "5px"
-                      }}
-                  >
-                      CLOSE X
-                  </button>
-                  {/* 모의전투용 PhaserGame 인스턴스 */}
+          <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <div style={{ width: "90%", height: "90%", background: "#000", border: "2px solid #ff9900", position: "relative", borderRadius: "10px", overflow: "hidden" }}>
+                  <button onClick={() => setShowMockBattle(false)} style={{ position: "absolute", top: "10px", right: "20px", background: "#ff4444", color: "white", border: "none", fontSize: "20px", fontWeight: "bold", cursor: "pointer", zIndex: 2000, padding: "5px 15px", borderRadius: "5px" }}>CLOSE X</button>
                   <PhaserGame mockData={mockData()} />
               </div>
           </div>
@@ -628,7 +536,6 @@ const DevPage = () => {
   );
 };
 
-// Styles
 const btnStyle = { padding: '10px 20px', marginRight: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', border: 'none', borderRadius: '5px', background: '#444', color: '#ddd' };
 const cardStyle = { background: "#2a2a2a", padding: "20px", "border-radius": "8px" };
 const sectionHeaderStyle = { color: "#aaa", "margin-top": 0 };
