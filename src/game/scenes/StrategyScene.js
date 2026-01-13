@@ -1,3 +1,4 @@
+// src/game/scenes/StrategyScene.js
 import BaseScene from './BaseScene'; 
 import Phaser from 'phaser';
 import sangsuMap from '../../assets/maps/sangsu_map.json'; 
@@ -22,42 +23,40 @@ import SaveManager from '../managers/SaveManager';
 
 import ShopModal from '../ui/ShopModal';
 import SystemModal from '../ui/SystemModal';
+import pathData from '../data/path.json'; 
 
 export default class StrategyScene extends BaseScene {
     constructor() {
         super('StrategyScene'); 
     }
 
-    // ... (init, preload, create, getCurrentGameData, saveProgress, fetchStrategyConfig, initializeGameWorld 등은 기존 유지)
     init(data) {
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
         }
         
         const savedData = SaveManager.loadGame();
+        this.isNewGame = !savedData; 
 
-        if (this.registry.get('playerCoins') === undefined) {
-            this.registry.set('playerCoins', savedData?.playerCoins ?? 10);
-        }
-
-        if (!this.registry.get('playerSquad')) {
-            this.registry.set('playerSquad', savedData?.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
-        }
-
-        if (!this.registry.get('unlockedRoles')) {
-            this.registry.set('unlockedRoles', savedData?.unlockedRoles || ['Normal']);
-        }
-
-        if (savedData && savedData.worldMapData) {
-            this.registry.set('worldMapData', savedData.worldMapData);
-        }
-
-        if (savedData && savedData.leaderPosition) {
-            this.registry.set('leaderPosition', savedData.leaderPosition);
-        }
-
-        if (this.registry.get('turnCount') === undefined) {
-            this.registry.set('turnCount', savedData?.turnCount ?? 1);
+        if (savedData) {
+            if (this.registry.get('playerCoins') === undefined) {
+                this.registry.set('playerCoins', savedData.playerCoins ?? 10);
+            }
+            if (!this.registry.get('playerSquad')) {
+                this.registry.set('playerSquad', savedData.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
+            }
+            if (!this.registry.get('unlockedRoles')) {
+                this.registry.set('unlockedRoles', savedData.unlockedRoles || ['Normal']);
+            }
+            if (savedData.worldMapData) {
+                this.registry.set('worldMapData', savedData.worldMapData);
+            }
+            if (savedData.leaderPosition) {
+                this.registry.set('leaderPosition', savedData.leaderPosition);
+            }
+            if (this.registry.get('turnCount') === undefined) {
+                this.registry.set('turnCount', savedData.turnCount ?? 1);
+            }
         }
     }
 
@@ -136,6 +135,23 @@ export default class StrategyScene extends BaseScene {
         } catch (e) {
             console.error("❌ Failed to load strategy config:", e);
         }
+        
+        if (this.isNewGame) {
+             const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
+             this.registry.set('playerCoins', initialCoins);
+             
+             if (!this.registry.get('playerSquad')) {
+                 this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
+             }
+             if (!this.registry.get('unlockedRoles')) {
+                 this.registry.set('unlockedRoles', ['Normal']);
+             }
+             if (this.registry.get('turnCount') === undefined) {
+                 this.registry.set('turnCount', 1);
+             }
+             console.log(`💰 [StrategyScene] New Game Initialized with Coins: ${initialCoins}`);
+        }
+
         this.initializeGameWorld(map, armyData);
     }
 
@@ -275,17 +291,26 @@ export default class StrategyScene extends BaseScene {
         const w = this.scale.width;
         const h = this.scale.height;
         const isMobile = w < 600; 
-        const topBarH = isMobile ? 60 : 50;
+
+        // [Modified] 모바일 상단 안전 영역 (Notch/Status Bar) 대응
+        const safeAreaTop = isMobile ? 40 : 0; 
+        const barHeight = isMobile ? 60 : 50;
+        
+        // 전체 TopBar 높이 = 안전영역 + 원래 바 높이
+        const topBarH = barHeight + safeAreaTop;
+        // 컨텐츠 중앙 위치 = 안전영역 + (바 높이 / 2)
+        const contentY = safeAreaTop + (barHeight / 2);
+
         const fontSize = isMobile ? '13px' : '16px'; 
 
         const topBarBg = this.add.rectangle(0, 0, w, topBarH, 0x000000, 0.6).setOrigin(0, 0);
         const coins = this.registry.get('playerCoins');
-        this.coinText = this.add.text(isMobile ? 10 : 20, topBarH/2, `💰 ${coins}냥`, { fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(0, 0.5);
+        this.coinText = this.add.text(isMobile ? 10 : 20, contentY, `💰 ${coins}냥`, { fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(0, 0.5);
         
         const rightMargin = isMobile ? 15 : 20;
         const btnSpacing = isMobile ? 40 : 50;
 
-        this.sysBtn = this.add.text(w - rightMargin, topBarH/2, "⚙️", { fontSize: isMobile ? '20px' : '24px' })
+        this.sysBtn = this.add.text(w - rightMargin, contentY, "⚙️", { fontSize: isMobile ? '20px' : '24px' })
             .setOrigin(1, 0.5)
             .setInteractive();
         
@@ -294,7 +319,7 @@ export default class StrategyScene extends BaseScene {
             this.systemModal.toggle();
         });
 
-        this.bgmBtn = this.add.text(w - rightMargin - btnSpacing, topBarH/2, "🔊", { fontSize: isMobile ? '20px' : '24px' })
+        this.bgmBtn = this.add.text(w - rightMargin - btnSpacing, contentY, "🔊", { fontSize: isMobile ? '20px' : '24px' })
             .setOrigin(1, 0.5)
             .setInteractive();
         
@@ -305,7 +330,7 @@ export default class StrategyScene extends BaseScene {
 
         const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
         const safeTextWidth = w - (isMobile ? 180 : 300); 
-        this.statusText = this.add.text(w / 2, topBarH/2, currentStatusMsg, { fontSize: fontSize, color: '#ffffff', align: 'center', wordWrap: { width: safeTextWidth, useAdvancedWrap: true } }).setOrigin(0.5, 0.5);
+        this.statusText = this.add.text(w / 2, contentY, currentStatusMsg, { fontSize: fontSize, color: '#ffffff', align: 'center', wordWrap: { width: safeTextWidth, useAdvancedWrap: true } }).setOrigin(0.5, 0.5);
 
         const btnMargin = isMobile ? 50 : 60;
         this.endTurnBtnObj = this.createStyledButton(w - (isMobile ? 85 : 100), h - btnMargin, '턴 종료', 0xcc0000, () => {
@@ -318,7 +343,8 @@ export default class StrategyScene extends BaseScene {
             this.shopModal.toggle();
         });
 
-        this.undoBtnObj = this.createStyledButton(w / 2, h - (btnMargin + 20), '이동 취소', 0x666666, () => this.undoMove());
+        // [Modified] 이동 취소 버튼 위치 수정 (부대편성 버튼과 동일한 위치)
+        this.undoBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '이동 취소', 0x666666, () => this.undoMove());
         this.undoBtnObj.container.setVisible(false);
 
         if (isMobile) {
@@ -601,15 +627,14 @@ export default class StrategyScene extends BaseScene {
             const layers = map.objects;
             if (layers && Object.keys(layers).length > 0) { objectLayer = layers[Object.keys(layers)[0]]; }
         }
+
         let nodes = [];
         if (objectLayer && objectLayer.objects) {
             nodes = objectLayer.objects.map(obj => {
                 const config = territoryConfig.territories[obj.id.toString()] || territoryConfig.default;
-                
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
                 
-                // 1. 소유자 결정 (Config 'neutral' 체크)
                 let initialOwner = 'enemy';
                 let text = "";
                 if (config.neutral) {
@@ -619,8 +644,6 @@ export default class StrategyScene extends BaseScene {
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : initialOwner;
                 
-                // 2. 초기 병력 결정
-                // Config에 "unit"이 있으면 기본 병력으로 설정 (예: "Runner" -> type: "runner")
                 let configArmy = null;
                 if (config.unit) {
                     configArmy = { type: config.unit.toLowerCase(), count: config.count || 1 };
@@ -628,53 +651,56 @@ export default class StrategyScene extends BaseScene {
 
                 let armyData = null;
                 if (savedNode) {
-                    if (savedNode.owner === 'player') {
-                        armyData = null; 
-                    } else if (savedNode.army) {
-                        armyData = savedNode.army; 
-                    } else {
-                        if (dbArmyData && dbArmyData[obj.id.toString()]) {
-                            armyData = dbArmyData[obj.id.toString()];
-                        } else {
-                            armyData = configArmy; // 저장된게 없으면 Config 사용
-                        }
+                    if (savedNode.owner === 'player') armyData = null;
+                    else if (savedNode.army) armyData = savedNode.army;
+                    else {
+                         if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
+                         else armyData = configArmy;
                     }
                 } else {
-                    if (dbArmyData && dbArmyData[obj.id.toString()]) {
-                        armyData = dbArmyData[obj.id.toString()];
-                    } else {
-                        armyData = configArmy; // DB도 없으면 Config 사용
-                    }
+                    if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
+                    else armyData = configArmy;
                 }
 
                 return {
-                    id: obj.id, x: obj.x, y: obj.y, name: config.name || obj.name || `Territory ${obj.id}`,
-                    owner: owner, connectedTo: [], levelIndex: finalLevelIndex, desc: config.description || "",
+                    id: obj.id, 
+                    x: obj.x, 
+                    y: obj.y, 
+                    name: config.name || obj.name || `Territory ${obj.id}`,
+                    owner: owner, 
+                    connectedTo: [], 
+                    levelIndex: finalLevelIndex, 
+                    desc: config.description || "",
                     text: text,
-                    army: armyData, bgm: config.bgm || "stage1_bgm" 
+                    army: armyData, 
+                    bgm: config.bgm || "stage1_bgm" 
                 };
             });
         } else {
-            nodes = [{ id: 1, x: 200, y: 300, owner: 'player', name: 'Base', connectedTo: [], levelIndex: 0 }, { id: 2, x: 400, y: 300, owner: 'enemy', name: 'Target', connectedTo: [], levelIndex: 0 }];
+            // fallback
         }
-        if (!existingData && nodes.length > 0) {
-            let startNode = nodes.reduce((prev, curr) => { const prevScore = prev.y - prev.x; const currScore = curr.y - curr.x; return (currScore > prevScore) ? curr : prev; });
-            startNode.owner = 'player'; startNode.name = "유니타워";
-        }
+
+        // [New] path.json 기반 연결 설정
         nodes.forEach(node => {
-            const others = nodes.filter(n => n.id !== node.id).map(n => ({ id: n.id, dist: Phaser.Math.Distance.Between(node.x, node.y, n.x, n.y) }));
-            others.sort((a, b) => a.dist - b.dist);
-            const neighbors = others.slice(0, 2);
-            neighbors.forEach(nb => {
-                if (!node.connectedTo.includes(nb.id)) node.connectedTo.push(nb.id);
-                const targetNode = nodes.find(n => n.id === nb.id);
-                if (targetNode && !targetNode.connectedTo.includes(node.id)) { targetNode.connectedTo.push(node.id); }
-            });
+            const nodeIdStr = node.id.toString();
+            if (pathData[nodeIdStr]) {
+                pathData[nodeIdStr].forEach(targetId => {
+                    if (targetId === node.id) return;
+                    if (!node.connectedTo.includes(targetId)) {
+                        node.connectedTo.push(targetId);
+                    }
+                    const targetNode = nodes.find(n => n.id === targetId);
+                    if (targetNode && !targetNode.connectedTo.includes(node.id)) {
+                        targetNode.connectedTo.push(node.id);
+                    }
+                });
+            }
         });
+
         this.registry.set('worldMapData', nodes);
     }
-
-    // [Modified] 다양한 유닛 토큰 지원
+    
+    // ... (rest of the code)
     createEnemyTokens() {
         if (!this.mapNodes) return;
         
@@ -689,11 +715,9 @@ export default class StrategyScene extends BaseScene {
 
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
-                // army.type 값에 맞춰 토큰 텍스처 결정 (기본: dog_token)
                 let textureKey = 'dog_token';
                 const type = node.army.type ? node.army.type.toLowerCase() : 'dog';
                 
-                // 매핑 로직
                 if (type === 'runner') textureKey = 'runner_token';
                 else if (type === 'dog') textureKey = 'dog_token';
                 else if (type === 'tanker') textureKey = 'tanker_token';
@@ -717,7 +741,6 @@ export default class StrategyScene extends BaseScene {
                 }
                 enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
                 
-                // 애니메이션 재생 (타입별)
                 if (type === 'runner') enemyObj.play('runner_idle');
                 else if (type === 'tanker') enemyObj.play('tanker_idle');
                 else if (type === 'shooter') enemyObj.play('shooter_idle');
@@ -725,7 +748,6 @@ export default class StrategyScene extends BaseScene {
                 else if (type === 'raccoon') enemyObj.play('raccoon_idle');
                 else if (type === 'normal') enemyObj.play('normal_idle');
                 else if (type === 'dog') enemyObj.play('dog_idle');
-                // 나머지는 idle 애니메이션이 있다면 재생 (없으면 멈춤)
                 
                 this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
                 

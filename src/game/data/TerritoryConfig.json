@@ -66,8 +66,17 @@
       "difficulty": 2,
       "bgm": "level2",
       "neutral": true,
-      "unit": "Shooter",
+      "unit": "Raccoon",
       "text": "이 곳은 한강파의 영역이다냥!"
+    },
+    "16": {
+      "mapId": "level4",
+      "name": "빈민가",
+      "difficulty": 2,
+      "bgm": "level2",
+      "neutral": true,
+      "unit": "Healer",
+      "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!"
     }
   }
 }
