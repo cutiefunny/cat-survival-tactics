@@ -7,12 +7,25 @@ export default class BaseScene extends Phaser.Scene {
     }
 
     create() {
-        // 공통 리사이즈 이벤트 리스너 등록
-        this.scale.on('resize', (gameSize, baseSize, displaySize, previousWidth, previousHeight) => {
+        // [Modified] 리스너 참조를 저장하여 제거 가능하게 변경
+        this.onResize = (gameSize, baseSize, displaySize, previousWidth, previousHeight) => {
             if (this.handleResize) {
                 this.handleResize(gameSize);
             }
-        }, this);
+        };
+
+        // 공통 리사이즈 이벤트 리스너 등록
+        this.scale.on('resize', this.onResize, this);
+
+        // [New] 씬 종료 시 이벤트 리스너 제거 (메모리 누수 및 좀비 이벤트 방지)
+        this.events.on('shutdown', () => {
+            this.scale.off('resize', this.onResize, this);
+        });
+
+        // [New] 씬 파괴 시에도 확실하게 제거
+        this.events.on('destroy', () => {
+            this.scale.off('resize', this.onResize, this);
+        });
     }
 
     /**
