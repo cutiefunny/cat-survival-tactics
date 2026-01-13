@@ -50,7 +50,6 @@
       "name": "레드로드",
       "difficulty": 2,
       "bgm": "level2",
-      "neutral": true,
       "unit": "Tanker",
       "text": "이 곳은 중간보스 '탱크'가 지키고 있다."
     },
@@ -77,6 +76,14 @@
       "neutral": true,
       "unit": "Healer",
       "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!"
+    },
+    "20": {
+      "mapId": "level4",
+      "name": "상수역",
+      "difficulty": 2,
+      "bgm": "level2",
+      "unit": "Boss",
+      "text": "최종장"
     }
   }
 }

@@ -12,6 +12,7 @@ import shooterImg from '../../assets/units/shooter.png';
 import healerImg from '../../assets/units/healer.png';
 import raccoonImg from '../../assets/units/raccoon.png';
 import normalImg from '../../assets/units/normal.png';
+import bossImg from '../../assets/units/boss.png'; // [New] 보스 이미지 임포트
 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
@@ -72,6 +73,7 @@ export default class StrategyScene extends BaseScene {
         this.load.spritesheet('healer_token', healerImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('raccoon_token', raccoonImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('normal_token', normalImg, { frameWidth: 100, frameHeight: 100 });
+        this.load.spritesheet('boss_token', bossImg, { frameWidth: 100, frameHeight: 100 }); // [New] 보스 토큰 로드
 
         this.load.audio('opening_bgm', openingBgm);
     }
@@ -338,13 +340,13 @@ export default class StrategyScene extends BaseScene {
             else this.handleTurnEnd();
         });
         
-        this.shopBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
+        this.shopBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
             if (this.systemModal.isOpen) this.systemModal.toggle();
             this.shopModal.toggle();
         });
 
-        // [Modified] 이동 취소 버튼 위치 수정 (부대편성 버튼과 동일한 위치)
-        this.undoBtnObj = this.createStyledButton(isMobile ? 85 : 100, h - btnMargin, '이동 취소', 0x666666, () => this.undoMove());
+        // [Modified] 이동 취소 버튼 위치 수정
+        this.undoBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '이동 취소', 0x666666, () => this.undoMove());
         this.undoBtnObj.container.setVisible(false);
 
         if (isMobile) {
@@ -429,7 +431,12 @@ export default class StrategyScene extends BaseScene {
             this.hasMoved = true; 
             if (this.selectedTargetId) {
                 let infoText = ""; if (node.army) infoText = ` (적군: ${node.army.count}마리)`;
-                this.statusText.setText(`⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`);
+                
+                // [Modified] 텍스트 설정이 있다면 함께 표시
+                const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
+                const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
+
+                this.statusText.setText(finalMsg);
             } else { this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); }
             this.updateUIState();
         });
@@ -574,6 +581,7 @@ export default class StrategyScene extends BaseScene {
         if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
         if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('boss_idle')) { this.anims.create({ key: 'boss_idle', frames: this.anims.generateFrameNumbers('boss_token', { frames: [0] }), frameRate: 1, repeat: -1 }); } // [New] 보스 애니메이션
     }
 
     update(time, delta) {
@@ -635,12 +643,10 @@ export default class StrategyScene extends BaseScene {
                 const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
                 
-                let initialOwner = 'enemy';
-                let text = "";
-                if (config.neutral) {
-                    initialOwner = 'neutral';
-                    text = config.text || "";
-                }
+                // [Modified] neutral 여부에 상관없이 text는 config에서 가져옴
+                let initialOwner = config.neutral ? 'neutral' : 'enemy';
+                let text = config.text || "";
+                
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
                 const owner = savedNode ? savedNode.owner : initialOwner;
                 
@@ -700,7 +706,6 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
     
-    // ... (rest of the code)
     createEnemyTokens() {
         if (!this.mapNodes) return;
         
@@ -725,6 +730,7 @@ export default class StrategyScene extends BaseScene {
                 else if (type === 'healer') textureKey = 'healer_token';
                 else if (type === 'raccoon') textureKey = 'raccoon_token';
                 else if (type === 'normal') textureKey = 'normal_token';
+                else if (type === 'boss') textureKey = 'boss_token'; // [New] 보스 토큰 할당
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 
@@ -734,10 +740,14 @@ export default class StrategyScene extends BaseScene {
 
                 let finalSize = 60;
                 if (node.owner === 'neutral') { finalSize = 55; if (type === 'tanker') { finalSize = 70; }} 
-                else { 
-                    const armyCount = node.army.count || 1; 
-                    finalSize = 50 + (armyCount - 5) * 5; 
-                    finalSize = Phaser.Math.Clamp(finalSize, 30, 90); 
+                else {
+                    if (type === 'tanker') { finalSize = 70; }
+                    else if (type === 'boss') { finalSize = 100; }
+                    else{ 
+                        const armyCount = node.army.count || 1; 
+                        finalSize = 50 + (armyCount - 5) * 5; 
+                        finalSize = Phaser.Math.Clamp(finalSize, 30, 90); 
+                    }
                 }
                 enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
                 
@@ -748,6 +758,7 @@ export default class StrategyScene extends BaseScene {
                 else if (type === 'raccoon') enemyObj.play('raccoon_idle');
                 else if (type === 'normal') enemyObj.play('normal_idle');
                 else if (type === 'dog') enemyObj.play('dog_idle');
+                else if (type === 'boss') enemyObj.play('boss_idle'); // [New] 보스 애니메이션 재생
                 
                 this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
                 
