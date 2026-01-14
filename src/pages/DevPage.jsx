@@ -30,6 +30,7 @@ const DEFAULT_CONFIG = {
   gameSettings: { 
       blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, 
       initialCoins: 50, 
+      territoryIncome: 2, // [New] 영토당 수입 기본값
       reinforcementInterval: 3, // 적군 증원 주기 (턴)
       fatiguePenaltyRate: 0.05, // 피로도 1당 패널티 비율
       growthHp: 10, // 레벨업당 체력 증가
@@ -98,6 +99,7 @@ const DevPage = () => {
         merged.gameSettings.redCount = rCount;
         
         // [New] 기본값 보장 로직 추가
+        if (merged.gameSettings.territoryIncome === undefined) merged.gameSettings.territoryIncome = 2;
         if (merged.gameSettings.reinforcementInterval === undefined) merged.gameSettings.reinforcementInterval = 3;
         if (merged.gameSettings.fatiguePenaltyRate === undefined) merged.gameSettings.fatiguePenaltyRate = 0.05;
         if (merged.gameSettings.growthHp === undefined) merged.gameSettings.growthHp = 10;
@@ -286,57 +288,94 @@ const DevPage = () => {
         {/* --- Global Settings --- */}
         <section style={cardStyle}>
           <h2 style={sectionHeaderStyle}>⚙️ Global Settings</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <label style={{display: "flex", alignItems: "center", cursor: "pointer", background: "#333", padding: "10px", borderRadius: "5px"}}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            
+            {/* 1. Debug Option */}
+            <label style={{display: "flex", alignItems: "center", cursor: "pointer", background: "#222", padding: "8px 12px", borderRadius: "4px", border: "1px solid #444"}}>
                 <input 
                     type="checkbox" 
                     checked={config.showDebugStats} 
                     onChange={(e) => setConfig("showDebugStats", e.target.checked)} 
                     style={{marginRight: "10px", transform: "scale(1.2)"}}
                 />
-                <span style={{color: config.showDebugStats ? "#44ff44" : "#888", fontWeight: "bold"}}>Show Debug Stats</span>
+                <span style={{color: config.showDebugStats ? "#44ff44" : "#ccc", fontWeight: "bold"}}>Show Debug Stats Overlay</span>
             </label>
 
-            <label style={rowStyle}>
-                <span style={{ color: "#aaa", fontWeight: "bold", marginRight: "10px" }}>🚀 Start Level:</span>
-                <select 
-                    value={config.gameSettings.startLevelIndex ?? 0}
-                    onInput={(e) => setConfig("gameSettings", "startLevelIndex", parseInt(e.target.value))}
-                    style={inputStyle}
-                >
-                    <option value={-1}>🚫 No Map</option>
-                    <For each={LEVEL_KEYS}>
-                        {(level, idx) => <option value={idx()}>{idx()}: {level}</option>}
-                    </For>
-                </select>
-            </label>
+            {/* 2. Map & Spawn Settings */}
+            {/* <div style={groupStyle}>
+                <div style={groupLabelStyle}>🗺️ MAP & SPAWN</div>
+                <div style={compactRowStyle}>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#aaa"}}>Start Map:</span>
+                        <select 
+                            value={config.gameSettings.startLevelIndex ?? 0}
+                            onInput={(e) => setConfig("gameSettings", "startLevelIndex", parseInt(e.target.value))}
+                            style={{...inputStyle, width: "120px"}}
+                        >
+                            <option value={-1}>🚫 None</option>
+                            <For each={LEVEL_KEYS}>
+                                {(level, idx) => <option value={idx()}>{idx()}: {level}</option>}
+                            </For>
+                        </select>
+                    </label>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#aaa"}}>Spawn Y:</span>
+                        <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#aaa"}}>Gap:</span>
+                        <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                </div>
+            </div> */}
 
-            <label style={rowStyle}>
-                <span style={{ color: "#ffdd00", fontWeight: "bold", marginRight: "10px" }}>💰 Initial Coins:</span>
-                <input type="number" value={config.gameSettings.initialCoins} onInput={(e) => setConfig("gameSettings", "initialCoins", parseInt(e.target.value))} style={inputStyle} />
-            </label>
-
-            <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
-                <label style={rowStyle}>
-                    <span style={{ color: "#ffaaaa", fontWeight: "bold", marginRight: "5px" }}>⚠️ Enemy Reinforce (Turns):</span>
-                    <input type="number" min="1" value={config.gameSettings.reinforcementInterval} onInput={(e) => setConfig("gameSettings", "reinforcementInterval", parseInt(e.target.value))} style={{...inputStyle, width: "60px"}} />
-                </label>
-                <label style={rowStyle}>
-                    <span style={{ color: "#aaaaff", fontWeight: "bold", marginRight: "5px" }}>📉 Fatigue Penalty (0~1):</span>
-                    <input type="number" step="0.01" max="1" value={config.gameSettings.fatiguePenaltyRate} onInput={(e) => setConfig("gameSettings", "fatiguePenaltyRate", parseFloat(e.target.value))} style={{...inputStyle, width: "60px"}} />
-                </label>
+            {/* 3. Economy Settings */}
+            <div style={groupStyle}>
+                <div style={groupLabelStyle}>💰 ECONOMY</div>
+                <div style={compactRowStyle}>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#ffd700"}}>Initial Coins:</span>
+                        <input type="number" value={config.gameSettings.initialCoins} onInput={(e) => setConfig("gameSettings", "initialCoins", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                    <div style={{width: "1px", height: "20px", background: "#555"}}></div>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#44ff44"}}>Territory Income:</span>
+                        <input type="number" value={config.gameSettings.territoryIncome} onInput={(e) => setConfig("gameSettings", "territoryIncome", parseInt(e.target.value))} style={shortInputStyle} />
+                        <span style={{fontSize: "0.8em", color: "#666"}}>/turn</span>
+                    </label>
+                </div>
             </div>
 
-            <div style={{ display: "flex", gap: "15px", flexWrap: "wrap", background: "#334433", padding: "10px", borderRadius: "5px" }}>
-                <span style={{ color: "#aaffaa", fontWeight: "bold", width: "100%" }}>📈 Growth per Level</span>
-                <label>HP+: <input type="number" value={config.gameSettings.growthHp} onInput={(e) => setConfig("gameSettings", "growthHp", parseInt(e.target.value))} style={{...inputStyle, width: "50px"}} /></label>
-                <label>ATK+: <input type="number" value={config.gameSettings.growthAtk} onInput={(e) => setConfig("gameSettings", "growthAtk", parseInt(e.target.value))} style={{...inputStyle, width: "50px"}} /></label>
+            {/* 4. Game Rules */}
+            <div style={groupStyle}>
+                <div style={groupLabelStyle}>⚖️ RULES & BALANCE</div>
+                <div style={compactRowStyle}>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#ffaaaa"}}>Reinforce Turn:</span>
+                        <input type="number" min="1" value={config.gameSettings.reinforcementInterval} onInput={(e) => setConfig("gameSettings", "reinforcementInterval", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#aaaaff"}}>Fatigue Penalty:</span>
+                        <input type="number" step="0.01" max="1" value={config.gameSettings.fatiguePenaltyRate} onInput={(e) => setConfig("gameSettings", "fatiguePenaltyRate", parseFloat(e.target.value))} style={shortInputStyle} />
+                    </label>
+                </div>
             </div>
 
-            <div style={{ display: "flex", gap: "20px", "flex-wrap": "wrap", marginTop: "10px" }}>
-                <label>Spawn Gap: <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px", ...inputStyle }} /></label>
-                <label>Start Y: <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={{ marginLeft: "5px", width: "50px", ...inputStyle }} /></label>
+            {/* 5. Level Up Growth */}
+            <div style={groupStyle}>
+                <div style={groupLabelStyle}>📈 LEVEL UP GROWTH</div>
+                <div style={compactRowStyle}>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#ff8888"}}>HP+:</span>
+                        <input type="number" value={config.gameSettings.growthHp} onInput={(e) => setConfig("gameSettings", "growthHp", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                        <span style={{color: "#ffcc88"}}>ATK+:</span>
+                        <input type="number" value={config.gameSettings.growthAtk} onInput={(e) => setConfig("gameSettings", "growthAtk", parseInt(e.target.value))} style={shortInputStyle} />
+                    </label>
+                </div>
             </div>
+
           </div>
         </section>
 
@@ -543,5 +582,9 @@ const inputStyle = { background: "#222", color: "white", border: "1px solid #555
 const rowStyle = {display: "flex", alignItems: "center", background: "#333", padding: "10px", borderRadius: "5px"};
 const statLabelStyle = {fontSize: "0.8em", color:"#ccc"};
 const statInputStyle = { width: "100%", background: "#111", color: "white", border: "1px solid #555", padding: "4px" };
+const shortInputStyle = { ...inputStyle, width: "70px", textAlign: "center" };
+const groupStyle = { background: "#333", padding: "10px", borderRadius: "5px", display: "flex", flexDirection: "column", gap: "8px" };
+const groupLabelStyle = { color: "#888", fontSize: "0.85em", fontWeight: "bold", marginBottom: "4px", borderBottom: "1px solid #555", paddingBottom: "2px" };
+const compactRowStyle = { display: "flex", alignItems: "center", gap: "15px", flexWrap: "wrap" };
 
 export default DevPage;

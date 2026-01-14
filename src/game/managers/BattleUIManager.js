@@ -98,6 +98,57 @@ export default class BattleUIManager {
         }
     }
 
+    createRetreatConfirmModal(onConfirm, onCancel) {
+        const { width, height } = this.scene.scale;
+        
+        // 입력 차단용 배경
+        const bg = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6)
+            .setInteractive()
+            .setDepth(3000);
+
+        const modal = this.scene.add.container(width / 2, height / 2).setDepth(3001);
+        
+        const panel = this.scene.add.rectangle(0, 0, 400, 250, 0x222222)
+            .setStrokeStyle(3, 0xffaa00);
+        
+        const titleText = this.scene.add.text(0, -60, "전장에서 이탈하시겠습니까?", {
+            fontSize: '22px', fontStyle: 'bold', color: '#ffffff'
+        }).setOrigin(0.5);
+
+        const descText = this.scene.add.text(0, -10, "후퇴 시 모든 아군의\n피로도가 2 증가합니다.", {
+            fontSize: '18px', color: '#cccccc', align: 'center'
+        }).setOrigin(0.5);
+
+        // 확인 버튼
+        const confirmBtn = this.scene.add.container(-90, 70);
+        const cBg = this.scene.add.rectangle(0, 0, 140, 50, 0xcc4444).setInteractive({ useHandCursor: true });
+        const cText = this.scene.add.text(0, 0, "후퇴", { fontSize: '20px', fontStyle: 'bold' }).setOrigin(0.5);
+        cBg.setStrokeStyle(2, 0xffffff);
+        confirmBtn.add([cBg, cText]);
+        
+        cBg.on('pointerdown', () => {
+            bg.destroy();
+            modal.destroy();
+            onConfirm();
+        });
+
+        // 취소 버튼
+        const cancelBtn = this.scene.add.container(90, 70);
+        const cancelBg = this.scene.add.rectangle(0, 0, 140, 50, 0x444444).setInteractive({ useHandCursor: true });
+        const cancelText = this.scene.add.text(0, 0, "취소", { fontSize: '20px', fontStyle: 'bold' }).setOrigin(0.5);
+        cancelBg.setStrokeStyle(2, 0xffffff);
+        cancelBtn.add([cancelBg, cancelText]);
+
+        cancelBg.on('pointerdown', () => {
+            bg.destroy();
+            modal.destroy();
+            onCancel();
+        });
+
+        modal.add([panel, titleText, descText, confirmBtn, cancelBtn]);
+    }
+
+
     updateDebugStats(loop) {
         if (!this.isDebugEnabled) return;
         

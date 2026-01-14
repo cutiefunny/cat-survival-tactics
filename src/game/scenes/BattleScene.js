@@ -295,20 +295,29 @@ export default class BattleScene extends BaseScene {
                 const tCity2 = map.addTilesetImage('City2', 'tiles_city2');
                 if (tCity1) tilesets.push(tCity1); if (tCity2) tilesets.push(tCity2);
                 map.tilesets.forEach(ts => {
-                    if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
-                    let imgKey = null;
-                    const name = ts.name;
-                    if (name.includes('Park')) imgKey = 'tiles_park';
-                    else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
-                    else if (name.includes('street2') || name === 'Street2') imgKey = 'tiles_street2';
-                    else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
-                    else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
-                    else if (name.includes('Road')) imgKey = 'tiles_road';
-                    else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
-                    else if (name.includes('City')) imgKey = 'tiles_city';
-                    else if (name.includes('Car') || name === 'car') imgKey = 'tiles_car';
-                    if (imgKey) { const t = map.addTilesetImage(ts.name, imgKey); if (t) tilesets.push(t); }
-                });
+                if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
+                let imgKey = null;
+                const name = ts.name;
+                
+                // [Modified] 타일셋 이름 매핑 로직 보강
+                if (name.includes('Park')) imgKey = 'tiles_park';
+                else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
+                
+                // "level5-2"가 "street2"를 포함하지 않으므로 명시적 확인 추가
+                else if (name.includes('street2') || name === 'Street2' || name === 'level5-2') imgKey = 'tiles_street2'; 
+                
+                else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
+                else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
+                
+                // "level5"가 "Road"를 포함하지 않으므로 명시적 확인 추가
+                else if (name.includes('Road') || name === 'level5') imgKey = 'tiles_road'; 
+                
+                else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
+                else if (name.includes('City')) imgKey = 'tiles_city';
+                else if (name.includes('Car') || name === 'car') imgKey = 'tiles_car';
+                
+                if (imgKey) { const t = map.addTilesetImage(ts.name, imgKey); if (t) tilesets.push(t); }
+            });
             }
             const validTilesets = tilesets.filter(t => t);
             const groundLayer = map.createLayer('Ground', validTilesets, 0, 0);
@@ -769,6 +778,12 @@ export default class BattleScene extends BaseScene {
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { this.playerUnit.tryUseSkill(); }
         }
+
+        // [New] 맵 끝단 도달 시 후퇴 체크
+        if (!this.isGameOver && !this.isRetreatModalOpen) {
+            this.checkRetreatCondition();
+        }
+
         if (!this.blueTeam || !this.redTeam || this.isGameOver || this.isSetupPhase) return;
         if (!this.battleStarted && this.playerUnit?.active) {
             this.checkBattleTimer -= delta;
@@ -796,7 +811,8 @@ export default class BattleScene extends BaseScene {
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
 
-    finishGame(message, color, isWin) {
+    // [Modified] fatiguePenalty 매개변수 유지 (후퇴 시 2)
+    finishGame(message, color, isWin, fatiguePenalty = 1) {
         if (this.isGameOver) return; 
         this.isGameOver = true;
         this.physics.pause();
@@ -808,25 +824,65 @@ export default class BattleScene extends BaseScene {
 
         const currentSquad = this.registry.get('playerSquad') || [];
         const fallenUnits = this.registry.get('fallenUnits') || [];
-        const nextSquad = [];
+        // [New] 포로 목록 데이터 로드
+        const prisonerList = this.registry.get('prisonerList') || [];
         
+        const nextSquad = [];
         const leveledUpUnits = [];
         const deadUnits = [];
+        const capturedUnits = []; // 이번 전투에서 잡힌 포로들
 
+        // 1. 후퇴(fatiguePenalty >= 2) 시 포로 발생 로직 계산
+        let prisonersToTake = 0;
+        if (!isWin && fatiguePenalty >= 2) {
+            const rand = Math.random() * 100;
+            if (rand < 2) prisonersToTake = 3;       // 2% 확률로 3명
+            else if (rand < 7) prisonersToTake = 2;  // 5% 확률로 2명 (누적 7%)
+            else if (rand < 17) prisonersToTake = 1; // 10% 확률로 1명 (누적 17%)
+        }
+
+        // 포로 후보군 선정 (리더 제외, 이번에 죽은 유닛 제외)
+        const captureCandidates = currentSquad.map((u, i) => i).filter(i => {
+            const member = currentSquad[i];
+            return member.role !== 'Leader' && !this.deadSquadIndices.includes(i);
+        });
+
+        // 후보군 셔플 후 선정
+        Phaser.Utils.Array.Shuffle(captureCandidates);
+        const selectedPrisonerIndices = captureCandidates.slice(0, prisonersToTake);
+
+        // 2. 부대원 상태 처리 루프
         currentSquad.forEach((member, i) => {
             if (member.role === 'Leader') {
                 member.name = '김냐냐';
             }
 
             if (this.deadSquadIndices.includes(i)) {
-                fallenUnits.push({
+                // [사망 처리]
+                if (member.role === 'Leader') {
+                    member.fatigue = (member.fatigue || 0) + 5;
+                    nextSquad.push(member);
+                    console.log("🤕 Leader revived with fatigue penalty (+5)");
+                } else {
+                    fallenUnits.push({
+                        ...member,
+                        deathDate: new Date().toISOString(),
+                        cause: 'Killed by Wild Dog',
+                        deathLevel: this.currentLevelIndex + 1
+                    });
+                    deadUnits.push({ name: member.name, role: member.role });
+                }
+            } else if (selectedPrisonerIndices.includes(i)) {
+                // [New] [포로 처리]
+                prisonerList.push({
                     ...member,
-                    deathDate: new Date().toISOString(),
-                    cause: 'Killed by Wild Dog',
-                    deathLevel: this.currentLevelIndex + 1
+                    capturedDate: new Date().toISOString(),
+                    capturedLevel: this.currentLevelIndex + 1
                 });
-                deadUnits.push({ name: member.name, role: member.role });
+                capturedUnits.push({ name: member.name, role: member.role });
+                console.log(`⛓️ Unit Captured: ${member.name} (${member.role})`);
             } else {
+                // [생존 처리]
                 member.xp = (member.xp || 0) + xpGained;
                 let leveledUp = false;
                 let oldLevel = member.level || 1;
@@ -849,13 +905,15 @@ export default class BattleScene extends BaseScene {
                     });
                 }
 
-                member.fatigue = (member.fatigue || 0) + 1;
+                member.fatigue = (member.fatigue || 0) + fatiguePenalty;
                 nextSquad.push(member);
             }
         });
 
+        // 3. 데이터 저장
         this.registry.set('playerSquad', nextSquad);
         this.registry.set('fallenUnits', fallenUnits);
+        this.registry.set('prisonerList', prisonerList); // 포로 목록 저장
 
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
@@ -870,6 +928,12 @@ export default class BattleScene extends BaseScene {
 
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
+
+        // [New] 결과 메시지에 포로 정보 추가
+        if (capturedUnits.length > 0) {
+            const names = capturedUnits.map(u => u.name).join(", ");
+            message += `\n⛓️ 포로 발생: ${names}`;
+        }
 
         if (this.isStrategyMode) {
             btnText = isWin ? "맵으로" : "맵으로";
@@ -898,10 +962,56 @@ export default class BattleScene extends BaseScene {
             stats: { 
                 rewardCoins: totalRewardCoins, 
                 leveledUpUnits: leveledUpUnits,
-                deadUnits: deadUnits
+                deadUnits: deadUnits,
+                capturedUnits: capturedUnits // [New] UI에 전달
             }
         };
         this.uiManager.createGameOverUI(resultData, callback);
+    }
+
+    checkRetreatCondition() {
+        // [Fix] 플레이어 유닛이 없거나 비활성 상태라면 로직을 수행하지 않고 종료
+        if (!this.playerUnit || !this.playerUnit.active) return;
+
+        const bounds = this.physics.world.bounds;
+        // baseSize 참조 전에 this.playerUnit 존재 여부를 확인했으므로 안전함
+        const padding = this.playerUnit.baseSize / 2 + 5; 
+        const { x, y } = this.playerUnit;
+
+        // 맵의 4면 중 어디라도 닿으면 트리거
+        if (x <= bounds.x + padding || x >= bounds.width - padding || 
+            y <= bounds.y + padding || y >= bounds.height - padding) {
+            this.triggerRetreat();
+        }
+    }
+
+    triggerRetreat() {
+        this.isRetreatModalOpen = true;
+        this.physics.pause(); // 게임 일시 정지
+        
+        // 리더 유닛 이동 정지 (모달 닫은 후 즉시 재진입 방지용으로 약간 튕겨냄)
+        this.playerUnit.setVelocity(0, 0);
+        const bounds = this.physics.world.bounds;
+        const centerX = bounds.x + bounds.width / 2;
+        const centerY = bounds.y + bounds.height / 2;
+        const angle = Phaser.Math.Angle.Between(this.playerUnit.x, this.playerUnit.y, centerX, centerY);
+        const pushBackDist = 30;
+        this.playerUnit.setPosition(
+            this.playerUnit.x + Math.cos(angle) * pushBackDist,
+            this.playerUnit.y + Math.sin(angle) * pushBackDist
+        );
+
+        this.uiManager.createRetreatConfirmModal(
+            () => { // 확인 (후퇴)
+                this.isRetreatModalOpen = false;
+                // 후퇴 시 승리=false, 피로도 패널티=2 적용
+                this.finishGame("작전상 후퇴!", "#ffaa00", false, 2);
+            },
+            () => { // 취소 (계속하기)
+                this.isRetreatModalOpen = false;
+                this.physics.resume();
+            }
+        );
     }
 
     nextLevel(score) {

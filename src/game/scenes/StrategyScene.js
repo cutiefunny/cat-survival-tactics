@@ -552,12 +552,18 @@ export default class StrategyScene extends BaseScene {
             totalMaintenanceCost += maintenance;
         });
         
-        // ... (이하 로직 동일)
+        // [New] 영토 수입 계산 (기본값: 영토당 2냥, DB 설정값 우선)
+        const ownedTerritories = this.mapNodes ? this.mapNodes.filter(n => n.owner === 'player').length : 0;
+        const incomePerTerritory = this.strategySettings?.gameSettings?.territoryIncome ?? 2;
+        const totalIncome = ownedTerritories * incomePerTerritory;
+
         let currentCoins = this.registry.get('playerCoins');
         let isBankrupt = false;
         
-        currentCoins -= totalMaintenanceCost;
-        console.log(`💸 [Maintenance] Cost: ${totalMaintenanceCost}, Remaining: ${currentCoins}`);
+        // 수입 추가 및 유지비 차감
+        currentCoins = currentCoins + totalIncome - totalMaintenanceCost;
+        
+        console.log(`💰 [Turn End] Income: +${totalIncome} (Terr: ${ownedTerritories}), Cost: -${totalMaintenanceCost}, Result: ${currentCoins}`);
 
         if (currentCoins < 0) {
             isBankrupt = true;
@@ -619,12 +625,18 @@ export default class StrategyScene extends BaseScene {
             this.statusText.setText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`);
             this.statusText.setColor('#ff4444');
         } else {
-            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (급식비 ${totalMaintenanceCost}냥 지출)` : "";
-            this.statusText.setText(`🌙 턴 종료. 행동력 회복.${maintenanceMsg}${warningMsg}`);
+            const incomeMsg = totalIncome > 0 ? ` (+${totalIncome})` : "";
+            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (-${totalMaintenanceCost})` : "";
+            
+            this.statusText.setText(`🌙 턴 종료${incomeMsg}${maintenanceMsg}${warningMsg}`);
             this.statusText.setColor(warningMsg ? '#ffaaaa' : '#ffffff');
             
+            // [New] 수입 및 지출 플로팅 텍스트 표시
+            if (totalIncome > 0) {
+                this.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
+            }
             if (totalMaintenanceCost > 0) {
-                this.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥`, '#ff4444');
+                this.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
             }
         }
         
@@ -723,6 +735,12 @@ export default class StrategyScene extends BaseScene {
                 const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
                 
                 let initialOwner = config.neutral ? 'neutral' : 'enemy';
+                
+                // [Modified] 1번 구역(ID: 1)은 게임 시작 시 무조건 플레이어 소유로 고정
+                if (obj.id === 1) {
+                    initialOwner = 'player';
+                }
+
                 let text = config.text || "";
                 
                 const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
@@ -742,8 +760,13 @@ export default class StrategyScene extends BaseScene {
                          else armyData = configArmy;
                     }
                 } else {
-                    if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
-                    else armyData = configArmy;
+                    // [Modified] 플레이어 소유인 경우(1번 구역 등)에는 초기 적군(armyData)을 제거
+                    if (owner === 'player') {
+                        armyData = null;
+                    } else {
+                        if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
+                        else armyData = configArmy;
+                    }
                 }
 
                 return {
