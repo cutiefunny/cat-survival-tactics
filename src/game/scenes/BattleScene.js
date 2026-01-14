@@ -18,11 +18,11 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; 
 
-// [Managers & Systems]
+// [Managers] - systems 폴더에서 managers 폴더로 통합됨
 import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
-import CombatManager from '../systems/CombatManager';
-import PathfindingManager from '../systems/PathfindingManager'; 
+import CombatManager from '../managers/CombatManager';       // [Changed] Path updated
+import PathfindingManager from '../managers/PathfindingManager'; // [Changed] Path updated
 
 // [Assets]
 import stage1Data from '../../assets/maps/stage1.json';

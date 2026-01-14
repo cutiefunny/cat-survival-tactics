@@ -63,11 +63,28 @@ export default class CombatManager {
         const now = this.scene.time.now;
         
         if (now > attacker.lastAttackTime + attacker.attackCooldown) {
-            defender.takeDamage(attacker.attackPower);
+            
+            // [New] 백어택 판정 로직: 뒤에서 맞으면 데미지 1.5배
+            let damageMultiplier = 1.0;
+            
+            // defender.flipX가 true면 우측, false면 좌측을 보고 있음
+            const isFacingRight = defender.flipX;
+            const isAttackerOnLeft = attacker.x < defender.x;
+            const isAttackerOnRight = attacker.x > defender.x;
+
+            // 방어자가 오른쪽을 보는데 공격자가 왼쪽에 있거나,
+            // 방어자가 왼쪽을 보는데 공격자가 오른쪽에 있으면 백어택
+            if ((isFacingRight && isAttackerOnLeft) || (!isFacingRight && isAttackerOnRight)) {
+                damageMultiplier = 1.5;
+            }
+
+            // 데미지 적용
+            defender.takeDamage(attacker.attackPower * damageMultiplier);
+            
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            // [New] 타격 성공 시, 사운드 재생 요청
+            // 타격 성공 시, 사운드 재생 요청
             if (this.scene.playHitSound) {
                 this.scene.playHitSound();
             }
