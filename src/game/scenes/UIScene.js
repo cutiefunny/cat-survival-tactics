@@ -184,8 +184,18 @@ export default class UIScene extends Phaser.Scene {
     updateSquadButton(state) {
         if (!this.squadBtn) return;
         const bg = this.squadBtn.list[0]; const text = this.squadBtn.list[1];
-        if (state === 'FORMATION') { bg.setFillStyle(0x0088ff); text.setText('대형유지'); } 
-        else { bg.setFillStyle(0x444444); text.setText('자율공격'); }
+        
+        if (state === 'FORMATION') { 
+            bg.setFillStyle(0x0088ff); 
+            text.setText('대형유지'); 
+        } else if (state === 'HOLD') {
+            // [New] 홀드 상태 UI (보라색)
+            bg.setFillStyle(0x8844ff); 
+            text.setText('홀드');
+        } else { 
+            bg.setFillStyle(0x444444); 
+            text.setText('자율공격'); 
+        }
     }
     updateSpeedButton(speed) {
         if (!this.speedBtn) return;

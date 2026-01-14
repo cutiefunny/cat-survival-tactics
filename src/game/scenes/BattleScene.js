@@ -733,7 +733,15 @@ export default class BattleScene extends BaseScene {
         if (!this.isAutoBattle && this.playerUnit?.body) this.playerUnit.setVelocity(0);
     }
     toggleSquadState() {
-        this.squadState = (this.squadState === 'FREE') ? 'FORMATION' : 'FREE';
+        // [Modified] 3단계 상태 토글: FREE -> FORMATION -> HOLD -> FREE
+        if (this.squadState === 'FREE') {
+            this.squadState = 'FORMATION';
+        } else if (this.squadState === 'FORMATION') {
+            this.squadState = 'HOLD';
+        } else {
+            this.squadState = 'FREE';
+        }
+        
         this.uiManager.updateSquadButton(this.squadState);
     }
     toggleGameSpeed() {

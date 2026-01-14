@@ -234,9 +234,23 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 this.updateAI(delta);
             } else {
                 switch (this.scene.squadState) {
-                    case 'FORMATION': this.ai.followLeader(); break;
-                    case 'FLEE': this.ai.runAway(delta); break;
-                    case 'FREE': default: this.updateAI(delta); break;
+                    case 'FORMATION': 
+                        this.ai.followLeader(); 
+                        break;
+                    case 'HOLD': 
+                        // [New] 홀드 상태: 이동을 멈추고 제자리에 대기
+                        this.setVelocity(0, 0);
+                        // 걷는 애니메이션 중이라면 정지
+                        if (this.anims.isPlaying && this.anims.currentAnim.key.includes('walk')) {
+                            this.stop();
+                            this.setFrame(0); // Idle 프레임
+                        }
+                        // AI 로직(updateAI)을 호출하지 않으므로 이동/추격하지 않음
+                        break;
+                    case 'FREE': 
+                    default: 
+                        this.updateAI(delta); 
+                        break;
                 }
             }
         } else {
