@@ -9,17 +9,13 @@ export default class Healer extends Unit {
         this.aggroStackLimit = stats.aggroStackLimit || 10;
         this.healStack = 0;
         
-        // [Modified] 하드코딩 제거 -> DevPage 설정값(Unit.js에서 this.skillRange로 설정됨) 사용
-        // 만약 설정값이 없으면 기본값 200 사용
         if (!this.skillRange) this.skillRange = 200;
 
         console.log(`💚 [Healer] Spawned! Heal CD: ${this.skillMaxCooldown}ms, Range: ${this.skillRange}, Aggro Limit: ${this.aggroStackLimit}`);
     }
 
-    // [Fix] 스킬 사용 시도: 성공 여부에 따라 쿨타임 적용
     tryUseSkill() {
         if (this.skillTimer <= 0 && this.skillMaxCooldown > 0) {
-            // performSkill이 true를 반환할 때만 쿨타임 리셋
             const isSuccess = this.performSkill(); 
             if (isSuccess) {
                 this.skillTimer = this.skillMaxCooldown;
@@ -27,58 +23,57 @@ export default class Healer extends Unit {
         }
     }
 
-    // 대열 유지 모드 로직
     updateNpcLogic(delta) {
         if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
-            // 사거리 내에 치료 가능한 아군이 있는지 확인
             const targetInRange = this.findLowestHpAllyInRange(this.skillRange);
-            
             if (targetInRange) {
                 this.updateAI(delta);
                 return;
             }
         }
-        
-        // 환자가 없거나 멀면 -> 리더 따라가기 (대열 복귀)
         super.updateNpcLogic(delta);
     }
 
     updateAI(delta) {
+        // 1. 도발(Taunt) 상태 체크
+        this.ai.processAggro(delta);
+        if (this.ai.isProvoked) {
+            if (this.ai.currentTarget && this.ai.currentTarget.active) {
+                this.ai.moveToTargetSmart(delta);
+            }
+            return; 
+        }
+
         this.ai.thinkTimer -= delta;
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
-        // 1. [타겟 선정]
+        // 2. [타겟 선정] 가장 위급한 아군 찾기
         let bestTarget = null;
-
         if (isFormationMode) {
-            // 대열모드: 사거리 내의 아군 중에서만 타겟 선정 (자가 치유 포함)
-            if (this.hp / this.maxHp <= 0.3) {
-                bestTarget = this; 
-            } else {
-                bestTarget = this.findLowestHpAllyInRange(this.skillRange);
-            }
+            if (this.hp / this.maxHp <= 0.3) bestTarget = this; 
+            else bestTarget = this.findLowestHpAllyInRange(this.skillRange);
         } else {
-            // 일반모드: 전체 아군 중 가장 위급한 대상
-            if (this.hp / this.maxHp <= 0.3) {
-                bestTarget = this; 
-            } else {
-                bestTarget = this.ai.findLowestHpAlly();
-            }
+            if (this.hp / this.maxHp <= 0.3) bestTarget = this; 
+            // [Fix] this.ai.findLowestHpAlly() -> this.findLowestHpAlly()
+            else bestTarget = this.findLowestHpAlly(); 
         }
 
-        // 타겟 교체 로직
-        if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying || this.ai.currentTarget.hp >= this.ai.currentTarget.maxHp) {
+        if (!bestTarget && !isFormationMode) bestTarget = this.findLowestHpAlly();
+
+        // 3. [Sticky Targeting] 타겟 교체 로직
+        const current = this.ai.currentTarget;
+        
+        if (!current || !current.active || current.isDying || current.hp >= current.maxHp) {
             this.ai.currentTarget = bestTarget;
-        } else if (bestTarget && bestTarget !== this.ai.currentTarget) {
+        } else if (bestTarget && bestTarget !== current) {
             if (bestTarget === this) {
                 this.ai.currentTarget = bestTarget;
             } 
-            else if (bestTarget.hp < this.ai.currentTarget.hp - 10) {
+            else if (bestTarget.hp < current.hp - 10) {
                 this.ai.currentTarget = bestTarget;
             }
         }
         
-        // 대열모드에서 타겟이 벗어나면 해제
         if (isFormationMode && this.ai.currentTarget && this.ai.currentTarget !== this) {
             const dist = Phaser.Math.Distance.Between(this.x, this.y, this.ai.currentTarget.x, this.ai.currentTarget.y);
             if (dist > this.skillRange) {
@@ -86,7 +81,7 @@ export default class Healer extends Unit {
             }
         }
 
-        // 2. [이동 및 행동]
+        // 4. [이동 및 행동]
         if (this.ai.currentTarget) {
             const target = this.ai.currentTarget;
             const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
@@ -102,26 +97,42 @@ export default class Healer extends Unit {
             }
 
             // [일반 모드] 추적 힐
-            const moveBuffer = 30; 
             const isStopped = this.body.speed < 10;
-            const threshold = isStopped ? (this.skillRange + moveBuffer) : this.skillRange;
+            const threshold = isStopped ? (this.skillRange - 10) : (this.skillRange - 40);
             
             if (dist <= threshold) {
                 this.setVelocity(0, 0);
+                this.ai.currentPath = [];
                 this.updateFlipX(); 
                 this.tryUseSkill();
             } else {
-                this.scene.physics.moveToObject(this, target, this.moveSpeed);
-                this.updateFlipX();
+                if (target !== this) {
+                    this.ai.moveToTargetSmart(delta);
+                }
             }
         } else {
-            // 타겟 없음
             if (isFormationMode) {
                 this.setVelocity(0, 0); 
             } else {
                 this.maintainSafePosition(); 
             }
         }
+    }
+
+    findLowestHpAlly() {
+        const allies = (this.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
+        let lowestHp = Infinity;
+        let target = null;
+
+        for (const ally of allies) {
+            if (ally.active && !ally.isDying && ally.hp < ally.maxHp) {
+                if (ally.hp < lowestHp) {
+                    lowestHp = ally.hp;
+                    target = ally;
+                }
+            }
+        }
+        return target;
     }
 
     findLowestHpAllyInRange(range) {
@@ -196,6 +207,9 @@ export default class Healer extends Unit {
             this.setFlipX(false);
         } else if (this.body.velocity.x > 20) {
             this.setFlipX(true);
+        } else if (this.ai.currentTarget && this.ai.currentTarget.active) {
+            const diffX = this.ai.currentTarget.x - this.x;
+            if (Math.abs(diffX) > 10) this.setFlipX(diffX > 0);
         }
     }
 
@@ -219,16 +233,13 @@ export default class Healer extends Unit {
         }
     }
 
-    // [Modified] 힐 성공 여부 반환 (Boolean)
     performSkill() {
         const target = this.ai.currentTarget; 
-        // 타겟이 유효하지 않으면 실패 처리 (쿨타임 소모 안 함)
         if (!target || !target.active || target.hp >= target.maxHp) {
             return false; 
         }
         
         const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-        // 사거리 체크 (안전장치)
         if (dist > this.skillRange + 10) { 
             return false; 
         }
@@ -261,7 +272,7 @@ export default class Healer extends Unit {
             }
         });
 
-        return true; // 힐 성공
+        return true; 
     }
 
     triggerAggro() {
@@ -280,7 +291,7 @@ export default class Healer extends Unit {
         enemies.forEach(enemy => {
             if (enemy.active) {
                 if (enemy.ai) enemy.ai.currentTarget = this;
-                if (enemy.isProvoked) enemy.isProvoked = false;
+                if (enemy.isProvoked) enemy.isProvoked = false; 
                 
                 const icon = this.scene.add.text(enemy.x, enemy.y - 40, "!", { 
                     fontSize: '24px', color: '#ff0000', fontStyle: 'bold' 
