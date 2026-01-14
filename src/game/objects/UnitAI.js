@@ -180,10 +180,9 @@ export default class UnitAI {
         const enemies = this.unit.targetGroup.getChildren();
         let bestTarget = null;
         
-        // 비교를 위한 최적의 값들 저장
-        let bestIsAggro = false; // 나를 공격 중인가?
-        let bestDist = Infinity; // 거리
-        let bestHp = Infinity;   // 체력
+        let bestIsAggro = false; 
+        let bestDist = Infinity; 
+        let bestHp = Infinity;   
 
         const myX = this.unit.x;
         const myY = this.unit.y;
@@ -191,14 +190,13 @@ export default class UnitAI {
         for (const enemy of enemies) {
             if (!enemy.active || enemy.isDying) continue;
 
-            // [Priority 1] 나를 때리는 적 (Aggro)
-            // 적의 현재 타겟이 '나'인지 확인
+            // [Priority 1] Aggro
             const isAggro = (enemy.ai && enemy.ai.currentTarget === this.unit);
             
-            // [Priority 2] 나와 가까운 적 (Distance)
+            // [Priority 2] Distance
             const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
             
-            // [Priority 3] 가장 약한 적 (HP)
+            // [Priority 3] HP
             const hp = enemy.hp;
 
             // 첫 번째 후보 등록
@@ -210,39 +208,49 @@ export default class UnitAI {
                 continue;
             }
 
-            // --- 비교 로직 (우선순위 순서대로) ---
+            // --- 엄격한 우선순위 비교 ---
 
-            // 1. 나를 때리는 적 우선
+            // 1순위: 나를 때리는 적 우선 (Aggro)
             if (isAggro !== bestIsAggro) {
-                if (isAggro) { // 현재 후보는 나를 때리는데, 기존 베스트는 아님 -> 교체
+                if (isAggro) { 
                     bestTarget = enemy;
                     bestIsAggro = isAggro;
                     bestDist = dist;
                     bestHp = hp;
                 }
-                // 기존 베스트가 나를 때리고, 현재 후보는 아님 -> 유지
                 continue; 
             }
 
-            // 2. 거리가 가까운 적 우선
-            // (거리 차이가 유의미하게 크면 가까운 쪽 선택)
+            // 2순위: 거리 비교 (Distance)
+            // 거리가 5px 이상 차이나면 확실하게 구분
             const distDiff = dist - bestDist;
-            if (Math.abs(distDiff) > 50) { // 50px 이상 차이나면 확실히 가까운 쪽 선택
+            
+            if (distDiff < -5) { 
+                // [Fix] 5px 이상 더 가까우면 체력 상관없이 무조건 교체
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+                continue;
+            } else if (distDiff > 5) {
+                // 5px 이상 더 멀면 고려 대상 아님
+                continue;
+            }
+
+            // 3순위: 거리가 비슷할 때(5px 이내), 가장 약한 적 우선 (HP)
+            if (hp < bestHp) {
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+            } else if (hp === bestHp) {
+                // [Fix] 체력도 같다면, 조금이라도 더 가까운 적을 선택 (Distance Tie-breaker)
                 if (dist < bestDist) {
                     bestTarget = enemy;
                     bestIsAggro = isAggro;
                     bestDist = dist;
                     bestHp = hp;
                 }
-                continue;
-            }
-
-            // 3. 거리가 비슷하다면(50px 이내), 체력이 약한 적 우선
-            if (hp < bestHp) {
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
             }
         }
         

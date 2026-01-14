@@ -224,6 +224,11 @@ export default class ShopModal {
         const textureKey = this.roleToTexture[role] || 'leader_token';
         const unitImg = this.scene.add.sprite(0, -popupH / 2 + 100, textureKey, 0).setDisplaySize(60, 60);
 
+        // [New] 레지스트리에서 성장률 설정값 가져오기 (기본값: HP 10, ATK 1)
+        const gameSettings = this.scene.registry.get('gameSettings') || {};
+        const growthHp = gameSettings.growthHp ?? 10;
+        const growthAtk = gameSettings.growthAtk ?? 1;
+
         const level = memberData.level || 1;
         const xp = memberData.xp || 0;
         const reqXp = level * 100;
@@ -239,8 +244,8 @@ export default class ShopModal {
         this.unitDetailPopup.add([bg, titleText, unitImg, lvText, xpText, fatigueText]);
 
         const computedStats = { ...stats };
-        const levelBonusHp = (level - 1) * 10;
-        const levelBonusAtk = (level - 1) * 1;
+        const levelBonusHp = (level - 1) * growthHp;
+        const levelBonusAtk = (level - 1) * growthAtk;
         
         computedStats.hp = Math.floor((stats.hp + levelBonusHp) * multiplier);
         computedStats.attackPower = Math.floor((stats.attackPower + levelBonusAtk) * multiplier);

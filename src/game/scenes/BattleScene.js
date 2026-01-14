@@ -397,6 +397,9 @@ export default class BattleScene extends BaseScene {
         this.time.timeScale = 1;
         this.playerSkillCount = 0;
         this.battleStartTime = 0;
+
+        this.retreatTimer = 0; // [New] 후퇴 타이머 초기화
+        this.isRetreatModalOpen = false; // [New] 모달 중복 실행 방지용
         
         if (config.showDebugStats) this.uiManager.createDebugStats();
         this.uiManager.createStartButton(() => this.handleStartBattle());
@@ -777,13 +780,12 @@ export default class BattleScene extends BaseScene {
         }
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { this.playerUnit.tryUseSkill(); }
+            
+            // [Modified] 맵 끝단 도달 시 후퇴 체크 (delta 전달)
+            if (!this.isGameOver && !this.isRetreatModalOpen) {
+                this.checkRetreatCondition(delta);
+            }
         }
-
-        // [New] 맵 끝단 도달 시 후퇴 체크
-        if (!this.isGameOver && !this.isRetreatModalOpen) {
-            this.checkRetreatCondition();
-        }
-
         if (!this.blueTeam || !this.redTeam || this.isGameOver || this.isSetupPhase) return;
         if (!this.battleStarted && this.playerUnit?.active) {
             this.checkBattleTimer -= delta;
@@ -969,19 +971,45 @@ export default class BattleScene extends BaseScene {
         this.uiManager.createGameOverUI(resultData, callback);
     }
 
-    checkRetreatCondition() {
-        // [Fix] 플레이어 유닛이 없거나 비활성 상태라면 로직을 수행하지 않고 종료
+    checkRetreatCondition(delta) {
+        // 플레이어 유닛이 없거나 비활성 상태라면 로직을 수행하지 않고 종료
         if (!this.playerUnit || !this.playerUnit.active) return;
 
         const bounds = this.physics.world.bounds;
-        // baseSize 참조 전에 this.playerUnit 존재 여부를 확인했으므로 안전함
-        const padding = this.playerUnit.baseSize / 2 + 5; 
+        const padding = this.playerUnit.baseSize / 2 + 10; // 여유 범위
         const { x, y } = this.playerUnit;
+        
+        let isPushing = false;
 
-        // 맵의 4면 중 어디라도 닿으면 트리거
-        if (x <= bounds.x + padding || x >= bounds.width - padding || 
-            y <= bounds.y + padding || y >= bounds.height - padding) {
-            this.triggerRetreat();
+        // 입력 상태 확인 (키보드, WASD, 조이스틱)
+        const cursors = this.cursors || {};
+        const wasd = this.wasd || {};
+        const joy = this.joystickCursors || {};
+
+        const leftInput = cursors.left?.isDown || wasd.left?.isDown || joy.left?.isDown;
+        const rightInput = cursors.right?.isDown || wasd.right?.isDown || joy.right?.isDown;
+        const upInput = cursors.up?.isDown || wasd.up?.isDown || joy.up?.isDown;
+        const downInput = cursors.down?.isDown || wasd.down?.isDown || joy.down?.isDown;
+
+        // 1. 왼쪽 벽을 밀고 있는가?
+        if (x <= bounds.x + padding && leftInput) isPushing = true;
+        // 2. 오른쪽 벽을 밀고 있는가?
+        else if (x >= bounds.width - padding && rightInput) isPushing = true;
+        // 3. 위쪽 벽을 밀고 있는가?
+        else if (y <= bounds.y + padding && upInput) isPushing = true;
+        // 4. 아래쪽 벽을 밀고 있는가?
+        else if (y >= bounds.height - padding && downInput) isPushing = true;
+
+        if (isPushing) {
+            this.retreatTimer += delta;
+            // 1초(1000ms) 이상 지속적으로 밀면 후퇴 트리거
+            if (this.retreatTimer > 1000) {
+                this.triggerRetreat();
+                this.retreatTimer = 0; 
+            }
+        } else {
+            // 밀다가 멈추거나 벽에서 떨어지면 타이머 즉시 초기화
+            this.retreatTimer = 0;
         }
     }
 

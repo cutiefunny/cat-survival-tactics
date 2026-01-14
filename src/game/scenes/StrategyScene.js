@@ -134,7 +134,10 @@ export default class StrategyScene extends BaseScene {
                     roleDefinitions: data.roleDefinitions || {}
                 };
 
-                // [New] Role Definitions를 레지스트리에 저장하여 UI(ShopModal)에서도 접근 가능하게 함
+                if (data.gameSettings) {
+                    this.registry.set('gameSettings', data.gameSettings);
+                }
+
                 if (data.roleDefinitions) {
                     this.registry.set('roleDefinitions', data.roleDefinitions);
                     console.log("✅ [StrategyScene] Role Definitions saved to Registry");
