@@ -7,15 +7,16 @@ export default class UnitAI {
 
         // [AI State]
         this.currentTarget = null;
-        this.thinkTimer = Math.random() * 200;
+        this.thinkTimer = Math.random() * 100; // 반응 속도를 위해 초기값 랜덤
         this.fleeTimer = 0;
         this.isLowHpFleeing = false;
         
-        // [New] 정찰(Roaming) 및 전투 모드 상태 변수
-        this.isCombatMode = false;      // true: 전투/추적 모드, false: 정찰 모드
-        this.spawnPos = { x: unit.x, y: unit.y }; // 스폰 위치 기억 (배회 중심점)
-        this.patrolTimer = 0;           // 다음 배회 지점 이동까지 남은 시간
-        this.patrolTarget = null;       // 현재 배회 목표 지점
+        // [Roaming & Combat State]
+        this.isCombatMode = false;      
+        this.isReturning = false;       
+        this.spawnPos = { x: unit.x, y: unit.y }; 
+        this.patrolTimer = 0;           
+        this.patrolTarget = null;       
 
         // [Aggro System]
         this.provokedTimer = 0; 
@@ -30,61 +31,59 @@ export default class UnitAI {
         this.losCheckTimer = 0;
         this.lastLosResult = true;
         
-        this.lastTargetChangeTime = 0;
+        // [Targeting State]
+        this.lastTargetChangeTime = 0; 
+        // 타겟 변경 쿨타임을 매우 짧게 줄여 반응성 향상 (기존 1000ms -> 200ms)
+        this.targetSwitchCooldown = 200; 
+
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
 
-        // [Wall Collision Handling] 벽 충돌 제어 변수
         this.wallCollisionTimer = 0;
         this.wallCollisionVector = new Phaser.Math.Vector2();
     }
 
     // =================================================================
-    // [New] 정찰(Patrol) 및 집단 대응(Aggro) 시스템
+    // [New] 정찰(Patrol) 및 타겟 탐색
     // =================================================================
 
-    // Unit.js의 updateNpcLogic에서 호출됨
-    // 반환값: true(전투 로직 실행 필요), false(정찰 중이므로 전투 로직 건너뜀)
     updateRoaming(delta) {
-        // 1. 이미 전투 중이거나 도발 상태라면 즉시 전투 로직(updateAI)으로 넘김
+        if (this.isReturning) {
+            this.handleReturnLogic(delta);
+            return false;
+        }
+
         if (this.isCombatMode || this.isProvoked) return true;
 
-        // 2. 적 탐지 (시야 범위 250px)
-        const enemy = this.findNearestEnemy();
-        if (enemy) {
-            const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, enemy.x, enemy.y);
-            // 시야 내에 적이 들어오면 전투 개시
+        // 정찰 중에도 "가장 좋은 타겟"을 지속적으로 탐색
+        const bestEnemy = this.findBestTarget();
+        if (bestEnemy) {
+            const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
+            // 감지 범위(250) 내에 적이 들어오면 전투 개시
             if (dist <= 250) {
-                // LOS 체크 (벽 뒤의 적은 감지 못하게 하려면 주석 해제)
-                // this.currentTarget = enemy; 
-                // if (!this.checkLineOfSight()) { this.currentTarget = null; return false; }
-
-                this.engageCombat(enemy);
+                this.currentTarget = bestEnemy;
+                if (!this.checkLineOfSight()) { 
+                    this.currentTarget = null; 
+                    return false; 
+                }
+                this.engageCombat(bestEnemy);
                 return true;
             }
         }
 
-        // 3. 정찰(Patrol) 로직 실행
+        // 정찰 이동 로직
         this.patrolTimer -= delta;
-
-        // 목표 지점에 도착했거나 대기 시간이 다 되면 -> 새로운 배회 지점 설정
         if (this.patrolTimer <= 0) {
-            // 스폰 지점 반경 150px 내에서 랜덤 위치 선정
             const rad = 150;
             const rx = this.spawnPos.x + (Math.random() * rad * 2 - rad);
             const ry = this.spawnPos.y + (Math.random() * rad * 2 - rad);
-            
             this.patrolTarget = new Phaser.Math.Vector2(rx, ry);
-            
-            // 이동 시간 + 대기 시간 랜덤 설정 (2~4초)
             this.patrolTimer = 2000 + Math.random() * 2000;
         }
 
-        // 배회 이동 실행
         if (this.patrolTarget) {
             const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.patrolTarget.x, this.patrolTarget.y);
             if (dist > 5) {
-                // 배회는 천천히 (기본 속도의 50%)
                 this.scene.physics.moveTo(this.unit, this.patrolTarget.x, this.patrolTarget.y, this.unit.moveSpeed * 0.5);
                 this.unit.updateFlipX();
             } else {
@@ -92,31 +91,45 @@ export default class UnitAI {
             }
         }
 
-        return false; // 전투 로직(update)은 실행하지 않음
+        return false; 
     }
 
-    // 전투 모드 돌입
+    handleReturnLogic(delta) {
+        const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.spawnPos.x, this.spawnPos.y);
+        if (dist > 10) {
+            this.scene.physics.moveTo(this.unit, this.spawnPos.x, this.spawnPos.y, this.unit.moveSpeed * 1.5);
+            this.unit.updateFlipX();
+        } else {
+            this.isReturning = false;
+            this.unit.setVelocity(0, 0);
+            if (this.unit.hp < this.unit.maxHp) {
+                this.unit.hp = Math.min(this.unit.hp + (this.unit.maxHp * 0.3), this.unit.maxHp);
+                this.unit.redrawHpBar();
+                this.unit.showEmote("💤", "#00ff00");
+            }
+        }
+    }
+
     engageCombat(target) {
-        if (this.isCombatMode) return; // 이미 전투 중이면 무시
+        if (this.isCombatMode || this.isReturning) return;
 
         this.isCombatMode = true;
         this.currentTarget = target;
         
-        // [Removed] 느낌표(!) 시각 효과 제거됨
+        if (this.unit.showEmote) {
+            this.unit.showEmote("!", "#ff0000");
+        }
         
-        // 주변 동료 호출 (Chain Aggro)
         this.broadcastAggro(target);
     }
 
-    // 주변 300px 내의 아군에게 전투 신호 전파 (집단 구타 유도)
     broadcastAggro(target) {
         const allies = (this.unit.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
-        const alertRadiusSq = 300 * 300; // 호출 범위
+        const alertRadiusSq = 300 * 300; 
 
         allies.forEach(ally => {
             if (ally.active && ally !== this.unit && ally.ai) {
-                // 아직 전투 모드가 아닌 아군만 호출
-                if (!ally.ai.isCombatMode) {
+                if (!ally.ai.isCombatMode && !ally.ai.isReturning) {
                     const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, ally.x, ally.y);
                     if (distSq <= alertRadiusSq) {
                         ally.ai.engageCombat(target);
@@ -127,76 +140,125 @@ export default class UnitAI {
     }
 
     // =================================================================
-    // 기존 로직 (도발, 벽 충돌, 전투 업데이트 등)
+    // [Updated] 타겟 선정 로직 (Priority System)
     // =================================================================
 
-    processAggro(delta) {
-        if (this.provokedTimer > 0) {
-            this.provokedTimer -= delta;
+    updateTargetSelection() {
+        const now = this.scene.time.now;
+        
+        // 도발 상태면 타겟 변경 불가
+        if (this.isProvoked) return; 
+
+        // 너무 잦은 변경 방지 (최소 200ms)
+        if (this.currentTarget && this.currentTarget.active && (now - this.lastTargetChangeTime < this.targetSwitchCooldown)) {
+            // 단, 현재 타겟이 죽었으면 즉시 변경
+            if (!this.currentTarget.active || this.currentTarget.isDying) {
+                // pass through
+            } else {
+                return;
+            }
+        }
+
+        // 1순위(피격), 2순위(거리), 3순위(체력)를 고려한 최고의 타겟 탐색
+        const bestTarget = this.findBestTarget();
+        
+        if (bestTarget && bestTarget !== this.currentTarget) {
+            this.currentTarget = bestTarget;
+            this.lastTargetChangeTime = now;
+            
+            // 타겟이 바뀌면 이동 경로도 즉시 재계산하도록 초기화
+            this.currentPath = [];
+            this.pathUpdateTimer = 0;
+            
+            if (!this.isCombatMode) {
+                this.engageCombat(bestTarget);
+            }
         }
     }
 
-    get isProvoked() {
-        return this.provokedTimer > 0 && this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
+    findBestTarget() {
+        const enemies = this.unit.targetGroup.getChildren();
+        let bestTarget = null;
+        
+        // 비교를 위한 최적의 값들 저장
+        let bestIsAggro = false; // 나를 공격 중인가?
+        let bestDist = Infinity; // 거리
+        let bestHp = Infinity;   // 체력
+
+        const myX = this.unit.x;
+        const myY = this.unit.y;
+
+        for (const enemy of enemies) {
+            if (!enemy.active || enemy.isDying) continue;
+
+            // [Priority 1] 나를 때리는 적 (Aggro)
+            // 적의 현재 타겟이 '나'인지 확인
+            const isAggro = (enemy.ai && enemy.ai.currentTarget === this.unit);
+            
+            // [Priority 2] 나와 가까운 적 (Distance)
+            const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
+            
+            // [Priority 3] 가장 약한 적 (HP)
+            const hp = enemy.hp;
+
+            // 첫 번째 후보 등록
+            if (!bestTarget) {
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+                continue;
+            }
+
+            // --- 비교 로직 (우선순위 순서대로) ---
+
+            // 1. 나를 때리는 적 우선
+            if (isAggro !== bestIsAggro) {
+                if (isAggro) { // 현재 후보는 나를 때리는데, 기존 베스트는 아님 -> 교체
+                    bestTarget = enemy;
+                    bestIsAggro = isAggro;
+                    bestDist = dist;
+                    bestHp = hp;
+                }
+                // 기존 베스트가 나를 때리고, 현재 후보는 아님 -> 유지
+                continue; 
+            }
+
+            // 2. 거리가 가까운 적 우선
+            // (거리 차이가 유의미하게 크면 가까운 쪽 선택)
+            const distDiff = dist - bestDist;
+            if (Math.abs(distDiff) > 50) { // 50px 이상 차이나면 확실히 가까운 쪽 선택
+                if (dist < bestDist) {
+                    bestTarget = enemy;
+                    bestIsAggro = isAggro;
+                    bestDist = dist;
+                    bestHp = hp;
+                }
+                continue;
+            }
+
+            // 3. 거리가 비슷하다면(50px 이내), 체력이 약한 적 우선
+            if (hp < bestHp) {
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+            }
+        }
+        
+        return bestTarget;
     }
 
-    onWallCollision(obstacle) {
-        // 1. 충돌한 장애물의 중심 좌표 계산
-        let ox, oy;
-        if (obstacle.pixelX !== undefined) { 
-            ox = obstacle.pixelX + obstacle.width / 2;
-            oy = obstacle.pixelY + obstacle.height / 2;
-        } else {
-            ox = obstacle.x;
-            oy = obstacle.y;
-        }
+    // =================================================================
+    // Main Update Loop
+    // =================================================================
 
-        const dx = this.unit.x - ox;
-        const dy = this.unit.y - oy;
-
-        // 2. 회피 벡터 계산
-        const newCollisionDir = new Phaser.Math.Vector2();
-        
-        if (Math.abs(dx) > Math.abs(dy)) {
-            const option1 = new Phaser.Math.Vector2(0, 1);
-            const option2 = new Phaser.Math.Vector2(0, -1);
-            
-            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const distToTarget1 = Phaser.Math.Distance.Squared(this.unit.x + option1.x * 50, this.unit.y + option1.y * 50, this.currentTarget.x, this.currentTarget.y);
-                const distToTarget2 = Phaser.Math.Distance.Squared(this.unit.x + option2.x * 50, this.unit.y + option2.y * 50, this.currentTarget.x, this.currentTarget.y);
-                newCollisionDir.copy(distToTarget1 < distToTarget2 ? option1 : option2);
-            } else {
-                newCollisionDir.set(0, Math.sign(dy) || 1);
-            }
-        } else {
-            const option1 = new Phaser.Math.Vector2(1, 0);
-            const option2 = new Phaser.Math.Vector2(-1, 0);
-            
-            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const distToTarget1 = Phaser.Math.Distance.Squared(this.unit.x + option1.x * 50, this.unit.y + option1.y * 50, this.currentTarget.x, this.currentTarget.y);
-                const distToTarget2 = Phaser.Math.Distance.Squared(this.unit.x + option2.x * 50, this.unit.y + option2.y * 50, this.currentTarget.x, this.currentTarget.y);
-                newCollisionDir.copy(distToTarget1 < distToTarget2 ? option1 : option2);
-            } else {
-                newCollisionDir.set(Math.sign(dx) || 1, 0);
-            }
-        }
-        
-        if (newCollisionDir.lengthSq() === 0) newCollisionDir.set(1, 0);
-
-        // 3. 연속 충돌 방지
-        if (this.wallCollisionTimer > 0) {
-            if (this.wallCollisionVector.dot(newCollisionDir) > 0.5) return; 
-            this.wallCollisionVector.negate();
+    update(delta) {
+        if (this.isReturning) {
+            this.handleReturnLogic(delta);
             return;
         }
 
-        // 4. 회피 시작
-        this.wallCollisionVector.copy(newCollisionDir);
-        this.wallCollisionTimer = 500;
-    }
-
-    update(delta) {
-        // [New] 벽 충돌 반동 처리 (최우선)
         if (this.wallCollisionTimer > 0) {
             this.wallCollisionTimer -= delta;
             this.unit.setVelocity(
@@ -209,60 +271,68 @@ export default class UnitAI {
 
         this.processAggro(delta);
 
-        const unit = this.unit;
-        
-        // 1. [생존 본능] 낮은 체력 도망 (탱커 제외)
-        if (unit.role !== 'Tanker') {
-            const fleeThreshold = unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
-            const hpRatio = unit.hp / unit.maxHp;
+        // [Leash Check] 너무 멀리 갔거나 시야에서 사라지면 포기
+        if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
+            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+                const CHASE_RANGE = 450; // 추격 유지 범위
+                const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
+                const hasLOS = this.checkLineOfSight();
+                
+                if (distToTarget > CHASE_RANGE || !hasLOS) {
+                    this.isReturning = true;
+                    this.isCombatMode = false;
+                    this.currentTarget = null;
+                    this.currentPath = [];
+                    if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
+                    return;
+                }
+            } else {
+                 // 타겟이 죽거나 사라짐 -> 즉시 복귀
+                 this.isReturning = true;
+                 this.isCombatMode = false;
+                 return;
+            }
+        }
+
+        // [Target Selection Update] 주기적으로 최적의 타겟 재탐색
+        // 전투 중에도 계속해서 더 좋은 타겟(나를 때리는 적 등)이 있는지 확인
+        this.thinkTimer -= delta;
+        if (this.thinkTimer <= 0) {
+            this.thinkTimer = 150 + Math.random() * 100; // 약 0.2초마다 재평가
+            this.updateTargetSelection();
+        }
+
+        // [Flee Logic] 낮은 체력 도주
+        if (this.unit.role !== 'Tanker') {
+            const fleeThreshold = this.unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
+            const hpRatio = this.unit.hp / this.unit.maxHp;
             
             if (!this.isLowHpFleeing && hpRatio <= fleeThreshold) {
                 this.isLowHpFleeing = true;
-                unit.setTint(0xff5555); 
+                this.unit.setTint(0xff5555); 
             } else if (this.isLowHpFleeing && hpRatio >= 0.5) {
                 this.isLowHpFleeing = false;
-                unit.resetVisuals(); 
+                this.unit.resetVisuals(); 
             }
 
             if (this.isLowHpFleeing) {
-                const nearestThreat = this.findNearestEnemy();
-                let distToThreat = Infinity;
+                const nearestThreat = this.findNearestEnemy(); // 도망칠 때는 단순히 가장 가까운 적 기준
                 if (nearestThreat) {
-                    distToThreat = Phaser.Math.Distance.Between(unit.x, unit.y, nearestThreat.x, nearestThreat.y);
-                }
-                const safeDist = 350;
-                if (distToThreat < safeDist) {
-                     this.runAway(delta);
-                } else {
-                     unit.setVelocity(0, 0); 
-                     unit.updateFlipX(); 
+                    const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, nearestThreat.x, nearestThreat.y);
+                    if (dist < 350) this.runAway(delta);
+                    else { this.unit.setVelocity(0, 0); this.unit.updateFlipX(); }
                 }
                 return;
             }
         }
 
-        // 2. 도발 상태 처리
-        if (this.isProvoked) {
-            if (this.currentTarget) {
-                this.moveToTargetSmart(delta);
-            }
-            return; 
-        }
-
-        // 3. 타겟 탐색
-        this.thinkTimer -= delta;
-        if (this.thinkTimer <= 0) {
-            this.thinkTimer = 100 + Math.random() * 100;
-            this.updateTargetSelection();
-        }
-
-        // 4. 전투 행동 및 이동
+        // [Combat Movement]
         if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-            const distSq = Phaser.Math.Distance.Squared(unit.x, unit.y, this.currentTarget.x, this.currentTarget.y);
+            const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
             
-            let desiredRange = unit.attackRange || 50; 
-            if (unit.role === 'Shooter') {
-                const aiParams = unit.aiConfig.shooter || {};
+            let desiredRange = this.unit.attackRange || 50; 
+            if (this.unit.role === 'Shooter') {
+                const aiParams = this.unit.aiConfig.shooter || {};
                 desiredRange = aiParams.attackRange || 250;
             }
 
@@ -270,167 +340,82 @@ export default class UnitAI {
             const hasLOS = inRange ? this.checkLineOfSight() : false;
 
             if (inRange && hasLOS) {
-                // 사거리 내 + 시야 확보됨 -> 공격 태세 (정지)
-                unit.setVelocity(0, 0);
+                this.unit.setVelocity(0, 0);
                 this.currentPath = [];
                 this.stuckTimer = 0;
                 
-                if (unit.role === 'Shooter') {
-                     // Shooter는 updateAI에서 lookAt 처리
-                } else {
-                     const diffX = this.currentTarget.x - unit.x;
-                     if (Math.abs(diffX) > 10) unit.setFlipX(diffX > 0);
+                if (this.unit.role !== 'Shooter') {
+                     const diffX = this.currentTarget.x - this.unit.x;
+                     if (Math.abs(diffX) > 10) this.unit.setFlipX(diffX > 0);
                 }
             } else {
-                // 사거리 밖 -> 추적
                 this.moveToTargetSmart(delta);
             }
         } else {
-            // 타겟이 없거나 죽음 -> 전투 모드 해제 고려
-            // (여기서 바로 정지시키면 다음 updateRoaming 호출 시 다시 정찰 시작)
-            unit.setVelocity(0, 0);
+            this.unit.setVelocity(0, 0);
             this.isCombatMode = false; 
         }
 
-        // 5. 스킬 사용 시도 (Auto Battle)
-        if (unit.team !== 'blue' || unit.scene.isAutoBattle) {
-            unit.tryUseSkill();
+        if (this.unit.team !== 'blue' || this.unit.scene.isAutoBattle) {
+            this.unit.tryUseSkill();
         }
     }
 
-    updateTargetSelection() {
-        const now = this.scene.time.now;
-        const timeSinceSwitch = now - this.lastTargetChangeTime;
-        
-        if (this.isProvoked) return; 
-
-        // 슈터는 타겟 전환을 더 자주 함
-        const isShooter = (this.unit.role === 'Shooter');
-        const switchCooldown = isShooter ? 100 : 1000;
-
-        // 현재 타겟이 살아있고 쿨타임 안 지났으면 유지
-        if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying && timeSinceSwitch < switchCooldown) {
-            return;
-        }
-
-        // 가장 가까운 적 탐색
-        const newTarget = this.findNearestEnemy();
-        
-        // 타겟이 바뀌었거나 새로 생겼으면 전투 개시
-        if (newTarget && newTarget !== this.currentTarget) {
-            this.engageCombat(newTarget); // [New] 타겟 발견 시 즉시 전투 모드 및 동료 호출
-            this.lastTargetChangeTime = now;
-        }
-    }
+    // =================================================================
+    // Helper Methods
+    // =================================================================
 
     findNearestEnemy() {
         const enemies = this.unit.targetGroup.getChildren();
-        let closestDistSq = Infinity;
-        let closestTarget = null;
-        
-        const ignoreRoles = (this.unit.role === 'Shooter');
+        let closest = null;
+        let minInfo = Infinity;
         const myX = this.unit.x;
         const myY = this.unit.y;
-
-        let closestNonHealerDistSq = Infinity;
-        let closestNonHealer = null;
-        let closestHealerDistSq = Infinity;
-        let closestHealer = null;
-
-        for (const enemy of enemies) {
-            if (!enemy.active || enemy.isDying) continue; 
-
-            const distSq = (myX - enemy.x) ** 2 + (myY - enemy.y) ** 2;
-
-            if (ignoreRoles) {
-                if (distSq < closestDistSq) {
-                    closestDistSq = distSq;
-                    closestTarget = enemy;
-                }
-            } else {
-                if (distSq < closestDistSq) {
-                    closestDistSq = distSq;
-                    closestTarget = enemy;
-                }
-            }
-        }
         
-        return closestTarget;
-    }
-
-    findLowestHpAlly() {
-        const allies = (this.unit.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
-        let lowestHpVal = Infinity; 
-        let target = null;
-        
-        for (let ally of allies) {
-            if (ally.active && !ally.isDying && ally !== this.unit && ally.hp < ally.maxHp) { 
-                if (ally.hp < lowestHpVal) { 
-                    lowestHpVal = ally.hp; 
-                    target = ally; 
-                }
-            }
-        }
-        return target;
-    }
-
-    findAllyUnderAttack() {
-        const allies = (this.unit.team === 'blue') ? this.scene.blueTeam.getChildren() : this.scene.redTeam.getChildren();
-        let bestTarget = null;
-        let maxUrgency = -1;
-
-        for (let ally of allies) {
-            if (!ally.active || ally.isDying || ally === this.unit) continue;
-
-            const targetingEnemies = ally.findEnemiesTargetingMe ? ally.findEnemiesTargetingMe().length : 0;
-            const hpRatio = ally.hp / ally.maxHp;
-
-            let urgency = (targetingEnemies * 100) + ((1 - hpRatio) * 200);
-            if (ally.role === 'Healer') urgency += 300;
-            if (ally.role === 'Shooter') urgency += 150;
-
-            if (targetingEnemies > 0 && urgency > maxUrgency) {
-                maxUrgency = urgency;
-                bestTarget = ally;
-            }
-        }
-        return bestTarget;
-    }
-
-    findStrategicTarget(weights = {}) {
-        const enemies = this.unit.targetGroup.getChildren();
-        
-        const wDist = weights.distance ?? 1.0; 
-        const wHp = weights.lowHp ?? 2.0;       
-        const roleBonus = weights.rolePriority ?? { 'Healer': 500, 'Shooter': 300 }; 
-
-        let bestTarget = null;
-        let bestScore = -Infinity;
-        const myX = this.unit.x;
-        const myY = this.unit.y;
-
         for (const enemy of enemies) {
             if (!enemy.active || enemy.isDying) continue;
-
-            const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
-            if (dist <= 0.1) continue;
-
-            const hpRatio = enemy.hp / enemy.maxHp;
-            
-            let score = 0;
-            score += (1000 / dist) * wDist;          
-            score += ((1 - hpRatio) * 1000) * wHp;   
-            
-            if (roleBonus[enemy.role]) {
-                score += roleBonus[enemy.role];      
-            }
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestTarget = enemy;
-            }
+            const d = (myX - enemy.x)**2 + (myY - enemy.y)**2;
+            if (d < minInfo) { minInfo = d; closest = enemy; }
         }
-        return bestTarget;
+        return closest;
+    }
+
+    processAggro(delta) {
+        if (this.provokedTimer > 0) this.provokedTimer -= delta;
+    }
+
+    get isProvoked() {
+        return this.provokedTimer > 0 && this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
+    }
+
+    onWallCollision(obstacle) {
+        let ox, oy;
+        if (obstacle.pixelX !== undefined) { 
+            ox = obstacle.pixelX + obstacle.width / 2;
+            oy = obstacle.pixelY + obstacle.height / 2;
+        } else {
+            ox = obstacle.x;
+            oy = obstacle.y;
+        }
+
+        const dx = this.unit.x - ox;
+        const dy = this.unit.y - oy;
+        const newCollisionDir = new Phaser.Math.Vector2();
+        
+        if (Math.abs(dx) > Math.abs(dy)) {
+            newCollisionDir.set(0, Math.sign(dy) || 1);
+        } else {
+            newCollisionDir.set(Math.sign(dx) || 1, 0);
+        }
+        
+        if (this.wallCollisionTimer > 0) {
+            if (this.wallCollisionVector.dot(newCollisionDir) > 0.5) return; 
+            this.wallCollisionVector.negate();
+            return;
+        }
+
+        this.wallCollisionVector.copy(newCollisionDir);
+        this.wallCollisionTimer = 500;
     }
 
     checkLineOfSight() {

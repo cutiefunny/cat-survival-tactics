@@ -148,7 +148,12 @@ export default class ShopModal {
     openUnitDetailPopup(unitConfig) {
         if (this.unitDetailPopup) this.unitDetailPopup.destroy();
         const { width, height } = this.scene.scale;
-        const stats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
+        
+        // [Fixed] DB 설정값(roleDefinitions)이 레지스트리에 있다면 우선 적용
+        const registryRoleDefs = this.scene.registry.get('roleDefinitions') || {};
+        const defaultStats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
+        // 기본값 위에 DB 설정값 덮어쓰기
+        const stats = { ...defaultStats, ...(registryRoleDefs[unitConfig.role] || {}) };
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
         const popupW = 300;
@@ -197,7 +202,11 @@ export default class ShopModal {
         const shopInfo = UNIT_COSTS.find(u => u.role === role) || { name: role };
         const roleText = (displayName !== shopInfo.name) ? `(${shopInfo.name})` : '';
 
-        const stats = ROLE_BASE_STATS[role] || ROLE_BASE_STATS['Normal'];
+        // [Fixed] DB 설정값(roleDefinitions)이 레지스트리에 있다면 우선 적용
+        const registryRoleDefs = this.scene.registry.get('roleDefinitions') || {};
+        const defaultStats = ROLE_BASE_STATS[role] || ROLE_BASE_STATS['Normal'];
+        // 기본값 위에 DB 설정값 덮어쓰기
+        const stats = { ...defaultStats, ...(registryRoleDefs[role] || {}) };
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
         const popupW = 300;

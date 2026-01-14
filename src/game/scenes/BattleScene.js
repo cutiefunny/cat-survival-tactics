@@ -18,11 +18,11 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; 
 
-// [Managers] - systems 폴더에서 managers 폴더로 통합됨
+// [Managers]
 import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
-import CombatManager from '../managers/CombatManager';       // [Changed] Path updated
-import PathfindingManager from '../managers/PathfindingManager'; // [Changed] Path updated
+import CombatManager from '../managers/CombatManager';       
+import PathfindingManager from '../managers/PathfindingManager'; 
 
 // [Assets]
 import stage1Data from '../../assets/maps/stage1.json';
@@ -37,6 +37,7 @@ import tilesetStreet1Img from '../../assets/tilesets/street1.png';
 import tilesetStreet2Img from '../../assets/tilesets/street2.png';
 import tilesetStreet3Img from '../../assets/tilesets/street3.png';
 import tilesetStreet4Img from '../../assets/tilesets/street4.png';
+import tilesetRoadImg from '../../assets/tilesets/road.png';
 
 // [Unit Sprites]
 import leaderSheet from '../../assets/units/leader.png';
@@ -136,6 +137,7 @@ export default class BattleScene extends BaseScene {
         this.load.image('tiles_street2', tilesetStreet2Img);
         this.load.image('tiles_street3', tilesetStreet3Img);
         this.load.image('tiles_street4', tilesetStreet4Img);
+        this.load.image('tiles_road', tilesetRoadImg);
 
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
@@ -236,6 +238,8 @@ export default class BattleScene extends BaseScene {
                 if (!this.hasLevelIndexPassed && dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
                     this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
                 }
+                // Red Team Roles, Blue Team Roles 등도 불러올 수 있음 (MockBattle이 아니면 보통 PlayerSquad Registry 사용)
+                if (dbData.redTeamRoles) config.redTeamRoles = dbData.redTeamRoles;
             }
         } catch (error) { console.error("❌ Config Error:", error); }
 
@@ -299,6 +303,7 @@ export default class BattleScene extends BaseScene {
                     else if (name.includes('street2') || name === 'Street2') imgKey = 'tiles_street2';
                     else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
                     else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
+                    else if (name.includes('Road')) imgKey = 'tiles_road';
                     else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
                     else if (name.includes('City')) imgKey = 'tiles_city';
                     else if (name.includes('Car') || name === 'car') imgKey = 'tiles_car';
@@ -427,7 +432,7 @@ export default class BattleScene extends BaseScene {
         });
     }
 
-    // [Modified] createUnitInstance: 성장률 및 피로도 패널티 적용
+    // [Modified] createUnitInstance: 성장률 및 피로도 패널티, 그리고 DB 설정값 적용
     createUnitInstance(x, y, team, target, stats, isLeader) {
         if (this.gameConfig && this.gameConfig.aiSettings) {
             stats.aiConfig = this.gameConfig.aiSettings;
@@ -436,7 +441,14 @@ export default class BattleScene extends BaseScene {
         }
 
         const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-        const baseStats = ROLE_BASE_STATS[stats.role] || {};
+        
+        // [Fix] 하드코딩된 ROLE_BASE_STATS 대신, DB에서 불러온 roleDefinitions가 있다면 우선 사용
+        let baseStats = ROLE_BASE_STATS[stats.role] || {};
+        if (this.gameConfig && this.gameConfig.roleDefinitions && this.gameConfig.roleDefinitions[stats.role]) {
+             // DB 설정값으로 베이스 스탯 오버라이드
+             baseStats = { ...baseStats, ...this.gameConfig.roleDefinitions[stats.role] };
+        }
+
         const safeStats = { ...stats };
         if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
         

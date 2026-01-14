@@ -133,6 +133,12 @@ export default class StrategyScene extends BaseScene {
                     gameSettings: data.gameSettings || {},
                     roleDefinitions: data.roleDefinitions || {}
                 };
+
+                // [New] Role Definitions를 레지스트리에 저장하여 UI(ShopModal)에서도 접근 가능하게 함
+                if (data.roleDefinitions) {
+                    this.registry.set('roleDefinitions', data.roleDefinitions);
+                    console.log("✅ [StrategyScene] Role Definitions saved to Registry");
+                }
             }
         } catch (e) {
             console.error("❌ Failed to load strategy config:", e);
@@ -158,6 +164,7 @@ export default class StrategyScene extends BaseScene {
     }
 
     initializeGameWorld(map, dbArmyData) {
+        // ... (이전 코드와 동일하여 생략, 변경 사항 없음)
         this.hasMoved = false;
         this.previousLeaderId = null;
         this.selectedTargetId = null; 
@@ -231,6 +238,7 @@ export default class StrategyScene extends BaseScene {
         this.prevPinchDistance = 0;
     }
 
+    // ... (이하 메서드들은 변경 사항 없음)
     handleStoryUnlocks(conqueredNodeId) {}
 
     unlockUnit(roleName) {
@@ -408,9 +416,6 @@ export default class StrategyScene extends BaseScene {
         const currentLeaderId = this.registry.get('leaderPosition');
         const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
 
-        // [Removed] 중립 구역 클릭 시 바로 텍스트만 띄우고 종료하던 로직 제거
-        // if (node.owner === 'neutral') { this.statusText.setText(node.text); this.shakeNode(circleObj); return; }
-
         if (this.hasMoved) {
             if (this.previousLeaderId !== null && node.id === this.previousLeaderId) { this.undoMove(); return; }
             this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요."); this.shakeStatusText(); return;
@@ -451,10 +456,8 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
-    // [New] 중립 구역 이벤트 처리 함수
     handleNeutralEvent(node) {
-        // 유닛 정보가 있으면 해당 유닛 토큰 이미지 사용
-        let imageKey = 'dog_token'; // 기본 이미지
+        let imageKey = 'dog_token';
         if (node.army && node.army.type) {
             const type = node.army.type.toLowerCase();
             if (type === 'runner') imageKey = 'runner_token';
@@ -466,10 +469,8 @@ export default class StrategyScene extends BaseScene {
             else imageKey = 'dog_token';
         }
 
-        // 선택지 구성
         const choices = [];
         
-        // 유닛이 있는 경우 영입 옵션 추가
         if (node.army) {
             choices.push({
                 text: "동료로 영입하기",
@@ -482,8 +483,7 @@ export default class StrategyScene extends BaseScene {
             value: "leave"
         });
 
-        // EventScene 실행
-        this.input.enabled = false; // 이벤트 중에는 맵 클릭 방지
+        this.input.enabled = false;
         this.scene.launch('EventScene', {
             title: node.name,
             description: node.text || "아무 일도 일어나지 않았습니다.",
@@ -495,28 +495,19 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
-    // [New] 이벤트 결과 처리 함수
     handleEventResult(result, node) {
         if (result === 'recruit') {
             if (node.army && node.army.type) {
-                // 대문자 변환 (예: runner -> Runner)
                 const roleName = node.army.type.charAt(0).toUpperCase() + node.army.type.slice(1);
                 this.unlockUnit(roleName);
                 this.statusText.setText(`🤝 ${roleName} 영입 성공!`);
-                
-                // 영입 후 해당 구역을 플레이어 소유로 변경
                 node.owner = 'player';
-                // 토큰 제거
                 const token = this.enemyTokens.find(t => 
                     Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
                 );
                 if (token) token.destroy();
-                
-                // 맵 데이터 업데이트 및 저장
                 this.registry.set('worldMapData', this.mapNodes);
                 this.saveProgress();
-                
-                // 노드 색상 변경 (새로고침 없이 반영을 위해)
                 const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
                 if (circle) circle.setFillStyle(0x4488ff);
             }
@@ -538,7 +529,9 @@ export default class StrategyScene extends BaseScene {
         let recoveredCount = 0;
         let totalMaintenanceCost = 0;
 
-        const roleDefs = this.strategySettings?.roleDefinitions || ROLE_BASE_STATS;
+        // [Modified] 유지비 계산 시에도 레지스트리의 roleDefinitions 참조
+        const registryRoleDefs = this.registry.get('roleDefinitions') || {};
+        const roleDefs = { ...ROLE_BASE_STATS, ...registryRoleDefs };
 
         squad.forEach(unit => {
             if (unit.fatigue > 0) {
@@ -559,6 +552,7 @@ export default class StrategyScene extends BaseScene {
             totalMaintenanceCost += maintenance;
         });
         
+        // ... (이하 로직 동일)
         let currentCoins = this.registry.get('playerCoins');
         let isBankrupt = false;
         
@@ -713,7 +707,6 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
-    // [Modified] Config 기반 파싱 로직 적용
     parseMapData(map, dbArmyData = {}) {
         const existingData = this.registry.get('worldMapData');
         let objectLayer = map.getObjectLayer('territory');
@@ -767,8 +760,6 @@ export default class StrategyScene extends BaseScene {
                     bgm: config.bgm || "stage1_bgm" 
                 };
             });
-        } else {
-            // fallback
         }
 
         nodes.forEach(node => {
@@ -790,23 +781,17 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
     
+    // ... (createEnemyTokens, createPlayerToken, createTerritoryNodes, drawConnections, handleBattleResult 등은 그대로 유지)
     createEnemyTokens() {
         if (!this.mapNodes) return;
-        
         if (this.enemyTokens && this.enemyTokens.length > 0) {
-            this.enemyTokens.forEach(token => {
-                if (token && token.active) {
-                    token.destroy();
-                }
-            });
+            this.enemyTokens.forEach(token => { if (token && token.active) token.destroy(); });
         }
         this.enemyTokens = [];
-
         this.mapNodes.forEach(node => {
             if (node.owner !== 'player' && node.army) {
                 let textureKey = 'dog_token';
                 const type = node.army.type ? node.army.type.toLowerCase() : 'dog';
-                
                 if (type === 'runner') textureKey = 'runner_token';
                 else if (type === 'dog') textureKey = 'dog_token';
                 else if (type === 'tanker') textureKey = 'tanker_token';
@@ -817,21 +802,14 @@ export default class StrategyScene extends BaseScene {
                 else if (type === 'boss') textureKey = 'boss_token';
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                
-                if (this.uiCamera) {
-                    this.uiCamera.ignore(enemyObj);
-                }
+                if (this.uiCamera) this.uiCamera.ignore(enemyObj);
 
                 let finalSize = 60;
-                if (node.owner === 'neutral') { finalSize = 55; } 
+                if (node.owner === 'neutral') finalSize = 55;
                 else { 
-                    if (type === 'tanker') { finalSize = 70; }
-                    else if (type === 'boss') { finalSize = 100; }
-                    else{
-                        const armyCount = node.army.count || 1; 
-                        finalSize = 50 + (armyCount - 5) * 5; 
-                        finalSize = Phaser.Math.Clamp(finalSize, 30, 90); 
-                    }
+                    if (type === 'tanker') finalSize = 70;
+                    else if (type === 'boss') finalSize = 100;
+                    else{ const armyCount = node.army.count || 1; finalSize = 50 + (armyCount - 5) * 5; finalSize = Phaser.Math.Clamp(finalSize, 30, 90); }
                 }
                 enemyObj.setDisplaySize(finalSize, finalSize); enemyObj.setOrigin(0.5, 0.8); enemyObj.setFlipX(false); enemyObj.setDepth(10); 
                 
@@ -845,7 +823,6 @@ export default class StrategyScene extends BaseScene {
                 else if (type === 'boss') enemyObj.play('boss_idle');
                 
                 this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
-                
                 this.enemyTokens.push(enemyObj);
             }
         });

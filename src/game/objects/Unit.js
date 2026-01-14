@@ -447,7 +447,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         let statusStr = "COMBAT";
         let color = "#ffffff";
         
-        if (this.ai && this.ai.isLowHpFleeing) {
+        if (this.ai && this.ai.isReturning) { // [New] 복귀 상태 디버그
+            statusStr = "🏠RETURN";
+            color = "#ffff00";
+        } else if (this.ai && this.ai.isLowHpFleeing) {
             statusStr = "😱FLEE";
             color = "#ff0000"; 
         } else if (this.body.velocity.lengthSq() < 10 && this.hp < this.maxHp * 0.5) {
@@ -558,5 +561,33 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!leaderUnit || !leaderUnit.active) return;
         this.formationOffset.x = this.savedRelativePos.x - leaderUnit.savedRelativePos.x;
         this.formationOffset.y = this.savedRelativePos.y - leaderUnit.savedRelativePos.y;
+    }
+
+    // [New] 감정표현(느낌표, 물음표 등) 시각 효과 표시
+    showEmote(text, color = '#ff0000') {
+        if (!this.scene) return;
+        
+        const emote = this.scene.add.text(this.x, this.y - this.baseSize, text, {
+            fontFamily: 'Arial',
+            fontSize: '32px',
+            fontStyle: 'bold',
+            color: color,
+            stroke: '#ffffff',
+            strokeThickness: 4
+        }).setOrigin(0.5);
+
+        emote.setDepth(2000);
+
+        this.scene.tweens.add({
+            targets: emote,
+            y: this.y - this.baseSize - 40,
+            alpha: 0,
+            scale: 1.5,
+            duration: 1000,
+            ease: 'Power2',
+            onComplete: () => {
+                emote.destroy();
+            }
+        });
     }
 }
