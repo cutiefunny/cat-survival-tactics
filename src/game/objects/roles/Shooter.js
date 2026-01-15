@@ -28,12 +28,26 @@ export default class Shooter extends Unit {
     updateAI(delta) {
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
+        // [Fix 1] UnitAI의 타이머 수동 갱신 (Shooter가 ai.update를 안 쓰므로 직접 해줘야 함)
+        if (this.ai.wallCollisionTimer > 0) this.ai.wallCollisionTimer -= delta;
+        if (this.ai.forcePathfindingTimer > 0) this.ai.forcePathfindingTimer -= delta;
+
+        // [Fix 2] 벽 충돌 중이라면 AI의 회피 기동(미끄러짐)을 우선 수행하고 리턴
+        if (this.ai.wallCollisionTimer > 0) {
+            this.setVelocity(
+                this.ai.wallCollisionVector.x * this.moveSpeed, 
+                this.ai.wallCollisionVector.y * this.moveSpeed
+            );
+            this.updateFlipX();
+            return; 
+        }
+
         // [Logic] 도발 상태 처리
         this.ai.processAggro(delta);
         if (this.ai.isProvoked) {
             if (this.ai.currentTarget && this.ai.currentTarget.active) {
-                this.scene.physics.moveToObject(this, this.ai.currentTarget, this.moveSpeed);
-                this.updateFlipX();
+                // 도발 시에도 패스파인딩 사용 권장 (직선 이동 대신)
+                this.ai.moveToTargetSmart(delta);
             }
             return; 
         }
@@ -70,7 +84,7 @@ export default class Shooter extends Unit {
         }
 
         // 3. [이동] 사거리 유지 및 추격
-        this.executeMovement();
+        this.executeMovement(delta); // delta 전달
         
         // 4. [시선] 타겟 바라보기
         if (this.ai.currentTarget && this.ai.currentTarget.active) {
@@ -148,7 +162,7 @@ export default class Shooter extends Unit {
         this.ai.currentTarget = strategicTarget;
     }
 
-    executeMovement() {
+    executeMovement(delta) {
         const target = this.ai.currentTarget;
         if (!target || !target.active) {
             this.setVelocity(0, 0);
@@ -167,15 +181,20 @@ export default class Shooter extends Unit {
         const kiteDistSq = (atkRange * 0.8) ** 2;
 
         if (distSq > atkRangeSq) {
-            // 사거리 밖이면 접근
-            this.scene.physics.moveToObject(this, target, this.moveSpeed);
+            // [Fix 3] 사거리 밖이면 접근: 단순 이동(moveToObject) 대신 스마트 패스파인딩 사용
+            this.ai.moveToTargetSmart(delta);
         } else if (distSq < kiteDistSq) {
             // 너무 가까우면 뒤로 살짝 빠짐 (Micro-Kiting)
+            // Kiting은 즉각 반응이 중요하므로 직선 이동 유지하되, 끼임 발생 시 처리는 AI 클래스가 도움을 줄 수 있음
             const angle = Phaser.Math.Angle.Between(target.x, target.y, this.x, this.y);
             this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 0.5, this.body.velocity);
+            
+            // 직접 이동 중에는 경로 배열을 비워 꼬임 방지
+            this.ai.currentPath = [];
         } else {
             // 적정 거리면 정지
             this.setVelocity(0, 0);
+            this.ai.currentPath = [];
         }
     }
 
@@ -203,6 +222,9 @@ export default class Shooter extends Unit {
         
         this.body.velocity.x = Math.cos(angle) * speed;
         this.body.velocity.y = Math.sin(angle) * speed;
+        
+        // 도망갈 때도 경로는 초기화
+        this.ai.currentPath = [];
     }
 
     lookAt(target) {

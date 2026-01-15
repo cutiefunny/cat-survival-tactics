@@ -393,7 +393,7 @@ export default class UnitAI {
             ox = obstacle.pixelX + (obstacle.width || 0) / 2;
             oy = obstacle.pixelY + (obstacle.height || 0) / 2;
         } 
-        // Sprite 또는 GameObject인 경우 (getBounds 사용 권장)
+        // Sprite 또는 GameObject인 경우
         else if (obstacle.getBounds) {
             const bounds = obstacle.getBounds();
             ox = bounds.centerX;
@@ -408,39 +408,52 @@ export default class UnitAI {
         const ux = this.unit.x;
         const uy = this.unit.y;
 
-        // 2. 충돌 면(Face) 판별: 가로 거리와 세로 거리 비교
+        // 2. 충돌 면(Face) 판별
         const dx = ux - ox;
         const dy = uy - oy;
 
         const slideDir = new Phaser.Math.Vector2();
+        
+        // 반발력(Repulsion): 벽에서 살짝 떨어뜨려 물리 연산 겹침을 방지
+        const repulsion = new Phaser.Math.Vector2();
 
-        // 현재 쫓고 있는 타겟 위치 가져오기 (없으면 현재 위치 기준)
-        // 전투 타겟 > 정찰 타겟 > 제자리 순서
+        // 현재 타겟 위치 가져오기
         const target = this.currentTarget || this.patrolTarget || { x: ux, y: uy };
 
-        // [Case 1] 가로 거리 차이가 더 큼 -> 좌/우 면에 충돌함 -> "세로(Y)"로 미끄러져야 함
+        // [Case 1] 가로 거리 차이가 더 큼 -> 좌/우 면 충돌 -> 세로(Y)로 회피
         if (Math.abs(dx) > Math.abs(dy)) {
-            // 타겟이 나보다 아래에 있으면 아래(1)로, 위에 있으면 위(-1)로 슬라이딩
-            // 단, Y축 차이가 너무 작으면(10px 미만) 그냥 장애물 중심에서 멀어지는 방향 선택 (코너 탈출)
+            // 타겟 방향으로 슬라이딩하되, 너무 좁은 틈이면 그냥 반대 방향 선택
             if (Math.abs(target.y - uy) > 10) {
                 slideDir.set(0, Math.sign(target.y - uy) || 1);
             } else {
                 slideDir.set(0, Math.sign(dy) || 1);
             }
+            // 벽 반대 방향(좌/우)으로 살짝 밀어냄
+            repulsion.set(Math.sign(dx), 0);
         } 
-        // [Case 2] 세로 거리 차이가 더 큼 -> 상/하 면에 충돌함 -> "가로(X)"로 미끄러져야 함
+        // [Case 2] 세로 거리 차이가 더 큼 -> 상/하 면 충돌 -> 가로(X)로 회피
         else {
             if (Math.abs(target.x - ux) > 10) {
                 slideDir.set(Math.sign(target.x - ux) || 1, 0);
             } else {
                 slideDir.set(Math.sign(dx) || 1, 0);
             }
+            // 벽 반대 방향(상/하)으로 살짝 밀어냄
+            repulsion.set(0, Math.sign(dy));
         }
 
-        // 3. 벡터 적용 및 타이머 설정
-        // 기존 500ms는 너무 길어서 코너에서 버벅거림 -> 150ms로 단축하여 빠른 반응 유도
-        this.wallCollisionVector.copy(slideDir);
-        this.wallCollisionTimer = 150; 
+        // 3. 벡터 합성 및 적용
+        // 슬라이드(0.7) + 반발력(0.5) 정도로 섞어서 벽을 타고 흐르면서도 떨어지게 만듦
+        this.wallCollisionVector.copy(slideDir).scale(0.7).add(repulsion.scale(0.5)).normalize();
+        this.wallCollisionTimer = 150; // 짧게 툭 쳐줌
+
+        // [핵심 수정 사항] 
+        // 벽에 박았으므로 1초 동안은 '직선 이동(isLineClear)' 체크를 강제로 건너뛰고 
+        // 무조건 A* 알고리즘으로 우회 경로를 찾도록 강제합니다.
+        this.forcePathfindingTimer = 1000;
+        
+        // 충돌 반응을 했으므로 '제자리 끼임' 판단 타이머는 초기화
+        this.stuckTimer = 0;
     }
 
     checkLineOfSight() {

@@ -32,6 +32,7 @@ const TILESET_MAPPING = {
     'road': new URL('../../assets/tilesets/road.png', import.meta.url).href,
 
     'Big_city': new URL('../../assets/tilesets/big_city.png', import.meta.url).href,
+    'Big_Street': new URL('../../assets/tilesets/big_street.png', import.meta.url).href,
 
     // 특정 레벨용 타일셋 매핑
     'level5': new URL('../../assets/tilesets/road.png', import.meta.url).href,
