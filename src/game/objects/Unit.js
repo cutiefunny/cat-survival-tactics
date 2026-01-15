@@ -317,6 +317,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     handleWallCollision(tile) {
+        // [Critical Fix] 물리 충돌 이벤트를 AI에게 전달하여 '벽 타기(Sliding)' 로직을 실행시킴
+        if (this.ai && typeof this.ai.onWallCollision === 'function') {
+            this.ai.onWallCollision(tile);
+        }
+
+        // (기존 로직 유지) 경로 이동 중 막히면 재탐색 시간 단축
         if (this.ai.currentPath.length > 0) {
             if (this.body.speed < 5) {
                 this.ai.pathUpdateTimer -= 50; 

@@ -1,30 +1,20 @@
 import Phaser from 'phaser';
 
-// [Refactor] 테스트 가능한 순수 함수로 로직 분리 (외부 파일이나 테스트에서 import 가능)
-// Phaser 의존성을 제거하거나 주입받도록 하여 테스트 용이성 확보
 export function calculateBestTarget(me, enemies, distanceFn) {
     let bestTarget = null;
     let bestIsAggro = false;
     let bestDist = Infinity;
     let bestHp = Infinity;
 
-    // distanceFn이 없으면 기본 유클리드 거리 계산 사용 (테스트 환경 대비)
     const getDist = distanceFn || ((a, b) => Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2));
 
     for (const enemy of enemies) {
         if (!enemy.active || (enemy.isDying === true)) continue;
 
-        // [Priority 1] Aggro: 적이 나를 보고 있는가?
-        // enemy.ai가 없을 수도 있으므로 안전하게 체크
         const isAggro = (enemy.ai && enemy.ai.currentTarget === me);
-        
-        // [Priority 2] Distance
         const dist = getDist(me, enemy);
-        
-        // [Priority 3] HP
         const hp = enemy.hp;
 
-        // 첫 번째 후보 등록
         if (!bestTarget) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -33,9 +23,6 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
-        // --- 엄격한 우선순위 비교 ---
-
-        // 1순위: 나를 때리는 적 우선 (Aggro)
         if (isAggro !== bestIsAggro) {
             if (isAggro) { 
                 bestTarget = enemy;
@@ -46,7 +33,6 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue; 
         }
 
-        // 2순위: 거리 비교 (Hysteresis 5px)
         const distDiff = dist - bestDist;
         if (distDiff < -5) { 
             bestTarget = enemy;
@@ -58,21 +44,12 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
-        // 3순위: 거리가 비슷할 때(5px 이내), 가장 약한 적 우선 (HP)
         if (hp < bestHp) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
             bestDist = dist;
             bestHp = hp;
-        } else if (hp === bestHp) {
-            // Tie-breaker: 더 가까운 적
-            if (dist < bestDist) {
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
-            }
-        }
+        } 
     }
     
     return bestTarget;
@@ -105,6 +82,9 @@ export default class UnitAI {
         this.lastPathCalcTime = 0;
         this.stuckTimer = 0;
         
+        // [Fix] 끼임 발생 시 직선 이동을 잠시 금지하는 타이머 추가
+        this.forcePathfindingTimer = 0;
+        
         // [LOS State]
         this.losCheckTimer = 0;
         this.lastLosResult = true;
@@ -120,10 +100,6 @@ export default class UnitAI {
         this.wallCollisionVector = new Phaser.Math.Vector2();
     }
 
-    // =================================================================
-    // [New] 정찰(Patrol) 및 타겟 탐색
-    // =================================================================
-
     updateRoaming(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
@@ -132,7 +108,6 @@ export default class UnitAI {
 
         if (this.isCombatMode || this.isProvoked) return true;
 
-        // 정찰 중 타겟 탐색
         const bestEnemy = this.findBestTarget();
         if (bestEnemy) {
             const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
@@ -147,7 +122,6 @@ export default class UnitAI {
             }
         }
 
-        // 정찰 이동 로직
         this.patrolTimer -= delta;
         if (this.patrolTimer <= 0) {
             const rad = 150;
@@ -181,7 +155,7 @@ export default class UnitAI {
             if (this.unit.hp < this.unit.maxHp) {
                 this.unit.hp = Math.min(this.unit.hp + (this.unit.maxHp * 0.3), this.unit.maxHp);
                 this.unit.redrawHpBar();
-                this.unit.showEmote("💤", "#00ff00");
+                if (this.unit.showEmote) this.unit.showEmote("💤", "#00ff00");
             }
         }
     }
@@ -215,32 +189,23 @@ export default class UnitAI {
         });
     }
 
-    // =================================================================
-    // [Updated] 타겟 선정 로직 (Priority System)
-    // =================================================================
-
     updateTargetSelection() {
         const now = this.scene.time.now;
         if (this.isProvoked) return; 
 
         const bestTarget = this.findBestTarget();
 
-        // 현재 타겟과 비교
         if (bestTarget && bestTarget !== this.currentTarget) {
-            
-            // [Fix] 쿨타임 체크: 하지만 '어그로(Aggro)'가 변경된 경우(긴급 상황)에는 쿨타임 무시
             const isCooldownActive = (now - this.lastTargetChangeTime < this.targetSwitchCooldown);
             const isEmergencySwitch = (bestTarget.ai && bestTarget.ai.currentTarget === this.unit) && 
                                       (!this.currentTarget || (this.currentTarget.ai && this.currentTarget.ai.currentTarget !== this.unit));
 
             if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                // 쿨타임 중이고, 긴급한 상황(어그로 변경)이 아니라면 변경 취소
                 if (isCooldownActive && !isEmergencySwitch) {
                     return;
                 }
             }
 
-            // 타겟 변경 확정
             this.currentTarget = bestTarget;
             this.lastTargetChangeTime = now;
             
@@ -254,8 +219,6 @@ export default class UnitAI {
     }
 
     findBestTarget() {
-        // [Refactor] 분리된 순수 함수 사용
-        // Phaser.Math.Distance.Between을 주입하여 계산
         return calculateBestTarget(
             this.unit, 
             this.unit.targetGroup.getChildren(),
@@ -263,14 +226,16 @@ export default class UnitAI {
         );
     }
 
-    // =================================================================
-    // Main Update Loop
-    // =================================================================
-
     update(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
+            this.updateAnimation();
             return;
+        }
+
+        // [Fix] 강제 우회 타이머 감소
+        if (this.forcePathfindingTimer > 0) {
+            this.forcePathfindingTimer -= delta;
         }
 
         if (this.wallCollisionTimer > 0) {
@@ -280,12 +245,12 @@ export default class UnitAI {
                 this.wallCollisionVector.y * this.unit.moveSpeed
             );
             this.unit.updateFlipX(); 
+            this.updateAnimation();
             return; 
         }
 
         this.processAggro(delta);
 
-        // [Leash Check]
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
             if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
                 const CHASE_RANGE = 450; 
@@ -298,23 +263,23 @@ export default class UnitAI {
                     this.currentTarget = null;
                     this.currentPath = [];
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
+                    this.updateAnimation();
                     return;
                 }
             } else {
                  this.isReturning = true;
                  this.isCombatMode = false;
+                 this.updateAnimation();
                  return;
             }
         }
 
-        // [Target Selection Update]
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
             this.thinkTimer = 150 + Math.random() * 100; 
             this.updateTargetSelection();
         }
 
-        // [Flee Logic]
         if (this.unit.role !== 'Tanker') {
             const fleeThreshold = this.unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
             const hpRatio = this.unit.hp / this.unit.maxHp;
@@ -328,19 +293,17 @@ export default class UnitAI {
             }
 
             if (this.isLowHpFleeing) {
-                // [Optimization] 단순 가장 가까운 적 탐색도 calculateBestTarget 재활용 가능하지만,
-                // 도주는 무조건 '거리'가 중요하므로 기존 findNearestEnemy 유지하되 중복 제거 고려
                 const nearestThreat = this.findNearestEnemy(); 
                 if (nearestThreat) {
                     const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, nearestThreat.x, nearestThreat.y);
                     if (dist < 350) this.runAway(delta);
                     else { this.unit.setVelocity(0, 0); this.unit.updateFlipX(); }
                 }
+                this.updateAnimation();
                 return;
             }
         }
 
-        // [Combat Movement]
         if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
             const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
             
@@ -373,11 +336,30 @@ export default class UnitAI {
         if (this.unit.team !== 'blue' || this.unit.scene.isAutoBattle) {
             this.unit.tryUseSkill();
         }
+        
+        this.updateAnimation();
     }
 
-    // =================================================================
-    // Helper Methods
-    // =================================================================
+    updateAnimation() {
+        const unit = this.unit;
+        const currentAnim = unit.anims.currentAnim?.key;
+        if (currentAnim && (currentAnim.includes('attack') || currentAnim.includes('hit'))) {
+            return;
+        }
+
+        // 실제 물리 속도 체크
+        const isMoving = unit.body.speed > 5;
+
+        if (isMoving) {
+            if (currentAnim !== `${unit.role}_walk`) {
+                unit.play(`${unit.role}_walk`, true);
+            }
+        } else {
+            if (currentAnim !== `${unit.role}_idle`) {
+                unit.play(`${unit.role}_idle`, true);
+            }
+        }
+    }
 
     findNearestEnemy() {
         const enemies = this.unit.targetGroup.getChildren();
@@ -403,33 +385,62 @@ export default class UnitAI {
     }
 
     onWallCollision(obstacle) {
+        // 1. 장애물의 중심 좌표(ox, oy) 안전하게 계산
         let ox, oy;
-        if (obstacle.pixelX !== undefined) { 
-            ox = obstacle.pixelX + obstacle.width / 2;
-            oy = obstacle.pixelY + obstacle.height / 2;
-        } else {
+        
+        // Phaser Tile 객체인 경우
+        if (obstacle.pixelX !== undefined) {
+            ox = obstacle.pixelX + (obstacle.width || 0) / 2;
+            oy = obstacle.pixelY + (obstacle.height || 0) / 2;
+        } 
+        // Sprite 또는 GameObject인 경우 (getBounds 사용 권장)
+        else if (obstacle.getBounds) {
+            const bounds = obstacle.getBounds();
+            ox = bounds.centerX;
+            oy = bounds.centerY;
+        } 
+        // 단순 좌표 객체인 경우
+        else {
             ox = obstacle.x;
             oy = obstacle.y;
         }
 
-        const dx = this.unit.x - ox;
-        const dy = this.unit.y - oy;
-        const newCollisionDir = new Phaser.Math.Vector2();
-        
+        const ux = this.unit.x;
+        const uy = this.unit.y;
+
+        // 2. 충돌 면(Face) 판별: 가로 거리와 세로 거리 비교
+        const dx = ux - ox;
+        const dy = uy - oy;
+
+        const slideDir = new Phaser.Math.Vector2();
+
+        // 현재 쫓고 있는 타겟 위치 가져오기 (없으면 현재 위치 기준)
+        // 전투 타겟 > 정찰 타겟 > 제자리 순서
+        const target = this.currentTarget || this.patrolTarget || { x: ux, y: uy };
+
+        // [Case 1] 가로 거리 차이가 더 큼 -> 좌/우 면에 충돌함 -> "세로(Y)"로 미끄러져야 함
         if (Math.abs(dx) > Math.abs(dy)) {
-            newCollisionDir.set(0, Math.sign(dy) || 1);
-        } else {
-            newCollisionDir.set(Math.sign(dx) || 1, 0);
-        }
-        
-        if (this.wallCollisionTimer > 0) {
-            if (this.wallCollisionVector.dot(newCollisionDir) > 0.5) return; 
-            this.wallCollisionVector.negate();
-            return;
+            // 타겟이 나보다 아래에 있으면 아래(1)로, 위에 있으면 위(-1)로 슬라이딩
+            // 단, Y축 차이가 너무 작으면(10px 미만) 그냥 장애물 중심에서 멀어지는 방향 선택 (코너 탈출)
+            if (Math.abs(target.y - uy) > 10) {
+                slideDir.set(0, Math.sign(target.y - uy) || 1);
+            } else {
+                slideDir.set(0, Math.sign(dy) || 1);
+            }
+        } 
+        // [Case 2] 세로 거리 차이가 더 큼 -> 상/하 면에 충돌함 -> "가로(X)"로 미끄러져야 함
+        else {
+            if (Math.abs(target.x - ux) > 10) {
+                slideDir.set(Math.sign(target.x - ux) || 1, 0);
+            } else {
+                slideDir.set(Math.sign(dx) || 1, 0);
+            }
         }
 
-        this.wallCollisionVector.copy(newCollisionDir);
-        this.wallCollisionTimer = 500;
+        // 3. 벡터 적용 및 타이머 설정
+        // 기존 500ms는 너무 길어서 코너에서 버벅거림 -> 150ms로 단축하여 빠른 반응 유도
+        this.wallCollisionVector.copy(slideDir);
+        this.wallCollisionTimer = 150; 
     }
 
     checkLineOfSight() {
@@ -491,22 +502,33 @@ export default class UnitAI {
         const unit = this.unit;
 
         if (this.currentPath.length > 0 || this.currentTarget) {
+            // [Stuck Check] 속도가 거의 0이면 끼임으로 판단
             if (unit.body.speed < unit.moveSpeed * 0.1) {
                 this.stuckTimer += delta;
                 if (this.stuckTimer > 200) {
                     this.stuckTimer = 0;
                     this.currentPath = [];
                     this.pathUpdateTimer = 0;
+                    
+                    // [Critical Fix] 끼임 발생 시:
+                    // 1. 물리 속도를 0으로 리셋하여 튕김 방지
+                    unit.setVelocity(0, 0); 
+                    // 2. 1.5초 동안 '직선 이동(LineClear)'을 금지하고 강제로 A* 경로 사용
+                    this.forcePathfindingTimer = 1500; 
                 }
             } else {
                 this.stuckTimer = 0;
             }
         }
 
-        const isLineClear = this.scene.pathfindingManager.isLineClear(
-            { x: unit.x, y: unit.y }, 
-            { x: this.currentTarget.x, y: this.currentTarget.y }
-        );
+        // [Fix] 최근에 끼인 적이 있다면(forcePathfindingTimer > 0), 직선 경로 체크를 건너뜀
+        let isLineClear = false;
+        if (this.forcePathfindingTimer <= 0) {
+            isLineClear = this.scene.pathfindingManager.isLineClear(
+                { x: unit.x, y: unit.y }, 
+                { x: this.currentTarget.x, y: this.currentTarget.y }
+            );
+        }
 
         if (isLineClear) {
             this.scene.physics.moveToObject(unit, this.currentTarget, unit.moveSpeed);
@@ -541,6 +563,7 @@ export default class UnitAI {
                 this.moveToPoint(nextPoint);
             }
         } else {
+            // 경로조차 없으면 어쩔 수 없이 직선 이동 (하지만 stuck 감지로 인해 다시 루프 탈출 가능)
             this.scene.physics.moveToObject(unit, this.currentTarget, unit.moveSpeed);
         }
         unit.updateFlipX();
