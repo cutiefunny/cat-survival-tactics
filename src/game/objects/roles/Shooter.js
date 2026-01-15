@@ -6,8 +6,6 @@ export default class Shooter extends Unit {
         stats.role = 'Shooter';
         stats.attackRange = stats.attackRange || 250; 
         super(scene, x, y, texture, team, targetGroup, stats, isLeader);
-        
-        this.isFlanking = false;
     }
 
     // [Formation Logic] 대열 유지 중이라도 사거리 내 적은 공격
@@ -17,7 +15,6 @@ export default class Shooter extends Unit {
             if (nearest && nearest.active && !nearest.isDying) {
                 const dist = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
                 
-                // 적이 사거리 안에 있으면 전투 로직(updateAI) 실행
                 if (dist <= this.attackRange) {
                     this.updateAI(delta);
                     return;
@@ -25,32 +22,28 @@ export default class Shooter extends Unit {
             }
         }
         
-        // 적이 없으면 리더 따라가기
         super.updateNpcLogic(delta);
     }
 
     updateAI(delta) {
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
-        // [Fix 1] 도발(Taunt) 상태 체크 (필수)
-        // 이 로직이 없으면 탱커가 도발해도 무시하고 도망가거나 다른 적을 쏨
+        // [Logic] 도발 상태 처리
         this.ai.processAggro(delta);
         if (this.ai.isProvoked) {
             if (this.ai.currentTarget && this.ai.currentTarget.active) {
-                // 도발 상태에서는 카이팅(도망) 하지 않고 도발자에게 끌려감
                 this.scene.physics.moveToObject(this, this.ai.currentTarget, this.moveSpeed);
                 this.updateFlipX();
             }
-            return; // 여기서 리턴하여 아래의 타겟 변경/카이팅 로직 차단
+            return; 
         }
 
-        // [Fix 2] 타겟이 없거나 죽었으면 즉시 반응
+        // 타겟 유효성 체크
         if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying) {
             this.ai.thinkTimer = 0;
         }
 
         // 1. [생존] 카이팅 (Kiting)
-        // 대열 유지 모드가 아닐 때만 도망가기 허용
         if (!isFormationMode) {
             const nearestThreat = this.ai.findNearestEnemy(); 
             if (nearestThreat) {
@@ -58,7 +51,6 @@ export default class Shooter extends Unit {
                 const kiteDist = this.aiConfig.shooter?.kiteDistance || 200;
                 const kiteDistSq = kiteDist * kiteDist;
 
-                // 너무 가까우면 공격보다 거리 벌리기 우선
                 if (distSq < kiteDistSq * 0.6) { 
                     this.fleeFrom(nearestThreat);
                     this.lookAt(nearestThreat);
@@ -90,16 +82,14 @@ export default class Shooter extends Unit {
     }
 
     decideTargetSmart() {
-        // 1. 나를 노리는 적(Chasers)이 있으면 최우선 처리 (자기 방어)
+        // 1. 자기 방어 (나를 노리는 적 우선)
         const chasers = this.findEnemiesTargetingMe();
         if (chasers.length > 0) {
             this.ai.currentTarget = this.getClosestUnit(chasers);
-            this.isFlanking = false;
             return;
         }
 
-        // 2. 전략적 타겟 탐색 (Scoring System with Stickiness)
-        // UnitAI의 findStrategicTarget을 직접 구현하여 Stickiness(가산점)를 추가함
+        // 2. 전략적 타겟 탐색 (점수제)
         const enemies = this.targetGroup.getChildren();
         let bestTarget = null;
         let highestScore = -Infinity;
@@ -107,22 +97,19 @@ export default class Shooter extends Unit {
         const myX = this.x;
         const myY = this.y;
 
-        // 가중치 설정
         const weights = { distance: 1.0, lowHp: 3.0 };
         const rolePriority = { 'Healer': 500, 'Shooter': 200 };
-        const STICKY_BONUS = 300; // 현재 타겟 유지 보너스
+        const STICKY_BONUS = 300; 
 
         for (const enemy of enemies) {
             if (!enemy.active || enemy.isDying) continue;
 
             const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
             
-            // 점수 계산: (거리 점수) + (체력 점수) + (직업 보너스)
             let score = -(dist * weights.distance);
             score -= (enemy.hp * weights.lowHp);
             score += (rolePriority[enemy.role] || 0);
 
-            // [Stickiness] 현재 타겟에게 큰 가산점을 주어 잦은 변경 방지
             if (enemy === this.ai.currentTarget) {
                 score += STICKY_BONUS;
             }
@@ -135,8 +122,7 @@ export default class Shooter extends Unit {
 
         let strategicTarget = bestTarget;
 
-        // 3. 기회주의적 사격 (Opportunistic Fire)
-        // 전략적 타겟(예: 멀리 있는 힐러)을 잡았더라도, 당장 내 코앞(사거리 내)에 적이 있으면 그 놈부터 쏨
+        // 3. 기회주의적 사격 (가까운 적 우선 전환)
         const nearest = this.ai.findNearestEnemy();
         if (nearest && nearest.active && !nearest.isDying) {
             const distToNearest = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
@@ -148,7 +134,6 @@ export default class Shooter extends Unit {
                     shouldSwitch = true;
                 } else {
                     const distToStrategic = Phaser.Math.Distance.Between(this.x, this.y, strategicTarget.x, strategicTarget.y);
-                    // 전략 타겟이 사거리 밖이라면, 사거리 안의 가까운 적 선택
                     if (distToStrategic > this.attackRange) {
                         shouldSwitch = true;
                     }

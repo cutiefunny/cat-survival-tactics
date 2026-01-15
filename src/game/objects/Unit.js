@@ -21,7 +21,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.isLeader = isLeader;
 
         this.role = roleKey;
-        // [Modified] 리더라면 baseSize를 10% 증가시킴
+        // [Modified] 리더라면 baseSize를 15% 증가시킴
         let size = (this.role === 'Tanker') ? 60 : 50;
         if (this.isLeader) {
             size *= 1.15; 
@@ -61,8 +61,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.isDying = false; 
         this.isAttacking = false;
         this.isTakingDamage = false;
-
-        this.noCombatTimer = 0;
 
         this._tempVec = new Phaser.Math.Vector2();
 
@@ -158,18 +156,28 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     enforceWorldBounds() {
         const bounds = this.scene.physics.world.bounds;
         const padding = this.baseSize / 2;
-        const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
-        const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
+        
+        // [Optimization] 경계 밖으로 나갔을 때만 연산 수행
+        if (this.x < bounds.x + padding || this.x > bounds.right - padding ||
+            this.y < bounds.y + padding || this.y > bounds.bottom - padding) {
 
-        if (this.x !== clampedX || this.y !== clampedY) {
-            this.x = clampedX;
-            this.y = clampedY;
-            this.setVelocity(0, 0);
+            const clampedX = Phaser.Math.Clamp(this.x, bounds.x + padding, bounds.right - padding);
+            const clampedY = Phaser.Math.Clamp(this.y, bounds.y + padding, bounds.bottom - padding);
+
+            if (this.x !== clampedX || this.y !== clampedY) {
+                this.x = clampedX;
+                this.y = clampedY;
+                this.setVelocity(0, 0);
+            }
         }
     }
 
     validatePosition() {
         if (!this.active || !this.body) return;
+        
+        // [Optimization] 움직이지 않는 상태라면 충돌 체크 불필요
+        if (this.body.speed < 0.1) return;
+
         let isInvalid = false;
         if (this.scene.blockLayer) {
             const tile = this.scene.blockLayer.getTileAtWorldXY(this.x, this.y);
@@ -192,25 +200,41 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     update(time, delta) {
         if (!this.active || this.isDying) return; 
         
-        this.validatePosition();
+        const adjustedDelta = delta * (this.scene.gameSpeed || 1);
+        const isMoving = this.body.speed > 0.1;
+
+        // [Optimization] 이동 중일 때만 위치 검증 및 경계 체크 수행
+        if (isMoving) {
+            this.validatePosition();
+            this.enforceWorldBounds();
+        }
+
         this.updateUI();
 
+        // [Optimization] 디버그 모드가 켜져 있을 때만 함수 호출
         if (this.scene.uiManager && this.scene.uiManager.isDebugEnabled) {
             this.handleDebugUpdates(delta);
         } else if (this.debugText) {
             this.destroyDebugObjects();
         }
 
-        const adjustedDelta = delta * (this.scene.gameSpeed || 1);
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
 
-        if (this.hp < this.maxHp * 0.5 && this.body.velocity.lengthSq() < 10 && !this.isTakingDamage && !this.isAttacking) {
+        // [Optimization] 움직이지 않고, 피해를 입거나 공격 중이 아닐 때만 재생
+        if (!isMoving && this.hp < this.maxHp * 0.5 && !this.isTakingDamage && !this.isAttacking) {
             this.handleRegen(adjustedDelta);
         }
 
-        if (this.scene.isSetupPhase) { this.setVelocity(0, 0); return; }
-        this.enforceWorldBounds();
-        if (this.scene.isGameOver) { this.setVelocity(0, 0); if (this.anims.isPlaying) this.stop(); return; }
+        if (this.scene.isSetupPhase) { 
+            if (isMoving) this.setVelocity(0, 0); 
+            return; 
+        }
+        
+        if (this.scene.isGameOver) { 
+            if (isMoving) this.setVelocity(0, 0); 
+            if (this.anims.isPlaying) this.stop(); 
+            return; 
+        }
 
         if (this.ai.fleeTimer > 0) this.ai.fleeTimer -= adjustedDelta;
 
@@ -524,7 +548,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updateAnimation() {
         const isBusy = (this.isTakingDamage || this.isAttacking || this.isUsingSkill);
         if (!isBusy) {
-            if (this.body.velocity.length() > 5) {
+            // [Optimization] 벡터 길이 계산 최적화 (제곱 비교)
+            if (this.body.velocity.lengthSq() > 25) { 
                 const walkKey = `${this.textureKey}_walk`;
                 if (this.scene.anims.exists(walkKey)) {
                     if (!this.anims.isPlaying || this.anims.currentAnim.key !== walkKey) {

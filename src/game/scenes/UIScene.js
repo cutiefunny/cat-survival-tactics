@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import GameOverModal from '../ui/GameOverModal'; // [New] 분리된 모달 클래스 임포트
+import GameOverModal from '../ui/GameOverModal'; 
 
 export default class UIScene extends Phaser.Scene {
     constructor() {
@@ -16,7 +16,6 @@ export default class UIScene extends Phaser.Scene {
         this.msgText = null;
         this.debugStats = null;
         
-        // [New] 모달 인스턴스 생성
         this.gameOverModal = new GameOverModal(this);
 
         const battleScene = this.scene.get('BattleScene');
@@ -43,50 +42,46 @@ export default class UIScene extends Phaser.Scene {
         
         this.footer.add([bg, border]);
 
-        this.createAutoButton();
-        this.createSquadButton();
-        this.createSpeedButton();
+        // [Refactored] 헬퍼 메서드를 사용하여 버튼 생성 코드 중복 제거
+        this.autoBtn = this.createFooterButton('수동조작', () => {
+            this.scene.get('BattleScene').toggleAutoBattle();
+        });
+
+        this.squadBtn = this.createFooterButton('자율공격', () => {
+            this.scene.get('BattleScene').toggleSquadState();
+        });
+
+        this.speedBtn = this.createFooterButton('1배속', () => {
+            this.scene.get('BattleScene').toggleGameSpeed();
+        });
         
+        this.footer.add([this.autoBtn, this.squadBtn, this.speedBtn]);
         this.repositionFooterElements();
     }
 
-    createAutoButton() {
-        this.autoBtn = this.add.container(0, 0);
-        this.autoBtn.setSize(120, 50);
-        const bg = this.add.rectangle(0, 0, 120, 50, 0x444444).setStrokeStyle(2, 0xffffff);
-        const text = this.add.text(0, 0, '수동조작', { fontSize: '18px', fontStyle: 'bold', fill: '#ffffff' }).setOrigin(0.5);
-        this.autoBtn.add([bg, text]);
-        bg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-            this.tweens.add({ targets: this.autoBtn, scale: 0.9, duration: 50, yoyo: true });
-            this.scene.get('BattleScene').toggleAutoBattle();
-        });
-        this.footer.add(this.autoBtn);
-    }
+    // [New] 푸터 버튼 생성 헬퍼
+    createFooterButton(defaultText, onClick) {
+        const container = this.add.container(0, 0);
+        container.setSize(120, 50);
 
-    createSquadButton() {
-        this.squadBtn = this.add.container(0, 0);
-        this.squadBtn.setSize(120, 50);
-        const bg = this.add.rectangle(0, 0, 120, 50, 0x444444).setStrokeStyle(2, 0xffffff);
-        const text = this.add.text(0, 0, '자율공격', { fontSize: '18px', fontStyle: 'bold', fill: '#ffffff' }).setOrigin(0.5);
-        this.squadBtn.add([bg, text]);
-        bg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-            this.tweens.add({ targets: this.squadBtn, scale: 0.9, duration: 50, yoyo: true });
-            this.scene.get('BattleScene').toggleSquadState();
-        });
-        this.footer.add(this.squadBtn);
-    }
+        const bg = this.add.rectangle(0, 0, 120, 50, 0x444444)
+            .setStrokeStyle(2, 0xffffff)
+            .setInteractive({ useHandCursor: true });
 
-    createSpeedButton() {
-        this.speedBtn = this.add.container(0, 0);
-        this.speedBtn.setSize(120, 50);
-        const bg = this.add.rectangle(0, 0, 120, 50, 0x444444).setStrokeStyle(2, 0xffffff);
-        const text = this.add.text(0, 0, '1배속', { fontSize: '18px', fontStyle: 'bold', fill: '#ffffff' }).setOrigin(0.5);
-        this.speedBtn.add([bg, text]);
-        bg.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-            this.tweens.add({ targets: this.speedBtn, scale: 0.9, duration: 50, yoyo: true });
-            this.scene.get('BattleScene').toggleGameSpeed();
+        const text = this.add.text(0, 0, defaultText, { 
+            fontSize: '18px', 
+            fontStyle: 'bold', 
+            fill: '#ffffff' 
+        }).setOrigin(0.5);
+
+        container.add([bg, text]);
+
+        bg.on('pointerdown', () => {
+            this.tweens.add({ targets: container, scale: 0.9, duration: 50, yoyo: true });
+            if (onClick) onClick();
         });
-        this.footer.add(this.speedBtn);
+
+        return container;
     }
 
     showStartButton(callback) {
@@ -127,11 +122,60 @@ export default class UIScene extends Phaser.Scene {
         }
     }
 
-    // [Modified] 모달 클래스로 위임
     createGameOverUI(data, callback) {
         if (this.gameOverModal) {
             this.gameOverModal.show(data, callback);
         }
+    }
+
+    // [New] 후퇴 확인 모달 (UIScene 레이어에서 처리)
+    showRetreatModal(onConfirm, onCancel) {
+        const { width, height } = this.scale;
+        
+        // 배경 (클릭 차단)
+        const bg = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.6)
+            .setInteractive()
+            .setDepth(3000);
+
+        const modal = this.add.container(width / 2, height / 2).setDepth(3001);
+        
+        const panel = this.add.rectangle(0, 0, 400, 250, 0x222222)
+            .setStrokeStyle(3, 0xffaa00);
+        
+        const titleText = this.add.text(0, -60, "전장에서 이탈하시겠습니까?", {
+            fontSize: '22px', fontStyle: 'bold', color: '#ffffff'
+        }).setOrigin(0.5);
+
+        const descText = this.add.text(0, -10, "후퇴 시 모든 아군의\n피로도가 2 증가합니다.", {
+            fontSize: '18px', color: '#cccccc', align: 'center'
+        }).setOrigin(0.5);
+
+        // 버튼 생성 헬퍼
+        const createBtn = (x, y, text, color, cb) => {
+            const btn = this.add.container(x, y);
+            const bBg = this.add.rectangle(0, 0, 140, 50, color).setInteractive({ useHandCursor: true });
+            const bText = this.add.text(0, 0, text, { fontSize: '20px', fontStyle: 'bold' }).setOrigin(0.5);
+            bBg.setStrokeStyle(2, 0xffffff);
+            btn.add([bBg, bText]);
+            
+            bBg.on('pointerdown', () => {
+                // 트윈 효과 후 콜백 실행
+                this.tweens.add({
+                    targets: btn, scale: 0.95, duration: 50, yoyo: true,
+                    onComplete: () => {
+                        bg.destroy();
+                        modal.destroy();
+                        if (cb) cb();
+                    }
+                });
+            });
+            return btn;
+        };
+
+        const confirmBtn = createBtn(-90, 70, "후퇴", 0xcc4444, onConfirm);
+        const cancelBtn = createBtn(90, 70, "취소", 0x444444, onCancel);
+
+        modal.add([panel, titleText, descText, confirmBtn, cancelBtn]);
     }
 
     playCoinAnimation(startX, startY, amount, onComplete) {
@@ -189,7 +233,6 @@ export default class UIScene extends Phaser.Scene {
             bg.setFillStyle(0x0088ff); 
             text.setText('대형유지'); 
         } else if (state === 'HOLD') {
-            // [New] 홀드 상태 UI (보라색)
             bg.setFillStyle(0x8844ff); 
             text.setText('홀드');
         } else { 
@@ -212,9 +255,11 @@ export default class UIScene extends Phaser.Scene {
         if (width < totalBtnWidth) scale = width / totalBtnWidth;
         const btnWidth = 120 * scale;
         const startX = (width - (btnWidth * 3)) / 2 + (btnWidth / 2);
+        
         if (this.autoBtn) { this.autoBtn.setScale(scale); this.autoBtn.setPosition(startX, centerY); }
         if (this.squadBtn) { this.squadBtn.setScale(scale); this.squadBtn.setPosition(startX + btnWidth, centerY); }
         if (this.speedBtn) { this.speedBtn.setScale(scale); this.speedBtn.setPosition(startX + btnWidth * 2, centerY); }
+        
         const bg = this.footer.list[0];
         const border = this.footer.list[1];
         if (bg) { bg.setPosition(width/2, centerY); bg.setSize(width, this.footerHeight); }
