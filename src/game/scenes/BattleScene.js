@@ -43,6 +43,9 @@ import level2 from '../../assets/sounds/level2.mp3';
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
 import hit3 from '../../assets/sounds/Hit3.wav';
+// [New] 피격 효과음 추가
+import ouch1 from '../../assets/sounds/Ouch1.mp3';
+import ouch2 from '../../assets/sounds/Ouch2.mp3';
 
 const UnitClasses = {
     'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
@@ -120,6 +123,10 @@ export default class BattleScene extends BaseScene {
         this.load.audio('hit1', hit1);
         this.load.audio('hit2', hit2);
         this.load.audio('hit3', hit3);
+        
+        // [New] Ouch 사운드 로드
+        this.load.audio('ouch1', ouch1);
+        this.load.audio('ouch2', ouch2);
     }
 
     create() {
@@ -157,6 +164,14 @@ export default class BattleScene extends BaseScene {
         const key = Phaser.Math.RND.pick(hits);
         if (this.sound && this.cache.audio.exists(key)) {
             this.sound.play(key, { volume: 0.4, detune: Phaser.Math.Between(-100, 100) });
+        }
+    }
+
+    playDieSound() {
+        const dieSounds = ['ouch1', 'ouch2'];
+        const key = Phaser.Math.RND.pick(dieSounds);
+        if (this.sound && this.cache.audio.exists(key)) {
+            this.sound.play(key, { volume: 0.6, detune: Phaser.Math.Between(-100, 100) });
         }
     }
 

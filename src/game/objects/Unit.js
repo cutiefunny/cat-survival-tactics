@@ -37,7 +37,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         
         this.defense = stats.defense || 0;
         this.killReward = stats.killReward || 10;
-
+        
+        // [New] 공격 빗나감 확률 (기본값 0.02)
         this.missChance = (stats.missChance !== undefined) ? stats.missChance : 0.02;
 
         this.attackRange = stats.attackRange || 50;
@@ -115,6 +116,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.team === 'red' && this.scene && typeof this.scene.animateCoinDrop === 'function') {
             const dropAmount = this.killReward; 
             this.scene.animateCoinDrop(this.x, this.y, dropAmount);
+        }
+
+        // [New] 유닛 사망 시 비명 소리 재생
+        if (this.scene && typeof this.scene.playDieSound === 'function') {
+            this.scene.playDieSound();
         }
 
         if (this.body) {
@@ -437,7 +443,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.scene && typeof this.scene.playHitSound === 'function') {
             this.scene.playHitSound();
         }
-        
+
         this.isTakingDamage = true;
         this.setFrame(FRAME_HIT);
         
