@@ -302,7 +302,7 @@ const DevPage = () => {
             </label>
 
             {/* 2. Map & Spawn Settings */}
-            {/* <div style={groupStyle}>
+            <div style={groupStyle}>
                 <div style={groupLabelStyle}>🗺️ MAP & SPAWN</div>
                 <div style={compactRowStyle}>
                     <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
@@ -318,16 +318,16 @@ const DevPage = () => {
                             </For>
                         </select>
                     </label>
-                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
+                    {/* <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
                         <span style={{color: "#aaa"}}>Spawn Y:</span>
                         <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={shortInputStyle} />
                     </label>
                     <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
                         <span style={{color: "#aaa"}}>Gap:</span>
                         <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={shortInputStyle} />
-                    </label>
+                    </label> */}
                 </div>
-            </div> */}
+            </div>
 
             {/* 3. Economy Settings */}
             <div style={groupStyle}>

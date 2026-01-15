@@ -1,9 +1,9 @@
 {
   "default": {
-    "mapId": "level2",
+    "mapId": "level0",
     "name": "Unknown Area",
     "difficulty": 1,
-    "bgm": "level1"
+    "bgm": "level0"
   },
   "territories": {
     "1": {
@@ -36,8 +36,20 @@
       "difficulty": 2,
       "bgm": "level2"
     },
+    "6": {
+      "mapId": "level6",
+      "name": "주차장",
+      "difficulty": 2,
+      "bgm": "level2"
+    },
+    "7": {
+      "mapId": "level0",
+      "name": "광장",
+      "difficulty": 2,
+      "bgm": "level2"
+    },
     "8": {
-      "mapId": "level4",
+      "mapId": "level0",
       "name": "합정파 근거지",
       "difficulty": 2,
       "bgm": "level2",
@@ -46,7 +58,7 @@
       "text": "여기는 합정파의 영역이다냥!"
     },
     "9": {
-      "mapId": "level4",
+      "mapId": "level0",
       "name": "레드로드",
       "difficulty": 2,
       "bgm": "level2",

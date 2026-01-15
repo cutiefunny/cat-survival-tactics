@@ -16,28 +16,14 @@ import Raccoon from '../objects/roles/Raccoon';
 import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS, getRandomUnitName } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
-import { LEVEL_KEYS, LEVEL_DATA } from '../managers/LevelManager'; 
+import { LEVEL_KEYS } from '../managers/LevelManager'; 
 
 // [Managers]
+import MapAssetManager from '../managers/MapAssetManager'; // [New] 맵 관리 매니저
 import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../managers/CombatManager';       
 import PathfindingManager from '../managers/PathfindingManager'; 
-
-// [Assets]
-import stage1Data from '../../assets/maps/stage1.json';
-import level4Data from '../../assets/maps/level4.json'; 
-import tilesetGrassImg from '../../assets/tilesets/TX_Tileset_Grass.png';
-import tilesetPlantImg from '../../assets/tilesets/TX_Plant.png';
-import tilesetCity1Img from '../../assets/tilesets/City_20.png';
-import tilesetCity2Img from '../../assets/tilesets/City_20_2.png';
-import tilesetParkImg from '../../assets/tilesets/park.png'; 
-import tilesetCarImg from '../../assets/tilesets/car.png'; 
-import tilesetStreet1Img from '../../assets/tilesets/street1.png';
-import tilesetStreet2Img from '../../assets/tilesets/street2.png';
-import tilesetStreet3Img from '../../assets/tilesets/street3.png';
-import tilesetStreet4Img from '../../assets/tilesets/street4.png';
-import tilesetRoadImg from '../../assets/tilesets/road.png';
 
 // [Unit Sprites]
 import leaderSheet from '../../assets/units/leader.png';
@@ -49,11 +35,10 @@ import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
 import normalSheet from '../../assets/units/normal.png'; 
 
+// [Sounds]
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
-
-// [Sounds]
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
 import hit3 from '../../assets/sounds/Hit3.wav';
@@ -113,6 +98,10 @@ export default class BattleScene extends BaseScene {
     }
 
     preload() {
+        // [New] MapAssetManager에게 맵/타일셋 로딩 위임
+        this.mapManager = new MapAssetManager(this);
+        this.mapManager.preload();
+
         const sheetConfig = { frameWidth: 100, frameHeight: 100 };
         this.load.spritesheet('leader', leaderSheet, sheetConfig);
         this.load.spritesheet('dog', dogSheet, sheetConfig); 
@@ -122,22 +111,6 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
         this.load.spritesheet('normal', normalSheet, sheetConfig);
-
-        this.load.tilemapTiledJSON('stage1', stage1Data);
-        this.load.tilemapTiledJSON('level4', level4Data); 
-        LEVEL_KEYS.forEach(key => { this.load.tilemapTiledJSON(key, LEVEL_DATA[key]); });
-        
-        this.load.image('tiles_grass', tilesetGrassImg);
-        this.load.image('tiles_plant', tilesetPlantImg);
-        this.load.image('tiles_city', tilesetCity1Img);
-        this.load.image('tiles_city2', tilesetCity2Img);
-        this.load.image('tiles_park', tilesetParkImg);
-        this.load.image('tiles_car', tilesetCarImg); 
-        this.load.image('tiles_street1', tilesetStreet1Img);
-        this.load.image('tiles_street2', tilesetStreet2Img);
-        this.load.image('tiles_street3', tilesetStreet3Img);
-        this.load.image('tiles_street4', tilesetStreet4Img);
-        this.load.image('tiles_road', tilesetRoadImg);
 
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
@@ -265,6 +238,7 @@ export default class BattleScene extends BaseScene {
 
     startGame(config, mapKey) {
         if (!mapKey) {
+            // 맵 파일이 없을 때 (기본 샌드박스)
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
             
@@ -282,51 +256,16 @@ export default class BattleScene extends BaseScene {
             this.spawnUnits(config, null); 
             this.setupPhysicsColliders(null, null);
         } else {
-            const map = this.make.tilemap({ key: mapKey });
-            const tilesets = [];
+            // [Modified] MapAssetManager를 사용하여 맵 생성
+            const mapData = this.mapManager.createMap(mapKey);
             
-            if (mapKey === 'stage1') {
-                const t1 = map.addTilesetImage('tileser_nature', 'tiles_grass');
-                const t2 = map.addTilesetImage('tileset_trees', 'tiles_plant');
-                if (t1) tilesets.push(t1); if (t2) tilesets.push(t2);
-            } else {
-                const tCity1 = map.addTilesetImage('City', 'tiles_city');
-                const tCity2 = map.addTilesetImage('City2', 'tiles_city2');
-                if (tCity1) tilesets.push(tCity1); if (tCity2) tilesets.push(tCity2);
-                map.tilesets.forEach(ts => {
-                if (tilesets.some(loadedTs => loadedTs.name === ts.name)) return;
-                let imgKey = null;
-                const name = ts.name;
-                
-                if (name.includes('Park')) imgKey = 'tiles_park';
-                else if (name.includes('street1') || name === 'Street1') imgKey = 'tiles_street1';
-                else if (name.includes('street2') || name === 'Street2' || name === 'level5-2') imgKey = 'tiles_street2'; 
-                else if (name.includes('street3') || name === 'Street3') imgKey = 'tiles_street3';
-                else if (name.includes('street4') || name === 'Street4') imgKey = 'tiles_street4';
-                else if (name.includes('Road') || name === 'level5') imgKey = 'tiles_road'; 
-                else if (name.includes('2') && name.includes('City')) imgKey = 'tiles_city2';
-                else if (name.includes('City')) imgKey = 'tiles_city';
-                else if (name.includes('Car') || name === 'car') imgKey = 'tiles_car';
-                
-                if (imgKey) { const t = map.addTilesetImage(ts.name, imgKey); if (t) tilesets.push(t); }
-            });
-            }
-            const validTilesets = tilesets.filter(t => t);
-            const groundLayer = map.createLayer('Ground', validTilesets, 0, 0);
-            this.wallLayer = map.createLayer('Walls', validTilesets, 0, 0);
-            this.blockLayer = map.createLayer('Blocks', validTilesets, 0, 0);
-            if (this.wallLayer) this.wallLayer.setCollisionByExclusion([-1]);
-            if (this.blockLayer) this.blockLayer.setCollisionByExclusion([-1]);
+            const map = mapData.map;
+            this.wallLayer = mapData.layers.wallLayer;
+            this.blockLayer = mapData.layers.blockLayer;
+            this.blockObjectGroup = mapData.blockObjectGroup;
+
             this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
-            this.blockObjectGroup = this.physics.add.staticGroup();
-            const blockObjectLayer = map.getObjectLayer('Blocks');
-            if (blockObjectLayer) {
-                blockObjectLayer.objects.forEach(obj => {
-                    const rect = this.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
-                    this.physics.add.existing(rect, true); rect.setVisible(false); this.blockObjectGroup.add(rect);
-                });
-            }
             const obstacleLayers = [this.wallLayer, this.blockLayer].filter(l => l !== null);
             this.pathfindingManager.setup(map, obstacleLayers);
             this.mapWidth = map.widthInPixels; this.mapHeight = map.heightInPixels;
@@ -604,8 +543,6 @@ export default class BattleScene extends BaseScene {
         this.initialRedCount = this.redTeam.getLength();
     }
     
-    // [Removed] buyUnit 메서드 제거 (전투 중 용병 고용 기능 삭제)
-
     animateCoinDrop(startX, startY, amount) {
         console.log(`💰 [Coin] Drop occurred! Amount: ${amount}, Pre-Total: ${this.playerCoins}`);
         
