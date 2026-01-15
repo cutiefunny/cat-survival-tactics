@@ -2,10 +2,13 @@ import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
 import UIScene from './scenes/UIScene';
 import StrategyScene from './scenes/StrategyScene';
+import LoadingScene from './scenes/LoadingScene'; // [New] Import
 
 export function launchGame(containerId, mockData = null) {
-    // 모의전투 여부에 따라 씬 목록 구성 (모의전투 시 StrategyScene 제외)
-    const sceneList = mockData ? [BattleScene, UIScene] : [StrategyScene, BattleScene, UIScene];
+    // [Modified] LoadingScene을 씬 목록에 추가 (순서는 상관없으나 명시적으로 포함)
+    const sceneList = mockData 
+        ? [LoadingScene, BattleScene, UIScene] 
+        : [StrategyScene, LoadingScene, BattleScene, UIScene];
 
     const config = {
         type: Phaser.AUTO,
@@ -16,7 +19,7 @@ export function launchGame(containerId, mockData = null) {
         physics: {
             default: 'arcade',
             arcade: {
-                debug: mockData?.config?.showDebugStats || false, // Dev 설정에 따라 디버그 모드
+                debug: mockData?.config?.showDebugStats || false, 
                 gravity: { y: 0 } 
             }
         },
@@ -27,18 +30,15 @@ export function launchGame(containerId, mockData = null) {
         },
         callbacks: {
             postBoot: (game) => {
-                // 모의전투일 경우, 시작하자마자 데이터 주입 및 씬 재시작
                 if (mockData) {
-                    // 1. 레지스트리에 플레이어 스쿼드(Blue Team) 설정
                     game.registry.set('playerSquad', mockData.squad);
                     game.registry.set('playerCoins', mockData.config.gameSettings.initialCoins);
 
-                    // 2. BattleScene을 강제로 재시작하며 설정(Config) 전달
                     const startSceneKey = 'BattleScene';
                     game.scene.stop(startSceneKey);
                     game.scene.start(startSceneKey, {
                         levelIndex: mockData.config.gameSettings.startLevelIndex,
-                        debugConfig: mockData.config // DB 대신 사용할 설정 객체
+                        debugConfig: mockData.config 
                     });
                 }
             }

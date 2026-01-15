@@ -665,9 +665,20 @@ export default class StrategyScene extends BaseScene {
         
         const currentCoins = this.registry.get('playerCoins') ?? 0;
 
-        this.scene.start('BattleScene', {
-            isStrategyMode: true, targetNodeId: this.selectedTargetId, levelIndex: selectedLevelIndex,
-            currentCoins: currentCoins, armyConfig: targetNode.army || null, bgmKey: targetNode.bgm 
+        // [Modified] BattleScene 직접 호출 대신 LoadingScene 경유
+        // 기존에 넘기던 데이터를 targetData로 포장해서 전달
+        const battleData = {
+            isStrategyMode: true, 
+            targetNodeId: this.selectedTargetId, 
+            levelIndex: selectedLevelIndex,
+            currentCoins: currentCoins, 
+            armyConfig: targetNode.army || null, 
+            bgmKey: targetNode.bgm 
+        };
+
+        this.scene.start('LoadingScene', {
+            targetScene: 'BattleScene',
+            targetData: battleData
         });
     }
 
