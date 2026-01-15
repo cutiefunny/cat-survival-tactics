@@ -8,15 +8,15 @@ import PhaserGame from "../components/PhaserGame";
 
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
-  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3 },
-  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2 },
-  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20, maintenance: 2 },
-  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30, maintenance: 2 },
-  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4 },
-  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25, maintenance: 5 },
-  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20, maintenance: 2 },
-  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 1 },
-  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 0 }
+  Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3, missChance: 0.02 },
+  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2, missChance: 0.02 },
+  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20, maintenance: 2, missChance: 0.02 },
+  Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30, maintenance: 2, missChance: 0.02 },
+  Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4, missChance: 0.02 },
+  Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25, maintenance: 5, missChance: 0.02 },
+  Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20, maintenance: 2, missChance: 0.02 },
+  Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 1, missChance: 0.02 },
+  NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 0, missChance: 0.02 }
 };
 
 // [설정] 기본 유닛 가격
@@ -490,8 +490,10 @@ const DevPage = () => {
                     {(role) => (
                     <div style={{ background: "#333", padding: "10px", borderRadius: "5px", borderLeft: `4px solid #888` }}>
                         <div style={{display: "flex", "justify-content": "space-between", "margin-bottom": "10px"}}>
+                            {/* ... (이전 코드 유지) */}
                             <h4 style={{ margin: "0", color: "#fff" }}>{role} {role === 'Healer' ? '💊' : role === 'Raccoon' ? '🦝' : ''}</h4>
                             <div style={{display: "flex", gap: "10px"}}>
+                                {/* ... (Buy, Maint inputs 유지) */}
                                 <label style={{ fontSize: "0.8em", color: "#ffdd00" }}>
                                     Buy: <input type="number" value={config.unitCosts?.[role] ?? 0} onInput={(e) => handleCostChange(role, parseInt(e.target.value))} style={{ width: "40px", ...inputStyle, borderColor: "#aa8800" }} />
                                 </label>
@@ -502,21 +504,36 @@ const DevPage = () => {
                         </div>
                         
                         <div style={{ display: "grid", "grid-template-columns": "1fr 1fr", gap: "5px" }}>
+                            {/* ... (HP, ATK, DEF, SPD inputs 유지) */}
                             <label style={statLabelStyle}>HP<input type="number" value={config.roleDefinitions[role].hp} onInput={(e) => handleStatChange(role, "hp", parseInt(e.target.value))} style={statInputStyle} /></label>
                             <label style={statLabelStyle}>ATK<input type="number" value={config.roleDefinitions[role].attackPower} onInput={(e) => handleStatChange(role, "attackPower", parseInt(e.target.value))} style={statInputStyle} /></label>
                             <label style={statLabelStyle}>DEF<input type="number" value={config.roleDefinitions[role].defense ?? 0} onInput={(e) => handleStatChange(role, "defense", parseInt(e.target.value))} style={statInputStyle} /></label>
                             <label style={statLabelStyle}>SPD<input type="number" value={config.roleDefinitions[role].moveSpeed} onInput={(e) => handleStatChange(role, "moveSpeed", parseInt(e.target.value))} style={statInputStyle} /></label>
                             
+                            {/* [Modified] Miss Prob Input 추가 */}
                             <label style={{...statLabelStyle, color: "#aaffaa"}}>
                                 {role === 'Healer' ? 'Motion CD' : 'ATK CD'}
                                 <input type="number" value={config.roleDefinitions[role].attackCooldown || 500} onInput={(e) => handleStatChange(role, "attackCooldown", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#112211", borderColor: "#484", color: "#afa" }} />
                             </label>
 
-                            <label style={{...statLabelStyle, color: "#ffd700"}}>
+                            <label style={{...statLabelStyle, color: "#ccc"}}>
+                                Miss Prob
+                                <input 
+                                    type="number" 
+                                    step="0.01" 
+                                    max="1.0"
+                                    value={config.roleDefinitions[role].missChance ?? 0.02} 
+                                    onInput={(e) => handleStatChange(role, "missChance", parseFloat(e.target.value))} 
+                                    style={{ ...statInputStyle, background: "#222", borderColor: "#666", color: "#fff" }} 
+                                />
+                            </label>
+
+                            <label style={{...statLabelStyle, color: "#ffd700", gridColumn: "span 2"}}>
                                 Kill Reward
                                 <input type="number" value={config.roleDefinitions[role].killReward ?? 10} onInput={(e) => handleStatChange(role, "killReward", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#221100", borderColor: "#aa8800", color: "#ffd700" }} />
                             </label>
                             
+                            {/* ... (나머지 inputs 유지) */}
                             {config.roleDefinitions[role].skillCooldown !== undefined && (
                                 <>
                                     <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>

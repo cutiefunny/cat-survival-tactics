@@ -64,16 +64,31 @@ export default class CombatManager {
         
         if (now > attacker.lastAttackTime + attacker.attackCooldown) {
             
+            // [New] 클래스별 Miss 확률 적용
+            // 유닛에게 설정된 missChance 사용 (없으면 기본 2%)
+            const missProb = (attacker.missChance !== undefined) ? attacker.missChance : 0.02;
+
+            if (Math.random() < missProb) {
+                // 쿨타임과 공격 모션은 소모 (헛손질)
+                attacker.lastAttackTime = now;
+                attacker.triggerAttackVisuals();
+
+                // "MISS" 텍스트 표시
+                if (defender.showEmote) {
+                    defender.showEmote("MISS", "#aaaaaa");
+                }
+                
+                // 데미지 적용 없이 종료
+                return;
+            }
+
             // [New] 백어택 판정 로직: 뒤에서 맞으면 데미지 1.5배
             let damageMultiplier = 1.0;
             
-            // defender.flipX가 true면 우측, false면 좌측을 보고 있음
             const isFacingRight = defender.flipX;
             const isAttackerOnLeft = attacker.x < defender.x;
             const isAttackerOnRight = attacker.x > defender.x;
 
-            // 방어자가 오른쪽을 보는데 공격자가 왼쪽에 있거나,
-            // 방어자가 왼쪽을 보는데 공격자가 오른쪽에 있으면 백어택
             if ((isFacingRight && isAttackerOnLeft) || (!isFacingRight && isAttackerOnRight)) {
                 damageMultiplier = 1.5;
             }
@@ -84,7 +99,6 @@ export default class CombatManager {
             attacker.lastAttackTime = now;
             attacker.triggerAttackVisuals();
             
-            // 타격 성공 시, 사운드 재생 요청
             if (this.scene.playHitSound) {
                 this.scene.playHitSound();
             }

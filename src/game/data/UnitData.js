@@ -60,58 +60,65 @@ export const UNIT_COSTS = [
 ];
 
 export const ROLE_BASE_STATS = {
-    // [Updated] killReward(처치 보상) 추가
     'Leader': { 
         hp: 200, attackPower: 25, moveSpeed: 90, 
         defense: 2, 
         attackRange: 50, 
         skillCooldown: 30000, skillRange: 300, skillDuration: 10000,
-        killReward: 100 // 보스급 보상
+        killReward: 100,
+        missChance: 0.02 // [New] 기본 2%
     },
     'Tanker': { 
         hp: 300, attackPower: 10, moveSpeed: 50, 
         defense: 5, 
         attackRange: 50, 
         skillCooldown: 10000, skillRange: 200,
-        killReward: 30 // 튼튼한 적 보상
+        killReward: 30,
+        missChance: 0.02 // [New]
     },
     'Healer': { 
         hp: 100, attackPower: 15, moveSpeed: 110, 
         defense: 0, 
         attackRange: 50, 
         skillCooldown: 3000, aggroStackLimit: 10,
-        killReward: 25 // 우선 순위 타겟 보상
+        killReward: 25,
+        missChance: 0.02 // [New]
     },
     'Raccoon': { 
         hp: 150, attackPower: 20, moveSpeed: 100, 
         defense: 0, 
         attackRange: 50, 
         skillCooldown: 8000,
-        killReward: 20
+        killReward: 20,
+        missChance: 0.02 // [New]
     },
     'Shooter': { 
         hp: 80, attackPower: 30, moveSpeed: 80, 
         defense: 0, 
-        attackRange: 250, // [Important] 원거리
-        killReward: 20
+        attackRange: 250, 
+        killReward: 20,
+        missChance: 0.02 // [New] 원거리는 명중률이 더 중요할 수 있음 (조정 가능)
     },
     'Runner': { 
         hp: 120, attackPower: 18, moveSpeed: 120, 
         defense: 0, 
         attackRange: 50,
-        killReward: 15
+        killReward: 15,
+        missChance: 0.02 // [New]
     },
     'Normal': { 
         hp: 140, attackPower: 15, moveSpeed: 70, 
         defense: 0, 
         attackRange: 50,
-        killReward: 10
+        killReward: 10,
+        missChance: 0.02 // [New]
     },
     'NormalDog': { 
         hp: 140, attackPower: 15, moveSpeed: 70, 
         defense: 0, 
         attackRange: 50,
-        killReward: 10 // 기본 잡몹 보상
+        killReward: 10,
+        missChance: 0.02 // [New]
     }
 };
 

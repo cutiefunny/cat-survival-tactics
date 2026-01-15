@@ -38,6 +38,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.defense = stats.defense || 0;
         this.killReward = stats.killReward || 10;
 
+        this.missChance = (stats.missChance !== undefined) ? stats.missChance : 0.02;
+
         this.attackRange = stats.attackRange || 50;
         this.aiConfig = stats.aiConfig || {}; 
 
@@ -611,8 +613,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     // [New] 감정표현(느낌표, 물음표 등) 시각 효과 표시
     showEmote(text, color = '#ff0000') {
         if (!this.scene) return;
-        
-        const emote = this.scene.add.text(this.x, this.y - this.baseSize, text, {
+
+        const str = String(text);
+        const isMiss = str.toUpperCase() === 'MISS';
+        const targetScale = isMiss ? 0.5 : 1.5;
+        const startScale = 0.5;
+
+        const emote = this.scene.add.text(this.x, this.y - this.baseSize, str, {
             fontFamily: 'Arial',
             fontSize: '32px',
             fontStyle: 'bold',
@@ -622,12 +629,13 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }).setOrigin(0.5);
 
         emote.setDepth(2000);
+        emote.setScale(startScale);
 
         this.scene.tweens.add({
             targets: emote,
             y: this.y - this.baseSize - 40,
             alpha: 0,
-            scale: 1.5,
+            scale: targetScale,
             duration: 1000,
             ease: 'Power2',
             onComplete: () => {

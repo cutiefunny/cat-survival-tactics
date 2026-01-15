@@ -82,7 +82,7 @@ export default class UnitAI {
         this.lastPathCalcTime = 0;
         this.stuckTimer = 0;
         
-        // [Fix] 끼임 발생 시 직선 이동을 잠시 금지하는 타이머 추가
+        // [Fix] 끼임 발생 시 직선 이동을 잠시 금지하는 타이머
         this.forcePathfindingTimer = 0;
         
         // [LOS State]
@@ -229,7 +229,7 @@ export default class UnitAI {
     update(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
-            this.updateAnimation();
+            // [Fix] updateAnimation() 제거: Unit.js에서 통합 관리
             return;
         }
 
@@ -245,7 +245,7 @@ export default class UnitAI {
                 this.wallCollisionVector.y * this.unit.moveSpeed
             );
             this.unit.updateFlipX(); 
-            this.updateAnimation();
+            // [Fix] updateAnimation() 제거
             return; 
         }
 
@@ -263,13 +263,13 @@ export default class UnitAI {
                     this.currentTarget = null;
                     this.currentPath = [];
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
-                    this.updateAnimation();
+                    // [Fix] updateAnimation() 제거
                     return;
                 }
             } else {
                  this.isReturning = true;
                  this.isCombatMode = false;
-                 this.updateAnimation();
+                 // [Fix] updateAnimation() 제거
                  return;
             }
         }
@@ -299,7 +299,7 @@ export default class UnitAI {
                     if (dist < 350) this.runAway(delta);
                     else { this.unit.setVelocity(0, 0); this.unit.updateFlipX(); }
                 }
-                this.updateAnimation();
+                // [Fix] updateAnimation() 제거
                 return;
             }
         }
@@ -337,29 +337,10 @@ export default class UnitAI {
             this.unit.tryUseSkill();
         }
         
-        this.updateAnimation();
+        // [Fix] updateAnimation() 제거: Unit.js의 update() 마지막에 호출됨
     }
 
-    updateAnimation() {
-        const unit = this.unit;
-        const currentAnim = unit.anims.currentAnim?.key;
-        if (currentAnim && (currentAnim.includes('attack') || currentAnim.includes('hit'))) {
-            return;
-        }
-
-        // 실제 물리 속도 체크
-        const isMoving = unit.body.speed > 5;
-
-        if (isMoving) {
-            if (currentAnim !== `${unit.role}_walk`) {
-                unit.play(`${unit.role}_walk`, true);
-            }
-        } else {
-            if (currentAnim !== `${unit.role}_idle`) {
-                unit.play(`${unit.role}_idle`, true);
-            }
-        }
-    }
+    // [Removed] updateAnimation 메서드 전체 삭제 (Unit.js 로직과 충돌 방지)
 
     findNearestEnemy() {
         const enemies = this.unit.targetGroup.getChildren();
@@ -385,6 +366,10 @@ export default class UnitAI {
     }
 
     onWallCollision(obstacle) {
+        // [New Fix] 충돌 즉시 현재 경로 폐기
+        this.currentPath = []; 
+        this.pathUpdateTimer = 0;
+
         // 1. 장애물의 중심 좌표(ox, oy) 안전하게 계산
         let ox, oy;
         
@@ -413,22 +398,17 @@ export default class UnitAI {
         const dy = uy - oy;
 
         const slideDir = new Phaser.Math.Vector2();
-        
-        // 반발력(Repulsion): 벽에서 살짝 떨어뜨려 물리 연산 겹침을 방지
         const repulsion = new Phaser.Math.Vector2();
 
-        // 현재 타겟 위치 가져오기
         const target = this.currentTarget || this.patrolTarget || { x: ux, y: uy };
 
         // [Case 1] 가로 거리 차이가 더 큼 -> 좌/우 면 충돌 -> 세로(Y)로 회피
         if (Math.abs(dx) > Math.abs(dy)) {
-            // 타겟 방향으로 슬라이딩하되, 너무 좁은 틈이면 그냥 반대 방향 선택
             if (Math.abs(target.y - uy) > 10) {
                 slideDir.set(0, Math.sign(target.y - uy) || 1);
             } else {
                 slideDir.set(0, Math.sign(dy) || 1);
             }
-            // 벽 반대 방향(좌/우)으로 살짝 밀어냄
             repulsion.set(Math.sign(dx), 0);
         } 
         // [Case 2] 세로 거리 차이가 더 큼 -> 상/하 면 충돌 -> 가로(X)로 회피
@@ -438,21 +418,17 @@ export default class UnitAI {
             } else {
                 slideDir.set(Math.sign(dx) || 1, 0);
             }
-            // 벽 반대 방향(상/하)으로 살짝 밀어냄
             repulsion.set(0, Math.sign(dy));
         }
 
         // 3. 벡터 합성 및 적용
-        // 슬라이드(0.7) + 반발력(0.5) 정도로 섞어서 벽을 타고 흐르면서도 떨어지게 만듦
-        this.wallCollisionVector.copy(slideDir).scale(0.7).add(repulsion.scale(0.5)).normalize();
-        this.wallCollisionTimer = 150; // 짧게 툭 쳐줌
+        this.wallCollisionVector.copy(slideDir).scale(0.8).add(repulsion.scale(1.2)).normalize();
+        this.wallCollisionTimer = 250; 
 
         // [핵심 수정 사항] 
-        // 벽에 박았으므로 1초 동안은 '직선 이동(isLineClear)' 체크를 강제로 건너뛰고 
+        // 벽에 박았으므로 1.5초 동안은 '직선 이동(isLineClear)' 체크를 강제로 건너뛰고 
         // 무조건 A* 알고리즘으로 우회 경로를 찾도록 강제합니다.
-        this.forcePathfindingTimer = 1000;
-        
-        // 충돌 반응을 했으므로 '제자리 끼임' 판단 타이머는 초기화
+        this.forcePathfindingTimer = 1500;
         this.stuckTimer = 0;
     }
 
@@ -515,7 +491,6 @@ export default class UnitAI {
         const unit = this.unit;
 
         if (this.currentPath.length > 0 || this.currentTarget) {
-            // [Stuck Check] 속도가 거의 0이면 끼임으로 판단
             if (unit.body.speed < unit.moveSpeed * 0.1) {
                 this.stuckTimer += delta;
                 if (this.stuckTimer > 200) {
@@ -523,10 +498,7 @@ export default class UnitAI {
                     this.currentPath = [];
                     this.pathUpdateTimer = 0;
                     
-                    // [Critical Fix] 끼임 발생 시:
-                    // 1. 물리 속도를 0으로 리셋하여 튕김 방지
                     unit.setVelocity(0, 0); 
-                    // 2. 1.5초 동안 '직선 이동(LineClear)'을 금지하고 강제로 A* 경로 사용
                     this.forcePathfindingTimer = 1500; 
                 }
             } else {
@@ -534,7 +506,6 @@ export default class UnitAI {
             }
         }
 
-        // [Fix] 최근에 끼인 적이 있다면(forcePathfindingTimer > 0), 직선 경로 체크를 건너뜀
         let isLineClear = false;
         if (this.forcePathfindingTimer <= 0) {
             isLineClear = this.scene.pathfindingManager.isLineClear(
@@ -551,7 +522,10 @@ export default class UnitAI {
         }
 
         this.pathUpdateTimer -= delta;
-        if (this.currentPath.length === 0 || this.pathUpdateTimer <= 0) {
+
+        const shouldCalculatePath = this.currentPath.length === 0 || this.pathUpdateTimer <= 0 || (this.forcePathfindingTimer > 0 && this.currentPath.length === 0);
+
+        if (shouldCalculatePath) {
             this.pathUpdateTimer = 500 + Math.random() * 300; 
             const path = this.scene.pathfindingManager.findPath(
                 { x: unit.x, y: unit.y },
@@ -576,7 +550,6 @@ export default class UnitAI {
                 this.moveToPoint(nextPoint);
             }
         } else {
-            // 경로조차 없으면 어쩔 수 없이 직선 이동 (하지만 stuck 감지로 인해 다시 루프 탈출 가능)
             this.scene.physics.moveToObject(unit, this.currentTarget, unit.moveSpeed);
         }
         unit.updateFlipX();
