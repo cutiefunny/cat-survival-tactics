@@ -37,8 +37,8 @@
       "bgm": "level2"
     },
     "6": {
-      "mapId": "level6",
-      "name": "주차장",
+      "mapId": "level0",
+      "name": "광장",
       "difficulty": 2,
       "bgm": "level2"
     },
@@ -58,7 +58,7 @@
       "text": "여기는 합정파의 영역이다냥!"
     },
     "9": {
-      "mapId": "level0",
+      "mapId": "level6",
       "name": "레드로드",
       "difficulty": 2,
       "bgm": "level2",

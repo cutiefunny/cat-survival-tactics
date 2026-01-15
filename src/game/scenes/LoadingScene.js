@@ -6,9 +6,10 @@ export default class LoadingScene extends Phaser.Scene {
     }
 
     init(data) {
-        // 전달받은 목표 씬과 데이터 저장
         this.targetScene = data.targetScene;
         this.targetData = data.targetData;
+        // [설정] 최소 유지 시간 1초 (컷씬 연출용 시간 확보)
+        this.minDuration = 1000; 
     }
 
     create() {
@@ -25,7 +26,7 @@ export default class LoadingScene extends Phaser.Scene {
             fontStyle: 'bold'
         }).setOrigin(0.5);
 
-        // 3. 깜빡이는 애니메이션 (시각적 피드백)
+        // 3. 텍스트 깜빡임 효과
         this.tweens.add({
             targets: loadingText,
             alpha: 0.3,
@@ -34,7 +35,7 @@ export default class LoadingScene extends Phaser.Scene {
             repeat: -1
         });
 
-        // 4. 간단한 스피너 (원형 회전)
+        // 4. 스피너 (로딩 중임을 알리는 회전 UI)
         const spinner = this.add.graphics();
         spinner.lineStyle(4, 0x4488ff, 1);
         spinner.beginPath();
@@ -50,8 +51,8 @@ export default class LoadingScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // [핵심] 화면이 한 번 렌더링될 시간을 준 뒤(100ms), 무거운 씬을 시작함
-        this.time.delayedCall(100, () => {
+        // [핵심] 최소 2초 대기 후 타겟 씬 시작
+        this.time.delayedCall(this.minDuration, () => {
             if (this.targetScene) {
                 this.scene.start(this.targetScene, this.targetData);
             }

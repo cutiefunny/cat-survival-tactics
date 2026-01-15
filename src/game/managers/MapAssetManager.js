@@ -7,15 +7,31 @@ const mapJsonFiles = import.meta.glob('../../assets/maps/*.json', { eager: true 
 const TILESET_MAPPING = {
     'tileser_nature': new URL('../../assets/tilesets/TX_Tileset_Grass.png', import.meta.url).href,
     'tileset_trees': new URL('../../assets/tilesets/TX_Plant.png', import.meta.url).href,
+    
+    // [Fix] 대소문자 호환성을 위해 소문자 키 추가 및 매핑 보강
     'City': new URL('../../assets/tilesets/City_20.png', import.meta.url).href,
     'City2': new URL('../../assets/tilesets/City_20_2.png', import.meta.url).href,
     'Park': new URL('../../assets/tilesets/park.png', import.meta.url).href,
+    
     'Car': new URL('../../assets/tilesets/car.png', import.meta.url).href,
+    'car': new URL('../../assets/tilesets/car.png', import.meta.url).href, // 소문자 추가
+
     'Street1': new URL('../../assets/tilesets/street1.png', import.meta.url).href,
+    'street1': new URL('../../assets/tilesets/street1.png', import.meta.url).href,
+
     'Street2': new URL('../../assets/tilesets/street2.png', import.meta.url).href,
+    'street2': new URL('../../assets/tilesets/street2.png', import.meta.url).href, // 소문자 추가
+
     'Street3': new URL('../../assets/tilesets/street3.png', import.meta.url).href,
+    'street3': new URL('../../assets/tilesets/street3.png', import.meta.url).href, // 소문자 추가
+
     'Street4': new URL('../../assets/tilesets/street4.png', import.meta.url).href,
+    'street4': new URL('../../assets/tilesets/street4.png', import.meta.url).href,
+
     'Road': new URL('../../assets/tilesets/road.png', import.meta.url).href,
+    'road': new URL('../../assets/tilesets/road.png', import.meta.url).href,
+
+    // 특정 레벨용 타일셋 매핑
     'level5': new URL('../../assets/tilesets/road.png', import.meta.url).href,
     'level5-2': new URL('../../assets/tilesets/street2.png', import.meta.url).href,
     'level6': new URL('../../assets/tilesets/parking.png', import.meta.url).href,

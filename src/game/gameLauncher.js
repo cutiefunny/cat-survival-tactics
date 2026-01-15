@@ -2,10 +2,10 @@ import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
 import UIScene from './scenes/UIScene';
 import StrategyScene from './scenes/StrategyScene';
-import LoadingScene from './scenes/LoadingScene'; // [New] Import
+import LoadingScene from './scenes/LoadingScene'; // [New]
 
 export function launchGame(containerId, mockData = null) {
-    // [Modified] LoadingScene을 씬 목록에 추가 (순서는 상관없으나 명시적으로 포함)
+    // [Modified] LoadingScene 추가
     const sceneList = mockData 
         ? [LoadingScene, BattleScene, UIScene] 
         : [StrategyScene, LoadingScene, BattleScene, UIScene];

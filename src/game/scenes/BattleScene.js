@@ -19,7 +19,7 @@ import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS } from '../managers/LevelManager'; 
 
 // [Managers]
-import MapAssetManager from '../managers/MapAssetManager'; // [New] 맵 관리 매니저
+import MapAssetManager from '../managers/MapAssetManager'; 
 import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../managers/CombatManager';       
@@ -34,6 +34,7 @@ import tankerSheet from '../../assets/units/tanker.png';
 import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
 import normalSheet from '../../assets/units/normal.png'; 
+import bossSheet from '../../assets/units/boss.png'; 
 
 // [Sounds]
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
@@ -79,7 +80,7 @@ export default class BattleScene extends BaseScene {
 
         this.isStrategyMode = data && data.isStrategyMode;
         this.targetNodeId = data ? data.targetNodeId : null;
-        this.armyConfig = data ? data.armyConfig : null;
+        this.armyConfig = data ? data.armyConfig : null; // [Note] StrategyScene에서 넘겨준 적군 데이터
         this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
         this.deadSquadIndices = [];
@@ -98,7 +99,6 @@ export default class BattleScene extends BaseScene {
     }
 
     preload() {
-        // [New] MapAssetManager에게 맵/타일셋 로딩 위임
         this.mapManager = new MapAssetManager(this);
         this.mapManager.preload();
 
@@ -111,6 +111,7 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
         this.load.spritesheet('normal', normalSheet, sheetConfig);
+        if (bossSheet) this.load.spritesheet('boss', bossSheet, sheetConfig); 
 
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
@@ -238,7 +239,6 @@ export default class BattleScene extends BaseScene {
 
     startGame(config, mapKey) {
         if (!mapKey) {
-            // 맵 파일이 없을 때 (기본 샌드박스)
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
             
@@ -256,7 +256,6 @@ export default class BattleScene extends BaseScene {
             this.spawnUnits(config, null); 
             this.setupPhysicsColliders(null, null);
         } else {
-            // [Modified] MapAssetManager를 사용하여 맵 생성
             const mapData = this.mapManager.createMap(mapKey);
             
             const map = mapData.map;
@@ -439,9 +438,11 @@ export default class BattleScene extends BaseScene {
         return unit;
     }
 
+    // [Refactored] spawnUnits: 배열 형태 적군 구성 지원 및 보스 핀 배치
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
 
+        // 1. 아군 스폰
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -460,10 +461,7 @@ export default class BattleScene extends BaseScene {
         
         playerSquad.forEach((member, i) => {
             const roleConfig = { ...member }; 
-            
-            if (!roleConfig.name) {
-                roleConfig.name = getRandomUnitName(roleConfig.role);
-            }
+            if (!roleConfig.name) roleConfig.name = getRandomUnitName(roleConfig.role);
 
             let spawnX, spawnY;
             if (spawnZone) {
@@ -474,78 +472,140 @@ export default class BattleScene extends BaseScene {
                 spawnY = startY + (i * spawnGap);
             }
             const isLeader = (member.role === 'Leader');
-            
             const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
-            
             unit.squadIndex = i;
-
             if (isLeader) this.playerUnit = unit;
             this.blueTeam.add(unit);
         });
 
-        const redCount = config.gameSettings.redCount ?? 6;
-        const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
-        let dogsSpawned = false;
+        // 2. 적군 스폰 로직
         let redSpawnArea = null;
+        let bossSpawnPoint = null; 
+        
+        // 맵에서 구역(Rect)과 핀(Point) 찾기
         if (map) {
             const dogLayer = map.getObjectLayer('Dogs');
             if (dogLayer && dogLayer.objects.length > 0) {
                 const areaObj = dogLayer.objects.find(obj => obj.width > 0 && obj.height > 0);
-                if (areaObj) redSpawnArea = new Phaser.Geom.Rectangle(areaObj.x, areaObj.y, areaObj.width, areaObj.height);
+                if (areaObj) {
+                    redSpawnArea = new Phaser.Geom.Rectangle(areaObj.x, areaObj.y, areaObj.width, areaObj.height);
+                }
+                const pointObj = dogLayer.objects.find(obj => !obj.width && !obj.height);
+                if (pointObj) {
+                    bossSpawnPoint = { x: pointObj.x, y: pointObj.y };
+                    console.log(`📍 Boss Pin found at (${pointObj.x}, ${pointObj.y})`);
+                }
             }
         }
+
+        // 3. 소환할 적 목록 작성 (Army Roster)
+        let enemyRoster = [];
+        
+        // A. 전략 맵에서 넘어온 armyConfig가 있는 경우 (배열 or 객체)
         if (this.armyConfig) {
-            const count = this.armyConfig.count || 1;
-            const armyStats = defaultRedRoles[0] || config.redTeamStats; 
-            for (let i = 0; i < count; i++) {
-                let spawnX, spawnY;
-                if (redSpawnArea) {
-                    spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
-                    spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
-                } else {
-                    spawnX = (this.mapWidth || 2000) - 250 + Phaser.Math.Between(-30, 30);
-                    spawnY = startY + (i * spawnGap);
+            const configs = Array.isArray(this.armyConfig) ? this.armyConfig : [this.armyConfig];
+            
+            configs.forEach(cfg => {
+                const count = cfg.count || 1;
+                const type = cfg.type || 'NormalDog';
+                const role = type.charAt(0).toUpperCase() + type.slice(1);
+                
+                for(let i=0; i<count; i++) {
+                    enemyRoster.push(role);
                 }
-                const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, armyStats, false);
-                this.redTeam.add(unit);
-            }
-            dogsSpawned = true;
-        }
-        if (!dogsSpawned && map) {
-            const dogLayer = map.getObjectLayer('Dogs');
-            if (dogLayer && dogLayer.objects.length > 0) {
-                if (redSpawnArea) {
-                    for (let i = 0; i < redCount; i++) {
-                        const stats = defaultRedRoles[i % defaultRedRoles.length];
-                        const spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
-                        const spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
-                        const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, stats, false);
-                        this.redTeam.add(unit);
-                    }
-                } else {
-                    dogLayer.objects.forEach((obj, index) => {
-                        const stats = defaultRedRoles[index % defaultRedRoles.length];
-                        const unit = this.createUnitInstance(obj.x, obj.y, 'red', this.blueTeam, stats, false);
-                        this.redTeam.add(unit);
-                    });
-                }
-                dogsSpawned = true;
-            }
-        }
-        if (!dogsSpawned) {
-            for (let i = 0; i < redCount; i++) {
+            });
+        } 
+        // B. 기본 구성 (일반 맵)
+        else {
+            const redCount = config.gameSettings.redCount ?? 6;
+            const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
+            for(let i=0; i<redCount; i++) {
                 const stats = defaultRedRoles[i % defaultRedRoles.length];
-                const unit = this.createUnitInstance(1300, startY + (i*spawnGap), 'red', this.blueTeam, stats, false);
-                this.redTeam.add(unit);
+                enemyRoster.push(stats.role || 'NormalDog');
             }
         }
+
+        // 4. 보스(핀 위치 배치용) 선정
+        // armyConfig가 있었다면, 그 중 가장 강력한 유닛을 보스로 선정하여 핀에 배치
+        let bossUnitRole = null;
+        let bossIndex = -1;
+
+        if (this.armyConfig) {
+            // 우선순위: Boss > Tanker > Leader > Raccoon > Shooter...
+            const priority = ['Boss', 'Tanker', 'Leader', 'Raccoon', 'Shooter', 'Healer', 'Runner'];
+            
+            for (const pRole of priority) {
+                // 정확히 일치하거나 포함하는 역할 찾기
+                bossIndex = enemyRoster.findIndex(r => r === pRole || r.includes(pRole));
+                if (bossIndex !== -1) {
+                    bossUnitRole = enemyRoster[bossIndex];
+                    break;
+                }
+            }
+            
+            // 특수 역할이 없다면 첫 번째 유닛을 리더로 간주
+            if (bossIndex === -1 && enemyRoster.length > 0) {
+                bossIndex = 0;
+                bossUnitRole = enemyRoster[0];
+            }
+        }
+
+        // 5. 보스 소환 (핀 위치 또는 구역 중앙)
+        if (bossIndex !== -1) {
+            let bossX, bossY;
+            if (bossSpawnPoint) {
+                bossX = bossSpawnPoint.x;
+                bossY = bossSpawnPoint.y;
+            } else if (redSpawnArea) {
+                bossX = redSpawnArea.centerX;
+                bossY = redSpawnArea.centerY;
+            } else {
+                bossX = 1300;
+                bossY = startY;
+            }
+
+            const bossStats = { 
+                role: bossUnitRole, 
+                name: `Boss ${bossUnitRole}`,
+                level: 5 // 보스급은 레벨 보정 (선택 사항)
+            };
+            
+            const bossUnit = this.createUnitInstance(bossX, bossY, 'red', this.blueTeam, bossStats, false);
+            
+            // 진짜 보스나 탱커라면 크기 키우기
+            if (bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') {
+                bossUnit.setScale(1.1); 
+            }
+            this.redTeam.add(bossUnit);
+            console.log(`👹 Boss/Leader Spawned: ${bossUnitRole} at (${bossX}, ${bossY})`);
+
+            // 리스트에서 제거 (중복 소환 방지)
+            enemyRoster.splice(bossIndex, 1);
+        }
+
+        // 6. 나머지 졸개 소환 (구역 내 랜덤)
+        enemyRoster.forEach((role, i) => {
+            const stats = { role: role, name: `${role} ${i+1}` };
+            
+            let spawnX, spawnY;
+            if (redSpawnArea) {
+                spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
+                spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
+            } else {
+                // 구역 없으면 일렬 배치
+                spawnX = 1300 + Phaser.Math.Between(-50, 50);
+                spawnY = startY + (i * spawnGap);
+            }
+
+            const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, stats, false);
+            this.redTeam.add(unit);
+        });
 
         this.initialRedCount = this.redTeam.getLength();
     }
     
     animateCoinDrop(startX, startY, amount) {
         console.log(`💰 [Coin] Drop occurred! Amount: ${amount}, Pre-Total: ${this.playerCoins}`);
-        
         const coin = this.add.graphics();
         coin.fillStyle(0xFFD700, 1); coin.fillCircle(0, 0, 8); coin.lineStyle(2, 0xFFFFFF, 1); coin.strokeCircle(0, 0, 8);
         coin.setPosition(startX, startY); coin.setDepth(900); 
@@ -578,23 +638,17 @@ export default class BattleScene extends BaseScene {
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
     }
-
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
-        
         if (this.zoneGraphics) { this.zoneGraphics.destroy(); this.zoneGraphics = null; }
-        
         this.uiManager.cleanupBeforeBattle();
-
         if (this.playerUnit?.active && !this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.scale.width * 0.4, this.scale.height * 0.4);
         }
-
         this.startBattle();
     }
-    
     saveInitialFormation() {
         if (!this.playerUnit || !this.playerUnit.active) return;
         const lx = this.playerUnit.x; const ly = this.playerUnit.y;
@@ -608,11 +662,9 @@ export default class BattleScene extends BaseScene {
         }
         this.playerUnit = newUnit; newUnit.isLeader = true;
         if (newUnit.active && !newUnit.isDying) newUnit.resetVisuals();
-        
         if (!this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
         }
-
         this.updateFormationOffsets();
     }
     transferControlToNextUnit() {
@@ -635,7 +687,6 @@ export default class BattleScene extends BaseScene {
         } else {
             this.squadState = 'FREE';
         }
-        
         this.uiManager.updateSquadButton(this.squadState);
     }
     toggleGameSpeed() {
@@ -662,7 +713,6 @@ export default class BattleScene extends BaseScene {
         }
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { this.playerUnit.tryUseSkill(); }
-            
             if (!this.isGameOver && !this.isRetreatModalOpen) {
                 this.checkRetreatCondition(delta);
             }
@@ -693,25 +743,20 @@ export default class BattleScene extends BaseScene {
         }
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
-
     finishGame(message, color, isWin, fatiguePenalty = 1) {
         if (this.isGameOver) return; 
         this.isGameOver = true;
         this.physics.pause();
         this.inputManager.destroy(); 
         if (this.bgm) this.bgm.stop();
-
         const battleResult = this.processBattleOutcome(isWin, fatiguePenalty);
         const { resultStats, totalScore, totalRewardCoins, capturedUnits } = battleResult;
-
         if (capturedUnits.length > 0) {
             const names = capturedUnits.map(u => u.name).join(", ");
             message += `\n⛓️ 포로 발생: ${names}`;
         }
-
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
-
         if (this.isStrategyMode) {
             btnText = "맵으로";
             callback = () => {
@@ -738,7 +783,6 @@ export default class BattleScene extends BaseScene {
                 }
             }
         }
-        
         const uiData = {
             isWin: isWin, 
             title: message, 
@@ -748,20 +792,16 @@ export default class BattleScene extends BaseScene {
         };
         this.uiManager.createGameOverUI(uiData, callback);
     }
-
     processBattleOutcome(isWin, fatiguePenalty) {
         const killedEnemies = Math.max(0, this.initialRedCount - this.redTeam.countActive());
         const xpGained = killedEnemies * 10;
-
         const currentSquad = this.registry.get('playerSquad') || [];
         const fallenUnits = this.registry.get('fallenUnits') || [];
         const prisonerList = this.registry.get('prisonerList') || [];
-        
         const nextSquad = [];
         const leveledUpUnits = [];
         const deadUnits = [];
         const capturedUnits = []; 
-
         let prisonersToTake = 0;
         if (!isWin && fatiguePenalty >= 2) {
             const rand = Math.random() * 100;
@@ -769,17 +809,14 @@ export default class BattleScene extends BaseScene {
             else if (rand < 7) prisonersToTake = 2;  
             else if (rand < 17) prisonersToTake = 1; 
         }
-
         const captureCandidates = currentSquad.map((u, i) => i).filter(i => {
             const member = currentSquad[i];
             return member.role !== 'Leader' && !this.deadSquadIndices.includes(i);
         });
         Phaser.Utils.Array.Shuffle(captureCandidates);
         const selectedPrisonerIndices = captureCandidates.slice(0, prisonersToTake);
-
         currentSquad.forEach((member, i) => {
             if (member.role === 'Leader') member.name = '김냐냐';
-
             if (this.deadSquadIndices.includes(i)) {
                 if (member.role === 'Leader') {
                     member.fatigue = (member.fatigue || 0) + 5;
@@ -805,14 +842,12 @@ export default class BattleScene extends BaseScene {
                 let oldLevel = member.level || 1;
                 let reqXp = oldLevel * 100;
                 let leveledUp = false;
-
                 while (member.xp >= reqXp) {
                     member.xp -= reqXp;
                     member.level = (member.level || 1) + 1;
                     reqXp = member.level * 100;
                     leveledUp = true;
                 }
-
                 if (leveledUp) {
                     leveledUpUnits.push({ 
                         name: member.name, 
@@ -825,22 +860,18 @@ export default class BattleScene extends BaseScene {
                 nextSquad.push(member);
             }
         });
-
         this.registry.set('playerSquad', nextSquad);
         this.registry.set('fallenUnits', fallenUnits);
         this.registry.set('prisonerList', prisonerList);
-
         const endTime = Date.now();
         const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
         const survivors = this.blueTeam.countActive();
         const survivorScore = survivors * 500;
         const timeScore = Math.max(0, (300 - durationSec) * 10);
         const totalScore = isWin ? (survivorScore + timeScore) : 0;
-        
         const battleEarnings = Math.max(0, this.playerCoins - this.levelInitialCoins);
         const scoreBonus = isWin ? Math.floor(totalScore / 1000) : 0;
         const totalRewardCoins = battleEarnings + scoreBonus;
-
         return {
             resultStats: {
                 rewardCoins: totalRewardCoins,
@@ -853,30 +884,23 @@ export default class BattleScene extends BaseScene {
             capturedUnits
         };
     }
-
     checkRetreatCondition(delta) {
         if (!this.playerUnit || !this.playerUnit.active) return;
-
         const bounds = this.physics.world.bounds;
         const padding = this.playerUnit.baseSize / 2 + 10; 
         const { x, y } = this.playerUnit;
-        
         let isPushing = false;
-
         const cursors = this.cursors || {};
         const wasd = this.wasd || {};
         const joy = this.joystickCursors || {};
-
         const leftInput = cursors.left?.isDown || wasd.left?.isDown || joy.left?.isDown;
         const rightInput = cursors.right?.isDown || wasd.right?.isDown || joy.right?.isDown;
         const upInput = cursors.up?.isDown || wasd.up?.isDown || joy.up?.isDown;
         const downInput = cursors.down?.isDown || wasd.down?.isDown || joy.down?.isDown;
-
         if (x <= bounds.x + padding && leftInput) isPushing = true;
         else if (x >= bounds.width - padding && rightInput) isPushing = true;
         else if (y <= bounds.y + padding && upInput) isPushing = true;
         else if (y >= bounds.height - padding && downInput) isPushing = true;
-
         if (isPushing) {
             this.retreatTimer += delta;
             if (this.retreatTimer > 1000) {
@@ -887,11 +911,9 @@ export default class BattleScene extends BaseScene {
             this.retreatTimer = 0;
         }
     }
-
     triggerRetreat() {
         this.isRetreatModalOpen = true;
         this.physics.pause(); 
-        
         this.playerUnit.setVelocity(0, 0);
         const bounds = this.physics.world.bounds;
         const centerX = bounds.x + bounds.width / 2;
@@ -902,7 +924,6 @@ export default class BattleScene extends BaseScene {
             this.playerUnit.x + Math.cos(angle) * pushBackDist,
             this.playerUnit.y + Math.sin(angle) * pushBackDist
         );
-
         this.uiManager.createRetreatConfirmModal(
             () => { 
                 this.isRetreatModalOpen = false;
@@ -914,12 +935,10 @@ export default class BattleScene extends BaseScene {
             }
         );
     }
-
     nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
         const bonusCoins = Math.floor(score / 1000);
         const nextCoins = this.playerCoins + bonusCoins; 
-        
         const centerX = this.scale.width / 2;
         const centerY = this.scale.height / 2;
         this.uiManager.playCoinAnimation(centerX, centerY, bonusCoins, () => {

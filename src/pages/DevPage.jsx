@@ -6,7 +6,7 @@ import { useNavigate } from "@solidjs/router";
 import { LEVEL_KEYS } from "../game/managers/LevelManager";
 import PhaserGame from "../components/PhaserGame"; 
 
-// [설정] 역할별 기본 스탯 정의 (maintenance 추가)
+// [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
   Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3 },
   Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2 },
@@ -26,15 +26,14 @@ const DEFAULT_UNIT_COSTS = {
 
 const DEFAULT_CONFIG = {
   showDebugStats: false, 
-  // [New] 신규 설정 필드 추가
   gameSettings: { 
       blueCount: 6, redCount: 6, spawnGap: 90, startY: 250, startLevelIndex: 0, 
       initialCoins: 50, 
-      territoryIncome: 2, // [New] 영토당 수입 기본값
-      reinforcementInterval: 3, // 적군 증원 주기 (턴)
-      fatiguePenaltyRate: 0.05, // 피로도 1당 패널티 비율
-      growthHp: 10, // 레벨업당 체력 증가
-      growthAtk: 1  // 레벨업당 공격력 증가
+      territoryIncome: 2, 
+      reinforcementInterval: 3, 
+      fatiguePenaltyRate: 0.05, 
+      growthHp: 10, 
+      growthAtk: 1  
   },
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
@@ -77,8 +76,20 @@ const DevPage = () => {
         }
         if (data.unitCosts) merged.unitCosts = { ...DEFAULT_UNIT_COSTS, ...data.unitCosts };
         
+        // [Modified] Territory Armies 데이터 구조 마이그레이션 (단일 객체 -> 배열)
         if (data.territoryArmies) {
-            merged.territoryArmies = { ...DEFAULT_CONFIG.territoryArmies, ...data.territoryArmies };
+            const rawArmies = { ...DEFAULT_CONFIG.territoryArmies, ...data.territoryArmies };
+            const migratedArmies = {};
+            Object.keys(rawArmies).forEach(key => {
+                const army = rawArmies[key];
+                if (Array.isArray(army)) {
+                    migratedArmies[key] = army;
+                } else if (army && typeof army === 'object') {
+                    // 기존 데이터가 단일 객체라면 배열로 감쌈
+                    migratedArmies[key] = [army];
+                }
+            });
+            merged.territoryArmies = migratedArmies;
         }
 
         if (data.roleDefinitions) {
@@ -98,7 +109,6 @@ const DevPage = () => {
         merged.gameSettings.blueCount = bCount;
         merged.gameSettings.redCount = rCount;
         
-        // [New] 기본값 보장 로직 추가
         if (merged.gameSettings.territoryIncome === undefined) merged.gameSettings.territoryIncome = 2;
         if (merged.gameSettings.reinforcementInterval === undefined) merged.gameSettings.reinforcementInterval = 3;
         if (merged.gameSettings.fatiguePenaltyRate === undefined) merged.gameSettings.fatiguePenaltyRate = 0.05;
@@ -196,6 +206,7 @@ const DevPage = () => {
     setConfig("unitCosts", roleName, value);
   };
 
+  // [Modified] 영토 군대 노드 추가 (배열로 초기화)
   const handleAddTerritoryArmy = () => {
       const id = newArmyNodeId();
       if (!id) return;
@@ -203,12 +214,26 @@ const DevPage = () => {
           alert(`Node ${id} already exists!`);
           return;
       }
-      setConfig("territoryArmies", id, { type: "NormalDog", count: 3 });
+      // 기본값: NormalDog 3마리 1세트가 든 배열
+      setConfig("territoryArmies", id, [{ type: "NormalDog", count: 3 }]);
       setNewArmyNodeId("");
   };
 
   const handleDeleteTerritoryArmy = (id) => {
       setConfig("territoryArmies", id, undefined);
+  };
+
+  // [New] 특정 노드에 유닛 타입 추가
+  const handleAddUnitToNode = (nodeId) => {
+      const currentList = config.territoryArmies[nodeId] || [];
+      setConfig("territoryArmies", nodeId, [...currentList, { type: "NormalDog", count: 1 }]);
+  };
+
+  // [New] 특정 노드의 특정 유닛 타입 제거
+  const handleRemoveUnitFromNode = (nodeId, index) => {
+      const currentList = [...config.territoryArmies[nodeId]];
+      currentList.splice(index, 1);
+      setConfig("territoryArmies", nodeId, currentList);
   };
 
   const saveConfig = async () => {
@@ -318,14 +343,6 @@ const DevPage = () => {
                             </For>
                         </select>
                     </label>
-                    {/* <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                        <span style={{color: "#aaa"}}>Spawn Y:</span>
-                        <input type="number" value={config.gameSettings.startY} onInput={(e) => setConfig("gameSettings", "startY", parseInt(e.target.value))} style={shortInputStyle} />
-                    </label>
-                    <label style={{display: "flex", alignItems: "center", gap: "5px"}}>
-                        <span style={{color: "#aaa"}}>Gap:</span>
-                        <input type="number" value={config.gameSettings.spawnGap} onInput={(e) => setConfig("gameSettings", "spawnGap", parseInt(e.target.value))} style={shortInputStyle} />
-                    </label> */}
                 </div>
             </div>
 
@@ -383,22 +400,22 @@ const DevPage = () => {
         <section style={cardStyle}>
           <h2 style={sectionHeaderStyle}>🧠 AI Parameters</h2>
           <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
-             <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
-                 <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
-                 <div style={{display: "flex", gap: "15px", flexWrap: "wrap"}}>
-                     <label>Flee HP% <input type="number" step="0.05" value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
-                     <label>Idle Regen/s <input type="number" step="0.005" value={config.aiSettings.common?.hpRegenRate ?? 0.01} onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
-                 </div>
-             </div>
-             
-             <div style={{display: "flex", gap: "20px"}}>
+              <div style={{background: "#333", padding: "10px", borderRadius: "5px"}}>
+                  <h4 style={{ color: "#ffffff", margin: "0 0 5px 0" }}>General Behavior</h4>
+                  <div style={{display: "flex", gap: "15px", flexWrap: "wrap"}}>
+                      <label>Flee HP% <input type="number" step="0.05" value={config.aiSettings.common?.fleeHpThreshold ?? 0.2} onInput={(e) => setConfig("aiSettings", "common", "fleeHpThreshold", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
+                      <label>Idle Regen/s <input type="number" step="0.005" value={config.aiSettings.common?.hpRegenRate ?? 0.01} onInput={(e) => setConfig("aiSettings", "common", "hpRegenRate", parseFloat(e.target.value))} style={{ width: "60px", ...inputStyle }} /></label>
+                  </div>
+              </div>
+              
+              <div style={{display: "flex", gap: "20px"}}>
                 <div><h4 style={{ color: "#dd88ff", margin: "5px 0" }}>Shooter</h4><label>Kite: <input type="number" value={config.aiSettings.shooter?.kiteDistance || 200} onInput={(e) => setConfig("aiSettings", "shooter", "kiteDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
                 <div><h4 style={{ color: "#ffcc88", margin: "5px 0" }}>Runner</h4><label>Ambush: <input type="number" value={config.aiSettings.runner.ambushDistance} onInput={(e) => setConfig("aiSettings", "runner", "ambushDistance", parseInt(e.target.value))} style={{ width: "50px", ...inputStyle }} /></label></div>
-             </div>
+              </div>
           </div>
         </section>
 
-        {/* --- Territory Armies Configuration --- */}
+        {/* --- Territory Armies Configuration (Updated for Multiple Types) --- */}
         <section style={{ ...cardStyle, gridColumn: "span 2", border: "1px solid #ff5555" }}>
             <h2 style={{ color: "#ff5555", marginTop: 0 }}>🏰 Territory Garrisons (Strategy Map)</h2>
             <div style={{ marginBottom: "15px", background: "#332222", padding: "10px", borderRadius: "5px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -413,38 +430,51 @@ const DevPage = () => {
                 <button onClick={handleAddTerritoryArmy} style={{ ...btnStyle, background: "#cc4444", color: "white" }}>Add Node</button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "10px" }}>
                 <For each={Object.keys(config.territoryArmies || {})}>
                     {(nodeId) => (
-                        <div style={{ background: "#443333", padding: "10px", borderRadius: "5px", border: "1px solid #664444", display: "flex", flexDirection: "column", gap: "5px" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ background: "#443333", padding: "10px", borderRadius: "5px", border: "1px solid #664444", display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #664444", paddingBottom: "5px" }}>
                                 <strong style={{ color: "#ffaaaa", fontSize: "1.1em" }}>Node {nodeId}</strong>
                                 <button onClick={() => handleDeleteTerritoryArmy(nodeId)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "1.2em" }}>❌</button>
                             </div>
                             
-                            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                                <label style={{ fontSize: "0.9em", color: "#ccc" }}>Type:</label>
-                                <select 
-                                    value={config.territoryArmies[nodeId].type} 
-                                    onInput={(e) => setConfig("territoryArmies", nodeId, "type", e.target.value)}
-                                    style={{ ...inputStyle, flex: 1 }}
-                                >
-                                    <For each={Object.keys(config.roleDefinitions)}>
-                                        {(role) => <option value={role}>{role}</option>}
-                                    </For>
-                                </select>
-                            </div>
-
-                            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                                <label style={{ fontSize: "0.9em", color: "#ccc" }}>Count:</label>
-                                <input 
-                                    type="number" 
-                                    min="1" 
-                                    value={config.territoryArmies[nodeId].count} 
-                                    onInput={(e) => setConfig("territoryArmies", nodeId, "count", parseInt(e.target.value))}
-                                    style={{ ...inputStyle, width: "60px" }} 
-                                />
-                            </div>
+                            {/* Loop through each unit type in this node */}
+                            <For each={config.territoryArmies[nodeId]}>
+                                {(unitData, idx) => (
+                                    <div style={{ display: "flex", gap: "8px", alignItems: "center", background: "#332222", padding: "5px", borderRadius: "4px" }}>
+                                        <select 
+                                            value={unitData.type} 
+                                            onInput={(e) => setConfig("territoryArmies", nodeId, idx(), "type", e.target.value)}
+                                            style={{ ...inputStyle, flex: 1 }}
+                                        >
+                                            <For each={Object.keys(config.roleDefinitions)}>
+                                                {(role) => <option value={role}>{role}</option>}
+                                            </For>
+                                        </select>
+                                        <input 
+                                            type="number" 
+                                            min="1" 
+                                            value={unitData.count} 
+                                            onInput={(e) => setConfig("territoryArmies", nodeId, idx(), "count", parseInt(e.target.value))}
+                                            style={{ ...inputStyle, width: "50px" }} 
+                                        />
+                                        <button 
+                                            onClick={() => handleRemoveUnitFromNode(nodeId, idx())}
+                                            style={{ background: "#cc4444", color: "white", border: "none", borderRadius: "3px", cursor: "pointer", padding: "2px 6px", fontSize: "0.8em" }}
+                                        >
+                                            X
+                                        </button>
+                                    </div>
+                                )}
+                            </For>
+                            
+                            <button 
+                                onClick={() => handleAddUnitToNode(nodeId)}
+                                style={{ marginTop: "5px", background: "#554444", color: "#ddd", border: "1px dashed #776666", borderRadius: "4px", padding: "5px", cursor: "pointer", width: "100%" }}
+                            >
+                                + Add Unit Type
+                            </button>
                         </div>
                     )}
                 </For>
