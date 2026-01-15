@@ -38,13 +38,13 @@
     },
     "6": {
       "mapId": "level0",
-      "name": "광장",
+      "name": "광장-서쪽",
       "difficulty": 2,
       "bgm": "level2"
     },
     "7": {
       "mapId": "level0",
-      "name": "광장",
+      "name": "광장-동쪽",
       "difficulty": 2,
       "bgm": "level2"
     },

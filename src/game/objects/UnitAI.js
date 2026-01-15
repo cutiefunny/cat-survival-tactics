@@ -1,5 +1,83 @@
 import Phaser from 'phaser';
 
+// [Refactor] 테스트 가능한 순수 함수로 로직 분리 (외부 파일이나 테스트에서 import 가능)
+// Phaser 의존성을 제거하거나 주입받도록 하여 테스트 용이성 확보
+export function calculateBestTarget(me, enemies, distanceFn) {
+    let bestTarget = null;
+    let bestIsAggro = false;
+    let bestDist = Infinity;
+    let bestHp = Infinity;
+
+    // distanceFn이 없으면 기본 유클리드 거리 계산 사용 (테스트 환경 대비)
+    const getDist = distanceFn || ((a, b) => Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2));
+
+    for (const enemy of enemies) {
+        if (!enemy.active || (enemy.isDying === true)) continue;
+
+        // [Priority 1] Aggro: 적이 나를 보고 있는가?
+        // enemy.ai가 없을 수도 있으므로 안전하게 체크
+        const isAggro = (enemy.ai && enemy.ai.currentTarget === me);
+        
+        // [Priority 2] Distance
+        const dist = getDist(me, enemy);
+        
+        // [Priority 3] HP
+        const hp = enemy.hp;
+
+        // 첫 번째 후보 등록
+        if (!bestTarget) {
+            bestTarget = enemy;
+            bestIsAggro = isAggro;
+            bestDist = dist;
+            bestHp = hp;
+            continue;
+        }
+
+        // --- 엄격한 우선순위 비교 ---
+
+        // 1순위: 나를 때리는 적 우선 (Aggro)
+        if (isAggro !== bestIsAggro) {
+            if (isAggro) { 
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+            }
+            continue; 
+        }
+
+        // 2순위: 거리 비교 (Hysteresis 5px)
+        const distDiff = dist - bestDist;
+        if (distDiff < -5) { 
+            bestTarget = enemy;
+            bestIsAggro = isAggro;
+            bestDist = dist;
+            bestHp = hp;
+            continue;
+        } else if (distDiff > 5) {
+            continue;
+        }
+
+        // 3순위: 거리가 비슷할 때(5px 이내), 가장 약한 적 우선 (HP)
+        if (hp < bestHp) {
+            bestTarget = enemy;
+            bestIsAggro = isAggro;
+            bestDist = dist;
+            bestHp = hp;
+        } else if (hp === bestHp) {
+            // Tie-breaker: 더 가까운 적
+            if (dist < bestDist) {
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+            }
+        }
+    }
+    
+    return bestTarget;
+}
+
 export default class UnitAI {
     constructor(unit) {
         this.unit = unit;
@@ -7,7 +85,7 @@ export default class UnitAI {
 
         // [AI State]
         this.currentTarget = null;
-        this.thinkTimer = Math.random() * 100; // 반응 속도를 위해 초기값 랜덤
+        this.thinkTimer = Math.random() * 100;
         this.fleeTimer = 0;
         this.isLowHpFleeing = false;
         
@@ -33,7 +111,6 @@ export default class UnitAI {
         
         // [Targeting State]
         this.lastTargetChangeTime = 0; 
-        // 타겟 변경 쿨타임을 매우 짧게 줄여 반응성 향상 (기존 1000ms -> 200ms)
         this.targetSwitchCooldown = 200; 
 
         this._tempStart = new Phaser.Math.Vector2();
@@ -55,11 +132,10 @@ export default class UnitAI {
 
         if (this.isCombatMode || this.isProvoked) return true;
 
-        // 정찰 중에도 "가장 좋은 타겟"을 지속적으로 탐색
+        // 정찰 중 타겟 탐색
         const bestEnemy = this.findBestTarget();
         if (bestEnemy) {
             const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
-            // 감지 범위(250) 내에 적이 들어오면 전투 개시
             if (dist <= 250) {
                 this.currentTarget = bestEnemy;
                 if (!this.checkLineOfSight()) { 
@@ -145,28 +221,29 @@ export default class UnitAI {
 
     updateTargetSelection() {
         const now = this.scene.time.now;
-        
-        // 도발 상태면 타겟 변경 불가
         if (this.isProvoked) return; 
 
-        // 너무 잦은 변경 방지 (최소 200ms)
-        if (this.currentTarget && this.currentTarget.active && (now - this.lastTargetChangeTime < this.targetSwitchCooldown)) {
-            // 단, 현재 타겟이 죽었으면 즉시 변경
-            if (!this.currentTarget.active || this.currentTarget.isDying) {
-                // pass through
-            } else {
-                return;
-            }
-        }
-
-        // 1순위(피격), 2순위(거리), 3순위(체력)를 고려한 최고의 타겟 탐색
         const bestTarget = this.findBestTarget();
-        
+
+        // 현재 타겟과 비교
         if (bestTarget && bestTarget !== this.currentTarget) {
+            
+            // [Fix] 쿨타임 체크: 하지만 '어그로(Aggro)'가 변경된 경우(긴급 상황)에는 쿨타임 무시
+            const isCooldownActive = (now - this.lastTargetChangeTime < this.targetSwitchCooldown);
+            const isEmergencySwitch = (bestTarget.ai && bestTarget.ai.currentTarget === this.unit) && 
+                                      (!this.currentTarget || (this.currentTarget.ai && this.currentTarget.ai.currentTarget !== this.unit));
+
+            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+                // 쿨타임 중이고, 긴급한 상황(어그로 변경)이 아니라면 변경 취소
+                if (isCooldownActive && !isEmergencySwitch) {
+                    return;
+                }
+            }
+
+            // 타겟 변경 확정
             this.currentTarget = bestTarget;
             this.lastTargetChangeTime = now;
             
-            // 타겟이 바뀌면 이동 경로도 즉시 재계산하도록 초기화
             this.currentPath = [];
             this.pathUpdateTimer = 0;
             
@@ -177,84 +254,13 @@ export default class UnitAI {
     }
 
     findBestTarget() {
-        const enemies = this.unit.targetGroup.getChildren();
-        let bestTarget = null;
-        
-        let bestIsAggro = false; 
-        let bestDist = Infinity; 
-        let bestHp = Infinity;   
-
-        const myX = this.unit.x;
-        const myY = this.unit.y;
-
-        for (const enemy of enemies) {
-            if (!enemy.active || enemy.isDying) continue;
-
-            // [Priority 1] Aggro
-            const isAggro = (enemy.ai && enemy.ai.currentTarget === this.unit);
-            
-            // [Priority 2] Distance
-            const dist = Phaser.Math.Distance.Between(myX, myY, enemy.x, enemy.y);
-            
-            // [Priority 3] HP
-            const hp = enemy.hp;
-
-            // 첫 번째 후보 등록
-            if (!bestTarget) {
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
-                continue;
-            }
-
-            // --- 엄격한 우선순위 비교 ---
-
-            // 1순위: 나를 때리는 적 우선 (Aggro)
-            if (isAggro !== bestIsAggro) {
-                if (isAggro) { 
-                    bestTarget = enemy;
-                    bestIsAggro = isAggro;
-                    bestDist = dist;
-                    bestHp = hp;
-                }
-                continue; 
-            }
-
-            // 2순위: 거리 비교 (Distance)
-            // 거리가 5px 이상 차이나면 확실하게 구분
-            const distDiff = dist - bestDist;
-            
-            if (distDiff < -5) { 
-                // [Fix] 5px 이상 더 가까우면 체력 상관없이 무조건 교체
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
-                continue;
-            } else if (distDiff > 5) {
-                // 5px 이상 더 멀면 고려 대상 아님
-                continue;
-            }
-
-            // 3순위: 거리가 비슷할 때(5px 이내), 가장 약한 적 우선 (HP)
-            if (hp < bestHp) {
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
-            } else if (hp === bestHp) {
-                // [Fix] 체력도 같다면, 조금이라도 더 가까운 적을 선택 (Distance Tie-breaker)
-                if (dist < bestDist) {
-                    bestTarget = enemy;
-                    bestIsAggro = isAggro;
-                    bestDist = dist;
-                    bestHp = hp;
-                }
-            }
-        }
-        
-        return bestTarget;
+        // [Refactor] 분리된 순수 함수 사용
+        // Phaser.Math.Distance.Between을 주입하여 계산
+        return calculateBestTarget(
+            this.unit, 
+            this.unit.targetGroup.getChildren(),
+            Phaser.Math.Distance.Between
+        );
     }
 
     // =================================================================
@@ -279,10 +285,10 @@ export default class UnitAI {
 
         this.processAggro(delta);
 
-        // [Leash Check] 너무 멀리 갔거나 시야에서 사라지면 포기
+        // [Leash Check]
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
             if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const CHASE_RANGE = 450; // 추격 유지 범위
+                const CHASE_RANGE = 450; 
                 const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
@@ -295,22 +301,20 @@ export default class UnitAI {
                     return;
                 }
             } else {
-                 // 타겟이 죽거나 사라짐 -> 즉시 복귀
                  this.isReturning = true;
                  this.isCombatMode = false;
                  return;
             }
         }
 
-        // [Target Selection Update] 주기적으로 최적의 타겟 재탐색
-        // 전투 중에도 계속해서 더 좋은 타겟(나를 때리는 적 등)이 있는지 확인
+        // [Target Selection Update]
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
-            this.thinkTimer = 150 + Math.random() * 100; // 약 0.2초마다 재평가
+            this.thinkTimer = 150 + Math.random() * 100; 
             this.updateTargetSelection();
         }
 
-        // [Flee Logic] 낮은 체력 도주
+        // [Flee Logic]
         if (this.unit.role !== 'Tanker') {
             const fleeThreshold = this.unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
             const hpRatio = this.unit.hp / this.unit.maxHp;
@@ -324,7 +328,9 @@ export default class UnitAI {
             }
 
             if (this.isLowHpFleeing) {
-                const nearestThreat = this.findNearestEnemy(); // 도망칠 때는 단순히 가장 가까운 적 기준
+                // [Optimization] 단순 가장 가까운 적 탐색도 calculateBestTarget 재활용 가능하지만,
+                // 도주는 무조건 '거리'가 중요하므로 기존 findNearestEnemy 유지하되 중복 제거 고려
+                const nearestThreat = this.findNearestEnemy(); 
                 if (nearestThreat) {
                     const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, nearestThreat.x, nearestThreat.y);
                     if (dist < 350) this.runAway(delta);
