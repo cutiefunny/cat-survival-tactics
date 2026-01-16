@@ -21,7 +21,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.isLeader = isLeader;
 
         this.role = roleKey;
-        // [Modified] 리더라면 baseSize를 15% 증가시킴
         let size = (this.role === 'Tanker') ? 60 : 50;
         if (this.isLeader) {
             size *= 1.15; 
@@ -37,8 +36,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         
         this.defense = stats.defense || 0;
         this.killReward = stats.killReward || 10;
-        
-        // [New] 공격 빗나감 확률 (기본값 0.02)
         this.missChance = (stats.missChance !== undefined) ? stats.missChance : 0.02;
 
         this.attackRange = stats.attackRange || 50;
@@ -105,7 +102,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (this.isDying) return; 
         this.isDying = true;
 
-        // [New] 유닛 사망 시 Scene에 알림 (사망자 명단 기록용)
         if (this.scene && typeof this.scene.handleUnitDeath === 'function') {
             this.scene.handleUnitDeath(this);
         }
@@ -118,7 +114,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             this.scene.animateCoinDrop(this.x, this.y, dropAmount);
         }
 
-        // [New] 유닛 사망 시 비명 소리 재생
         if (this.scene && typeof this.scene.playDieSound === 'function') {
             this.scene.playDieSound();
         }
@@ -165,7 +160,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const bounds = this.scene.physics.world.bounds;
         const padding = this.baseSize / 2;
         
-        // [Optimization] 경계 밖으로 나갔을 때만 연산 수행
         if (this.x < bounds.x + padding || this.x > bounds.right - padding ||
             this.y < bounds.y + padding || this.y > bounds.bottom - padding) {
 
@@ -183,7 +177,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     validatePosition() {
         if (!this.active || !this.body) return;
         
-        // [Optimization] 움직이지 않는 상태라면 충돌 체크 불필요
         if (this.body.speed < 0.1) return;
 
         let isInvalid = false;
@@ -211,7 +204,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const adjustedDelta = delta * (this.scene.gameSpeed || 1);
         const isMoving = this.body.speed > 0.1;
 
-        // [Optimization] 이동 중일 때만 위치 검증 및 경계 체크 수행
         if (isMoving) {
             this.validatePosition();
             this.enforceWorldBounds();
@@ -219,7 +211,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this.updateUI();
 
-        // [Optimization] 디버그 모드가 켜져 있을 때만 함수 호출
         if (this.scene.uiManager && this.scene.uiManager.isDebugEnabled) {
             this.handleDebugUpdates(delta);
         } else if (this.debugText) {
@@ -228,7 +219,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
 
-        // [Optimization] 움직이지 않고, 피해를 입거나 공격 중이 아닐 때만 재생
         if (!isMoving && this.hp < this.maxHp * 0.5 && !this.isTakingDamage && !this.isAttacking) {
             this.handleRegen(adjustedDelta);
         }
@@ -270,14 +260,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                         this.ai.followLeader(); 
                         break;
                     case 'HOLD': 
-                        // [New] 홀드 상태: 이동을 멈추고 제자리에 대기
                         this.setVelocity(0, 0);
-                        // 걷는 애니메이션 중이라면 정지
                         if (this.anims.isPlaying && this.anims.currentAnim.key.includes('walk')) {
                             this.stop();
-                            this.setFrame(0); // Idle 프레임
+                            this.setFrame(0);
                         }
-                        // AI 로직(updateAI)을 호출하지 않으므로 이동/추격하지 않음
                         break;
                     case 'FREE': 
                     default: 
@@ -286,6 +273,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 }
             }
         } else {
+            // [Check] 비전투 상태에서 적을 못 찾으면 updateAI가 호출되지 않음.
+            // 하지만 적에게 맞으면 onDamage -> engageCombat -> isCombatMode=true 되므로 다음 프레임부터 호출됨.
             if (this.ai.updateRoaming(delta)) {
                 this.updateAI(delta);
             }
@@ -325,12 +314,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     }
 
     handleWallCollision(tile) {
-        // [Critical Fix] 물리 충돌 이벤트를 AI에게 전달하여 '벽 타기(Sliding)' 로직을 실행시킴
         if (this.ai && typeof this.ai.onWallCollision === 'function') {
             this.ai.onWallCollision(tile);
         }
-
-        // (기존 로직 유지) 경로 이동 중 막히면 재탐색 시간 단축
         if (this.ai.currentPath.length > 0) {
             if (this.body.speed < 5) {
                 this.ai.pathUpdateTimer -= 50; 
@@ -421,7 +407,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const range = this.skillRange;
         this.targetGroup.getChildren().forEach(enemy => {
             if (enemy.active && !enemy.isDying && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) { 
-                enemy.takeDamage(this.attackPower * 2); 
+                // [Modified] attacker 정보(this)를 전달
+                enemy.takeDamage(this.attackPower * 2, this); 
             }
         });
         this.scene.time.delayedCall(500, () => {
@@ -432,12 +419,18 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         });
     }
 
-    takeDamage(amount) {
+    // [Modified] attacker 파라미터 추가
+    takeDamage(amount, attacker = null) {
         if (!this.scene.battleStarted || this.isDying) return; 
         
         const damage = Math.max(1, amount - this.defense);
-        
         this.hp -= damage;
+
+        // [New] AI에게 공격자 정보 전달 (피격 반응)
+        if (this.ai && typeof this.ai.onDamage === 'function') {
+            this.ai.onDamage(attacker);
+        }
+
         this.onTakeDamage(); 
 
         if (this.scene && typeof this.scene.playHitSound === 'function') {
@@ -499,7 +492,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         let statusStr = "COMBAT";
         let color = "#ffffff";
         
-        if (this.ai && this.ai.isReturning) { // [New] 복귀 상태 디버그
+        if (this.ai && this.ai.isReturning) { 
             statusStr = "🏠RETURN";
             color = "#ffff00";
         } else if (this.ai && this.ai.isLowHpFleeing) {
@@ -562,7 +555,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updateAnimation() {
         const isBusy = (this.isTakingDamage || this.isAttacking || this.isUsingSkill);
         if (!isBusy) {
-            // [Optimization] 벡터 길이 계산 최적화 (제곱 비교)
             if (this.body.velocity.lengthSq() > 25) { 
                 const walkKey = `${this.textureKey}_walk`;
                 if (this.scene.anims.exists(walkKey)) {
@@ -616,7 +608,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.formationOffset.y = this.savedRelativePos.y - leaderUnit.savedRelativePos.y;
     }
 
-    // [New] 감정표현(느낌표, 물음표 등) 시각 효과 표시
     showEmote(text, color = '#ff0000') {
         if (!this.scene) return;
 

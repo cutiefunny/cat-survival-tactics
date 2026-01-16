@@ -620,7 +620,6 @@ export default class BattleScene extends BaseScene {
     }
     
     animateCoinDrop(startX, startY, amount) {
-        console.log(`💰 [Coin] Drop occurred! Amount: ${amount}, Pre-Total: ${this.playerCoins}`);
         const coin = this.add.graphics();
         coin.fillStyle(0xFFD700, 1); coin.fillCircle(0, 0, 8); coin.lineStyle(2, 0xFFFFFF, 1); coin.strokeCircle(0, 0, 8);
         coin.setPosition(startX, startY); coin.setDepth(900); 
@@ -629,7 +628,6 @@ export default class BattleScene extends BaseScene {
             onComplete: () => { 
                 coin.destroy(); 
                 this.playerCoins += amount; 
-                console.log(`💰 [Coin] Collected! New Total: ${this.playerCoins}`);
                 if(this.uiManager) this.uiManager.updateCoins(this.playerCoins); 
             }
         });

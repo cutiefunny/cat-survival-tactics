@@ -6,15 +6,24 @@ export function calculateBestTarget(me, enemies, distanceFn) {
     let bestDist = Infinity;
     let bestHp = Infinity;
 
+    // 거리 계산 함수 (기본값: 유클리드 거리)
     const getDist = distanceFn || ((a, b) => Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2));
+    
+    // [New] 최근(3초 내) 나를 때린 적도 어그로 대상에 포함
+    const now = me.scene.time.now;
+    const lastAttacker = me.ai ? me.ai.lastAttacker : null;
+    const lastHitTime = me.ai ? me.ai.lastAttackedTime : 0;
+    const isRecentAttacker = (enemy) => (enemy === lastAttacker && (now - lastHitTime < 3000));
 
     for (const enemy of enemies) {
         if (!enemy.active || (enemy.isDying === true)) continue;
 
-        const isAggro = (enemy.ai && enemy.ai.currentTarget === me);
+        // 1. 나를 공격 중인지 확인 (AI 타겟팅 or 최근 공격자)
+        const isAggro = (enemy.ai && enemy.ai.currentTarget === me) || isRecentAttacker(enemy);
         const dist = getDist(me, enemy);
         const hp = enemy.hp;
 
+        // 아직 후보가 없으면 현재 적을 등록
         if (!bestTarget) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -23,27 +32,30 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
+        // [우선순위 1] 어그로 (나를 노리는 적)
         if (isAggro !== bestIsAggro) {
-            if (isAggro) { 
+            if (isAggro) {
                 bestTarget = enemy;
                 bestIsAggro = isAggro;
                 bestDist = dist;
                 bestHp = hp;
             }
-            continue; 
+            continue;
         }
 
+        // [우선순위 2] 거리 (가까운 적)
         const distDiff = dist - bestDist;
-        if (distDiff < -5) { 
-            bestTarget = enemy;
-            bestIsAggro = isAggro;
-            bestDist = dist;
-            bestHp = hp;
-            continue;
-        } else if (distDiff > 5) {
+        if (Math.abs(distDiff) > 1) { 
+            if (dist < bestDist) {
+                bestTarget = enemy;
+                bestIsAggro = isAggro;
+                bestDist = dist;
+                bestHp = hp;
+            }
             continue;
         }
 
+        // [우선순위 3] 체력 (약한 적)
         if (hp < bestHp) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -75,6 +87,9 @@ export default class UnitAI {
 
         // [Aggro System]
         this.provokedTimer = 0; 
+        // [New] 피격 기억 시스템
+        this.lastAttacker = null;
+        this.lastAttackedTime = 0;
         
         // [Pathfinding State]
         this.currentPath = [];
@@ -100,6 +115,21 @@ export default class UnitAI {
         this.wallCollisionVector = new Phaser.Math.Vector2();
     }
 
+    // [New] 피격 시 호출되는 메서드
+    onDamage(attacker) {
+        if (!attacker || !attacker.active) return;
+
+        this.lastAttacker = attacker;
+        this.lastAttackedTime = this.scene.time.now;
+
+        // 전투 중이 아니었다면 즉시 전투 모드로 전환하고 해당 적을 타겟팅
+        if (!this.isCombatMode) {
+            this.engageCombat(attacker);
+            // 반응 속도를 위해 즉시 생각(TargetSelection)하도록 타이머 초기화
+            this.thinkTimer = 0; 
+        }
+    }
+
     updateRoaming(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
@@ -111,7 +141,8 @@ export default class UnitAI {
         const bestEnemy = this.findBestTarget();
         if (bestEnemy) {
             const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
-            if (dist <= 250) {
+            // [Modified] 탐색 범위 300으로 소폭 상향
+            if (dist <= 300) {
                 this.currentTarget = bestEnemy;
                 if (!this.checkLineOfSight()) { 
                     this.currentTarget = null; 
@@ -161,7 +192,7 @@ export default class UnitAI {
     }
 
     engageCombat(target) {
-        if (this.isCombatMode || this.isReturning) return;
+        if (this.isReturning) return; // 복귀 중엔 무시 (단, 강제성이 필요하면 제거 가능)
 
         this.isCombatMode = true;
         this.currentTarget = target;
@@ -197,8 +228,17 @@ export default class UnitAI {
 
         if (bestTarget && bestTarget !== this.currentTarget) {
             const isCooldownActive = (now - this.lastTargetChangeTime < this.targetSwitchCooldown);
-            const isEmergencySwitch = (bestTarget.ai && bestTarget.ai.currentTarget === this.unit) && 
-                                      (!this.currentTarget || (this.currentTarget.ai && this.currentTarget.ai.currentTarget !== this.unit));
+            
+            // [Modified] 타겟 교체 로직 강화: 나를 때리는 적(Aggro)은 쿨타임 무시하고 즉시 교체
+            // bestTarget이 '어그로(나를 공격 중)' 상태이고, 현재 타겟은 아니라면 긴급 교체
+            const isNewTargetAggro = (bestTarget.ai && bestTarget.ai.currentTarget === this.unit) || 
+                                     (bestTarget === this.lastAttacker && (now - this.lastAttackedTime < 3000));
+            
+            const isCurrentTargetAggro = this.currentTarget && 
+                                         ((this.currentTarget.ai && this.currentTarget.ai.currentTarget === this.unit) ||
+                                          (this.currentTarget === this.lastAttacker && (now - this.lastAttackedTime < 3000)));
+
+            const isEmergencySwitch = isNewTargetAggro && !isCurrentTargetAggro;
 
             if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
                 if (isCooldownActive && !isEmergencySwitch) {
@@ -229,11 +269,9 @@ export default class UnitAI {
     update(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
-            // [Fix] updateAnimation() 제거: Unit.js에서 통합 관리
             return;
         }
 
-        // [Fix] 강제 우회 타이머 감소
         if (this.forcePathfindingTimer > 0) {
             this.forcePathfindingTimer -= delta;
         }
@@ -245,7 +283,6 @@ export default class UnitAI {
                 this.wallCollisionVector.y * this.unit.moveSpeed
             );
             this.unit.updateFlipX(); 
-            // [Fix] updateAnimation() 제거
             return; 
         }
 
@@ -253,23 +290,23 @@ export default class UnitAI {
 
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
             if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const CHASE_RANGE = 450; 
+                const CHASE_RANGE = 500; // [Modified] 추격 포기 거리 상향 (쉽게 포기하지 않도록)
                 const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
                 if (distToTarget > CHASE_RANGE || !hasLOS) {
+                    // 시야가 끊겨도 바로 포기하지 않고 잠시 대기하거나 경로 탐색을 시도하게 할 수 있으나,
+                    // 일단은 단순화를 위해 복귀 처리 (단, LOS 체크가 너무 엄격하면 문제됨)
                     this.isReturning = true;
                     this.isCombatMode = false;
                     this.currentTarget = null;
                     this.currentPath = [];
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
-                    // [Fix] updateAnimation() 제거
                     return;
                 }
             } else {
                  this.isReturning = true;
                  this.isCombatMode = false;
-                 // [Fix] updateAnimation() 제거
                  return;
             }
         }
@@ -299,7 +336,6 @@ export default class UnitAI {
                     if (dist < 350) this.runAway(delta);
                     else { this.unit.setVelocity(0, 0); this.unit.updateFlipX(); }
                 }
-                // [Fix] updateAnimation() 제거
                 return;
             }
         }
@@ -336,11 +372,7 @@ export default class UnitAI {
         if (this.unit.team !== 'blue' || this.unit.scene.isAutoBattle) {
             this.unit.tryUseSkill();
         }
-        
-        // [Fix] updateAnimation() 제거: Unit.js의 update() 마지막에 호출됨
     }
-
-    // [Removed] updateAnimation 메서드 전체 삭제 (Unit.js 로직과 충돌 방지)
 
     findNearestEnemy() {
         const enemies = this.unit.targetGroup.getChildren();
@@ -366,43 +398,31 @@ export default class UnitAI {
     }
 
     onWallCollision(obstacle) {
-        // [New Fix] 충돌 즉시 현재 경로 폐기
         this.currentPath = []; 
         this.pathUpdateTimer = 0;
 
-        // 1. 장애물의 중심 좌표(ox, oy) 안전하게 계산
         let ox, oy;
-        
-        // Phaser Tile 객체인 경우
         if (obstacle.pixelX !== undefined) {
             ox = obstacle.pixelX + (obstacle.width || 0) / 2;
             oy = obstacle.pixelY + (obstacle.height || 0) / 2;
-        } 
-        // Sprite 또는 GameObject인 경우
-        else if (obstacle.getBounds) {
+        } else if (obstacle.getBounds) {
             const bounds = obstacle.getBounds();
             ox = bounds.centerX;
             oy = bounds.centerY;
-        } 
-        // 단순 좌표 객체인 경우
-        else {
+        } else {
             ox = obstacle.x;
             oy = obstacle.y;
         }
 
         const ux = this.unit.x;
         const uy = this.unit.y;
-
-        // 2. 충돌 면(Face) 판별
         const dx = ux - ox;
         const dy = uy - oy;
 
         const slideDir = new Phaser.Math.Vector2();
         const repulsion = new Phaser.Math.Vector2();
-
         const target = this.currentTarget || this.patrolTarget || { x: ux, y: uy };
 
-        // [Case 1] 가로 거리 차이가 더 큼 -> 좌/우 면 충돌 -> 세로(Y)로 회피
         if (Math.abs(dx) > Math.abs(dy)) {
             if (Math.abs(target.y - uy) > 10) {
                 slideDir.set(0, Math.sign(target.y - uy) || 1);
@@ -410,9 +430,7 @@ export default class UnitAI {
                 slideDir.set(0, Math.sign(dy) || 1);
             }
             repulsion.set(Math.sign(dx), 0);
-        } 
-        // [Case 2] 세로 거리 차이가 더 큼 -> 상/하 면 충돌 -> 가로(X)로 회피
-        else {
+        } else {
             if (Math.abs(target.x - ux) > 10) {
                 slideDir.set(Math.sign(target.x - ux) || 1, 0);
             } else {
@@ -421,13 +439,8 @@ export default class UnitAI {
             repulsion.set(0, Math.sign(dy));
         }
 
-        // 3. 벡터 합성 및 적용
         this.wallCollisionVector.copy(slideDir).scale(0.8).add(repulsion.scale(1.2)).normalize();
         this.wallCollisionTimer = 250; 
-
-        // [핵심 수정 사항] 
-        // 벽에 박았으므로 1.5초 동안은 '직선 이동(isLineClear)' 체크를 강제로 건너뛰고 
-        // 무조건 A* 알고리즘으로 우회 경로를 찾도록 강제합니다.
         this.forcePathfindingTimer = 1500;
         this.stuckTimer = 0;
     }
