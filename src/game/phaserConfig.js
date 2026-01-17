@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import BattleScene from './scenes/BattleScene';
 import StrategyScene from './scenes/StrategyScene'; // StrategyScene 명시적 임포트 확인 필요
+import LoadingScene from './scenes/LoadingScene';
 import UIScene from './scenes/UIScene'; 
 import EventScene from './scenes/EventScene'; // [New] EventScene 추가
 import VirtualJoystickPlugin from 'phaser3-rex-plugins/plugins/virtualjoystick-plugin.js';
@@ -37,7 +38,7 @@ export const getGameConfig = (containerId) => {
                 start: true
             }]
         },
-        // [Modified] EventScene 추가
-        scene: [StrategyScene, BattleScene, UIScene, EventScene]
+        
+        scene: [EventScene, StrategyScene, LoadingScene, BattleScene, UIScene]
     };
 };

@@ -3,12 +3,13 @@ import BattleScene from './scenes/BattleScene';
 import UIScene from './scenes/UIScene';
 import StrategyScene from './scenes/StrategyScene';
 import LoadingScene from './scenes/LoadingScene'; // [New]
+import EventScene from './scenes/EventScene'; // [New]
 
 export function launchGame(containerId, mockData = null) {
     // [Modified] LoadingScene 추가
     const sceneList = mockData 
         ? [LoadingScene, BattleScene, UIScene] 
-        : [StrategyScene, LoadingScene, BattleScene, UIScene];
+        : [EventScene, StrategyScene, LoadingScene, BattleScene, UIScene];
 
     const config = {
         type: Phaser.AUTO,
