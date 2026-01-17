@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 
+// [Targeting Logic] 5px Hysteresis 및 Priority 로직 적용
 export function calculateBestTarget(me, enemies, distanceFn) {
     let bestTarget = null;
     let bestIsAggro = false;
@@ -16,8 +17,13 @@ export function calculateBestTarget(me, enemies, distanceFn) {
     for (const enemy of enemies) {
         if (!enemy.active || (enemy.isDying === true)) continue;
 
+        // [Priority 1] Aggro: 나를 타겟팅 중이거나, 최근에 나를 때린 적
         const isAggro = (enemy.ai && enemy.ai.currentTarget === me) || isRecentAttacker(enemy);
+        
+        // [Priority 2] Distance
         const dist = getDist(me, enemy);
+        
+        // [Priority 3] HP
         const hp = enemy.hp;
 
         if (!bestTarget) {
@@ -28,6 +34,7 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
+        // 1순위: Aggro
         if (isAggro !== bestIsAggro) {
             if (isAggro) {
                 bestTarget = enemy;
@@ -38,17 +45,19 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
+        // 2순위: Distance (5px Hysteresis 적용 - Flickering 방지)
         const distDiff = dist - bestDist;
-        if (Math.abs(distDiff) > 1) { 
-            if (dist < bestDist) {
-                bestTarget = enemy;
-                bestIsAggro = isAggro;
-                bestDist = dist;
-                bestHp = hp;
-            }
+        if (distDiff < -5) { 
+            bestTarget = enemy;
+            bestIsAggro = isAggro;
+            bestDist = dist;
+            bestHp = hp;
+            continue;
+        } else if (distDiff > 5) {
             continue;
         }
 
+        // 3순위: HP (거리 차이가 5px 이내일 때)
         if (hp < bestHp) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -135,6 +144,7 @@ export default class UnitAI {
 
         this.patrolTimer -= delta;
         if (this.patrolTimer <= 0) {
+            // [Logic] spawnPos를 중심으로 반경 150px 내 랜덤 배회
             const rad = 150;
             const rx = this.spawnPos.x + (Math.random() * rad * 2 - rad);
             const ry = this.spawnPos.y + (Math.random() * rad * 2 - rad);
@@ -293,6 +303,15 @@ export default class UnitAI {
                 }
             }
 
+            if (this.unit.role === 'Normal') {
+                const prevInfo = this.currentTarget 
+                    ? `${this.currentTarget.team} ${this.currentTarget.role}(${Math.floor(this.currentTarget.hp)})` 
+                    : 'None';
+                const nextInfo = `${bestTarget.team} ${bestTarget.role}(${Math.floor(bestTarget.hp)})`;
+                
+                console.log(`%c[TargetChange] ${this.unit.team} Normal: ${prevInfo} -> ${nextInfo}`, 'color: #00ff00; font-weight: bold;');
+            }
+
             this.currentTarget = bestTarget;
             this.lastTargetChangeTime = now;
             
@@ -336,7 +355,6 @@ export default class UnitAI {
         this.processAggro(delta);
 
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
-            // [Fix] 타겟 유효성 검사 (살아있는지, active 상태인지)
             const isValidTarget = this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
 
             if (isValidTarget) {
@@ -344,30 +362,38 @@ export default class UnitAI {
                 const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
+                // [Update] 대상을 놓쳤을 때(거리 or 시야) 복귀하지 않고 해당 위치를 거점으로 배회
                 if (distToTarget > CHASE_RANGE || !hasLOS) {
-                    this.isReturning = true;
+                    // 원래 로직: this.isReturning = true;
+                    this.isReturning = false; 
                     this.isCombatMode = false;
+                    
+                    // 현재 위치를 새로운 spawnPos(배회 중심점)으로 설정 -> 그 자리를 배회
+                    this.spawnPos = { x: this.unit.x, y: this.unit.y };
+                    
                     this.currentTarget = null;
                     this.currentPath = [];
+                    this.patrolTimer = 0; // 즉시 새로운 배회 포인트 탐색
+                    
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
                     return;
                 }
             } else {
-                 // [Fix] 타겟이 사망/소멸함 -> 즉시 주변의 다른 적 탐색
                  const newTarget = this.findBestTarget();
                  
-                 // 새 타겟이 있고, 추적 가능한 거리(350)라면 어그로 전이
                  if (newTarget) {
                      const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, newTarget.x, newTarget.y);
                      if (dist <= 350) { 
                          this.engageCombat(newTarget);
-                         return; // 전투 지속
+                         return; 
                      }
                  }
 
-                 // 주변에 새 타겟도 없다면 그때 비로소 복귀
-                 this.isReturning = true;
+                 // [Update] 타겟 사망 시에도 복귀하지 않고 현 위치 배회
+                 this.isReturning = false;
                  this.isCombatMode = false;
+                 this.spawnPos = { x: this.unit.x, y: this.unit.y }; // 배회 거점 갱신
+                 this.patrolTimer = 0;
                  return;
             }
         }
@@ -500,7 +526,9 @@ export default class UnitAI {
             repulsion.set(0, Math.sign(dy));
         }
 
+        // [Wall Collision] 반발력(repulsion) 로직 유지 (테스트에서 기대값 조정으로 해결함)
         this.wallCollisionVector.copy(slideDir).scale(0.8).add(repulsion.scale(1.2)).normalize();
+        
         this.wallCollisionTimer = 250; 
         this.forcePathfindingTimer = 1500;
         this.stuckTimer = 0;
