@@ -219,7 +219,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
 
-        if (!isMoving && this.hp < this.maxHp * 0.5 && !this.isTakingDamage && !this.isAttacking) {
+        // [Fixed] !this.ai.isReturning 조건 추가: 복귀 중에는 자동 회복 금지
+        if (!isMoving && this.hp < this.maxHp * 0.5 && !this.isTakingDamage && !this.isAttacking && !this.ai.isReturning) {
             this.handleRegen(adjustedDelta);
         }
 
@@ -273,8 +274,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
                 }
             }
         } else {
-            // [Check] 비전투 상태에서 적을 못 찾으면 updateAI가 호출되지 않음.
-            // 하지만 적에게 맞으면 onDamage -> engageCombat -> isCombatMode=true 되므로 다음 프레임부터 호출됨.
             if (this.ai.updateRoaming(delta)) {
                 this.updateAI(delta);
             }
@@ -407,7 +406,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const range = this.skillRange;
         this.targetGroup.getChildren().forEach(enemy => {
             if (enemy.active && !enemy.isDying && Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y) < range * range) { 
-                // [Modified] attacker 정보(this)를 전달
                 enemy.takeDamage(this.attackPower * 2, this); 
             }
         });
@@ -419,14 +417,12 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         });
     }
 
-    // [Modified] attacker 파라미터 추가
     takeDamage(amount, attacker = null) {
         if (!this.scene.battleStarted || this.isDying) return; 
         
         const damage = Math.max(1, amount - this.defense);
         this.hp -= damage;
 
-        // [New] AI에게 공격자 정보 전달 (피격 반응)
         if (this.ai && typeof this.ai.onDamage === 'function') {
             this.ai.onDamage(attacker);
         }

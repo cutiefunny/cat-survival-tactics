@@ -6,10 +6,8 @@ export function calculateBestTarget(me, enemies, distanceFn) {
     let bestDist = Infinity;
     let bestHp = Infinity;
 
-    // 거리 계산 함수 (기본값: 유클리드 거리)
     const getDist = distanceFn || ((a, b) => Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2));
     
-    // [New] 최근(3초 내) 나를 때린 적도 어그로 대상에 포함
     const now = me.scene.time.now;
     const lastAttacker = me.ai ? me.ai.lastAttacker : null;
     const lastHitTime = me.ai ? me.ai.lastAttackedTime : 0;
@@ -18,12 +16,10 @@ export function calculateBestTarget(me, enemies, distanceFn) {
     for (const enemy of enemies) {
         if (!enemy.active || (enemy.isDying === true)) continue;
 
-        // 1. 나를 공격 중인지 확인 (AI 타겟팅 or 최근 공격자)
         const isAggro = (enemy.ai && enemy.ai.currentTarget === me) || isRecentAttacker(enemy);
         const dist = getDist(me, enemy);
         const hp = enemy.hp;
 
-        // 아직 후보가 없으면 현재 적을 등록
         if (!bestTarget) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -32,7 +28,6 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
-        // [우선순위 1] 어그로 (나를 노리는 적)
         if (isAggro !== bestIsAggro) {
             if (isAggro) {
                 bestTarget = enemy;
@@ -43,7 +38,6 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
-        // [우선순위 2] 거리 (가까운 적)
         const distDiff = dist - bestDist;
         if (Math.abs(distDiff) > 1) { 
             if (dist < bestDist) {
@@ -55,7 +49,6 @@ export function calculateBestTarget(me, enemies, distanceFn) {
             continue;
         }
 
-        // [우선순위 3] 체력 (약한 적)
         if (hp < bestHp) {
             bestTarget = enemy;
             bestIsAggro = isAggro;
@@ -72,39 +65,31 @@ export default class UnitAI {
         this.unit = unit;
         this.scene = unit.scene;
 
-        // [AI State]
         this.currentTarget = null;
         this.thinkTimer = Math.random() * 100;
         this.fleeTimer = 0;
         this.isLowHpFleeing = false;
         
-        // [Roaming & Combat State]
         this.isCombatMode = false;      
         this.isReturning = false;       
         this.spawnPos = { x: unit.x, y: unit.y }; 
         this.patrolTimer = 0;           
         this.patrolTarget = null;       
 
-        // [Aggro System]
         this.provokedTimer = 0; 
-        // [New] 피격 기억 시스템
         this.lastAttacker = null;
         this.lastAttackedTime = 0;
         
-        // [Pathfinding State]
         this.currentPath = [];
         this.pathUpdateTimer = 0;
         this.lastPathCalcTime = 0;
         this.stuckTimer = 0;
         
-        // [Fix] 끼임 발생 시 직선 이동을 잠시 금지하는 타이머
         this.forcePathfindingTimer = 0;
         
-        // [LOS State]
         this.losCheckTimer = 0;
         this.lastLosResult = true;
         
-        // [Targeting State]
         this.lastTargetChangeTime = 0; 
         this.targetSwitchCooldown = 200; 
 
@@ -115,17 +100,13 @@ export default class UnitAI {
         this.wallCollisionVector = new Phaser.Math.Vector2();
     }
 
-    // [New] 피격 시 호출되는 메서드
     onDamage(attacker) {
         if (!attacker || !attacker.active) return;
-
         this.lastAttacker = attacker;
         this.lastAttackedTime = this.scene.time.now;
 
-        // 전투 중이 아니었다면 즉시 전투 모드로 전환하고 해당 적을 타겟팅
         if (!this.isCombatMode) {
             this.engageCombat(attacker);
-            // 반응 속도를 위해 즉시 생각(TargetSelection)하도록 타이머 초기화
             this.thinkTimer = 0; 
         }
     }
@@ -141,7 +122,6 @@ export default class UnitAI {
         const bestEnemy = this.findBestTarget();
         if (bestEnemy) {
             const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
-            // [Modified] 탐색 범위 300으로 소폭 상향
             if (dist <= 300) {
                 this.currentTarget = bestEnemy;
                 if (!this.checkLineOfSight()) { 
@@ -177,12 +157,14 @@ export default class UnitAI {
 
     handleReturnLogic(delta) {
         const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.spawnPos.x, this.spawnPos.y);
+        
         if (dist > 10) {
-            this.scene.physics.moveTo(this.unit, this.spawnPos.x, this.spawnPos.y, this.unit.moveSpeed * 1.5);
-            this.unit.updateFlipX();
+            this.moveToLocationSmart(this.spawnPos.x, this.spawnPos.y, delta, 1.5);
         } else {
             this.isReturning = false;
             this.unit.setVelocity(0, 0);
+            this.currentPath = []; 
+
             if (this.unit.hp < this.unit.maxHp) {
                 this.unit.hp = Math.min(this.unit.hp + (this.unit.maxHp * 0.3), this.unit.maxHp);
                 this.unit.redrawHpBar();
@@ -191,8 +173,75 @@ export default class UnitAI {
         }
     }
 
+    moveToLocationSmart(targetX, targetY, delta, speedFactor = 1.0) {
+        const unit = this.unit;
+        const moveSpeed = unit.moveSpeed * speedFactor;
+
+        if (this.currentPath.length > 0 || (Math.abs(unit.x - targetX) > 10 || Math.abs(unit.y - targetY) > 10)) {
+             if (unit.body.speed < moveSpeed * 0.1) {
+                this.stuckTimer += delta;
+                if (this.stuckTimer > 200) {
+                    this.stuckTimer = 0;
+                    this.currentPath = [];
+                    this.pathUpdateTimer = 0;
+                    unit.setVelocity(0, 0);
+                    this.forcePathfindingTimer = 1500; 
+                }
+             } else {
+                 this.stuckTimer = 0;
+             }
+        }
+
+        let isLineClear = false;
+        if (this.forcePathfindingTimer <= 0) {
+             isLineClear = this.scene.pathfindingManager.isLineClear(
+                { x: unit.x, y: unit.y },
+                { x: targetX, y: targetY }
+            );
+        }
+
+        if (isLineClear) {
+            this.scene.physics.moveTo(unit, targetX, targetY, moveSpeed);
+            unit.updateFlipX();
+            this.currentPath = [];
+            return;
+        }
+
+        this.pathUpdateTimer -= delta;
+        const shouldCalculatePath = this.currentPath.length === 0 || this.pathUpdateTimer <= 0 || (this.forcePathfindingTimer > 0 && this.currentPath.length === 0);
+
+        if (shouldCalculatePath) {
+            this.pathUpdateTimer = 500 + Math.random() * 300;
+            const path = this.scene.pathfindingManager.findPath(
+                { x: unit.x, y: unit.y },
+                { x: targetX, y: targetY }
+            );
+            if (path && path.length > 0) {
+                this.currentPath = path;
+                this.lastPathCalcTime = this.scene.time.now;
+            }
+        }
+
+        if (this.currentPath.length > 0) {
+            const nextPoint = this.currentPath[0];
+            const distToPoint = Phaser.Math.Distance.Between(unit.x, unit.y, nextPoint.x, nextPoint.y);
+
+            if (distToPoint < 15) {
+                this.currentPath.shift();
+                if (this.currentPath.length > 0) {
+                    this.moveToPoint(this.currentPath[0], moveSpeed);
+                }
+            } else {
+                this.moveToPoint(nextPoint, moveSpeed);
+            }
+        } else {
+             this.scene.physics.moveTo(unit, targetX, targetY, moveSpeed);
+        }
+        unit.updateFlipX();
+    }
+
     engageCombat(target) {
-        if (this.isReturning) return; // 복귀 중엔 무시 (단, 강제성이 필요하면 제거 가능)
+        if (this.isReturning) return;
 
         this.isCombatMode = true;
         this.currentTarget = target;
@@ -229,8 +278,6 @@ export default class UnitAI {
         if (bestTarget && bestTarget !== this.currentTarget) {
             const isCooldownActive = (now - this.lastTargetChangeTime < this.targetSwitchCooldown);
             
-            // [Modified] 타겟 교체 로직 강화: 나를 때리는 적(Aggro)은 쿨타임 무시하고 즉시 교체
-            // bestTarget이 '어그로(나를 공격 중)' 상태이고, 현재 타겟은 아니라면 긴급 교체
             const isNewTargetAggro = (bestTarget.ai && bestTarget.ai.currentTarget === this.unit) || 
                                      (bestTarget === this.lastAttacker && (now - this.lastAttackedTime < 3000));
             
@@ -289,14 +336,15 @@ export default class UnitAI {
         this.processAggro(delta);
 
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
-            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const CHASE_RANGE = 500; // [Modified] 추격 포기 거리 상향 (쉽게 포기하지 않도록)
+            // [Fix] 타겟 유효성 검사 (살아있는지, active 상태인지)
+            const isValidTarget = this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
+
+            if (isValidTarget) {
+                const CHASE_RANGE = 500; 
                 const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
                 if (distToTarget > CHASE_RANGE || !hasLOS) {
-                    // 시야가 끊겨도 바로 포기하지 않고 잠시 대기하거나 경로 탐색을 시도하게 할 수 있으나,
-                    // 일단은 단순화를 위해 복귀 처리 (단, LOS 체크가 너무 엄격하면 문제됨)
                     this.isReturning = true;
                     this.isCombatMode = false;
                     this.currentTarget = null;
@@ -305,6 +353,19 @@ export default class UnitAI {
                     return;
                 }
             } else {
+                 // [Fix] 타겟이 사망/소멸함 -> 즉시 주변의 다른 적 탐색
+                 const newTarget = this.findBestTarget();
+                 
+                 // 새 타겟이 있고, 추적 가능한 거리(350)라면 어그로 전이
+                 if (newTarget) {
+                     const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, newTarget.x, newTarget.y);
+                     if (dist <= 350) { 
+                         this.engageCombat(newTarget);
+                         return; // 전투 지속
+                     }
+                 }
+
+                 // 주변에 새 타겟도 없다면 그때 비로소 복귀
                  this.isReturning = true;
                  this.isCombatMode = false;
                  return;
@@ -362,7 +423,7 @@ export default class UnitAI {
                      if (Math.abs(diffX) > 10) this.unit.setFlipX(diffX > 0);
                 }
             } else {
-                this.moveToTargetSmart(delta);
+                this.moveToLocationSmart(this.currentTarget.x, this.currentTarget.y, delta, 1.0);
             }
         } else {
             this.unit.setVelocity(0, 0);
@@ -498,78 +559,9 @@ export default class UnitAI {
         return true;
     }
 
-    moveToTargetSmart(delta) {
-        if (!this.currentTarget) return;
-        
-        const unit = this.unit;
-
-        if (this.currentPath.length > 0 || this.currentTarget) {
-            if (unit.body.speed < unit.moveSpeed * 0.1) {
-                this.stuckTimer += delta;
-                if (this.stuckTimer > 200) {
-                    this.stuckTimer = 0;
-                    this.currentPath = [];
-                    this.pathUpdateTimer = 0;
-                    
-                    unit.setVelocity(0, 0); 
-                    this.forcePathfindingTimer = 1500; 
-                }
-            } else {
-                this.stuckTimer = 0;
-            }
-        }
-
-        let isLineClear = false;
-        if (this.forcePathfindingTimer <= 0) {
-            isLineClear = this.scene.pathfindingManager.isLineClear(
-                { x: unit.x, y: unit.y }, 
-                { x: this.currentTarget.x, y: this.currentTarget.y }
-            );
-        }
-
-        if (isLineClear) {
-            this.scene.physics.moveToObject(unit, this.currentTarget, unit.moveSpeed);
-            unit.updateFlipX();
-            this.currentPath = []; 
-            return;
-        }
-
-        this.pathUpdateTimer -= delta;
-
-        const shouldCalculatePath = this.currentPath.length === 0 || this.pathUpdateTimer <= 0 || (this.forcePathfindingTimer > 0 && this.currentPath.length === 0);
-
-        if (shouldCalculatePath) {
-            this.pathUpdateTimer = 500 + Math.random() * 300; 
-            const path = this.scene.pathfindingManager.findPath(
-                { x: unit.x, y: unit.y },
-                { x: this.currentTarget.x, y: this.currentTarget.y }
-            );
-            if (path && path.length > 0) {
-                this.currentPath = path;
-                this.lastPathCalcTime = this.scene.time.now;
-            }
-        }
-
-        if (this.currentPath.length > 0) {
-            const nextPoint = this.currentPath[0];
-            const distToPoint = Phaser.Math.Distance.Between(unit.x, unit.y, nextPoint.x, nextPoint.y);
-
-            if (distToPoint < 15) { 
-                this.currentPath.shift();
-                if (this.currentPath.length > 0) {
-                    this.moveToPoint(this.currentPath[0]);
-                }
-            } else {
-                this.moveToPoint(nextPoint);
-            }
-        } else {
-            this.scene.physics.moveToObject(unit, this.currentTarget, unit.moveSpeed);
-        }
-        unit.updateFlipX();
-    }
-
-    moveToPoint(point) {
-        this.scene.physics.moveTo(this.unit, point.x, point.y, this.unit.moveSpeed);
+    moveToPoint(point, speed = null) {
+        const moveSpeed = speed || this.unit.moveSpeed;
+        this.scene.physics.moveTo(this.unit, point.x, point.y, moveSpeed);
         const diffX = point.x - this.unit.x;
         if (Math.abs(diffX) > 5) {
             this.unit.setFlipX(diffX > 0);
@@ -578,7 +570,7 @@ export default class UnitAI {
 
     runAway(delta) {
         if (this.isProvoked) {
-            this.moveToTargetSmart(delta);
+            this.moveToLocationSmart(this.currentTarget.x, this.currentTarget.y, delta);
             return;
         }
 

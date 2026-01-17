@@ -454,10 +454,13 @@ export default class BattleScene extends BaseScene {
     }
 
     // [Refactored] spawnUnits: 배열 형태 적군 구성 지원 및 보스 핀 배치
+    // src/game/scenes/BattleScene.js 내부 메서드 수정
+
+    // [Refactored] spawnUnits: 배열 형태 적군 구성 지원 및 보스 핀 배치
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
 
-        // 1. 아군 스폰
+        // 1. 아군 스폰 (기존 로직 유지)
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -519,7 +522,8 @@ export default class BattleScene extends BaseScene {
         // A. 전략 맵에서 넘어온 armyConfig가 있는 경우 (배열 or 객체)
         if (this.armyConfig) {
             const configs = Array.isArray(this.armyConfig) ? this.armyConfig : [this.armyConfig];
-            
+            console.log("🛠️ [SpawnUnits] ArmyConfig:", JSON.stringify(configs)); // [Debug] 입력 설정 확인
+
             configs.forEach(cfg => {
                 const count = cfg.count || 1;
                 const type = cfg.type || 'NormalDog';
@@ -540,8 +544,9 @@ export default class BattleScene extends BaseScene {
             }
         }
 
+        console.log(`📋 [SpawnUnits] Initial Roster (${enemyRoster.length}):`, enemyRoster); // [Debug] 초기 로스터 확인
+
         // 4. 보스(핀 위치 배치용) 선정
-        // armyConfig가 있었다면, 그 중 가장 강력한 유닛을 보스로 선정하여 핀에 배치
         let bossUnitRole = null;
         let bossIndex = -1;
 
@@ -549,12 +554,24 @@ export default class BattleScene extends BaseScene {
             // 우선순위: Boss > Tanker > Leader > Raccoon > Shooter...
             const priority = ['Boss', 'Tanker', 'Leader', 'Raccoon', 'Shooter', 'Healer', 'Runner'];
             
+            // [Fix] 정확히 일치하는 역할을 먼저 찾고, 없으면 포함하는 역할 찾기 (오매칭 방지)
             for (const pRole of priority) {
-                // 정확히 일치하거나 포함하는 역할 찾기
-                bossIndex = enemyRoster.findIndex(r => r === pRole || r.includes(pRole));
+                // 1차 시도: 정확 일치
+                bossIndex = enemyRoster.findIndex(r => r === pRole);
                 if (bossIndex !== -1) {
                     bossUnitRole = enemyRoster[bossIndex];
                     break;
+                }
+            }
+            
+            // 2차 시도: 부분 일치 (정확 일치가 없을 경우만)
+            if (bossIndex === -1) {
+                for (const pRole of priority) {
+                    bossIndex = enemyRoster.findIndex(r => r.includes(pRole));
+                    if (bossIndex !== -1) {
+                        bossUnitRole = enemyRoster[bossIndex];
+                        break;
+                    }
                 }
             }
             
@@ -582,20 +599,20 @@ export default class BattleScene extends BaseScene {
             const bossStats = { 
                 role: bossUnitRole, 
                 name: `Boss ${bossUnitRole}`,
-                level: 5 // 보스급은 레벨 보정 (선택 사항)
+                level: 5 // 보스급은 레벨 보정
             };
             
             const bossUnit = this.createUnitInstance(bossX, bossY, 'red', this.blueTeam, bossStats, false);
             
-            // 진짜 보스나 탱커라면 크기 키우기
             if (bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') {
                 bossUnit.setScale(1.1); 
             }
             this.redTeam.add(bossUnit);
             console.log(`👹 Boss/Leader Spawned: ${bossUnitRole} at (${bossX}, ${bossY})`);
 
-            // 리스트에서 제거 (중복 소환 방지)
-            enemyRoster.splice(bossIndex, 1);
+            // [Fix] 리스트에서 제거 및 로그 확인 (중복 소환 방지 핵심)
+            const removed = enemyRoster.splice(bossIndex, 1);
+            console.log(`✂️ [SpawnUnits] Removed Boss from roster: ${removed[0]}. Remaining: ${enemyRoster.length}`);
         }
 
         // 6. 나머지 졸개 소환 (구역 내 랜덤)
@@ -607,7 +624,7 @@ export default class BattleScene extends BaseScene {
                 spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
                 spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
             } else {
-                // 구역 없으면 일렬 배치
+                // 구역 없으면 일렬 배치 (보스가 없을 때 대비 약간 오프셋)
                 spawnX = 1300 + Phaser.Math.Between(-50, 50);
                 spawnY = startY + (i * spawnGap);
             }

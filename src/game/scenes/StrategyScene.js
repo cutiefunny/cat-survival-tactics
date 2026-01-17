@@ -624,11 +624,23 @@ export default class StrategyScene extends BaseScene {
         if (turnCount % reinforceInterval === 0) {
             this.mapNodes.forEach(node => {
                 if (node.owner !== 'player' && node.owner !== 'neutral' && node.army) {
-                    // [Modified] 배열 형태 증원 처리
+                    // [Fixed] 보스급 유닛(Tanker, Boss)은 증원되지 않도록 필터링
+                    const excludeTypes = ['boss', 'tanker', 'leader', 'raccoon'];
+
                     if (Array.isArray(node.army)) {
-                        node.army.forEach(u => u.count = (u.count || 1) + 1);
+                        node.army.forEach(u => {
+                            const type = u.type ? u.type.toLowerCase() : '';
+                            // 제외 목록에 없으면 +1
+                            if (!excludeTypes.includes(type)) {
+                                u.count = (u.count || 1) + 1;
+                            }
+                        });
                     } else {
-                        node.army.count = (node.army.count || 1) + 1;
+                        // 단일 객체일 경우
+                        const type = node.army.type ? node.army.type.toLowerCase() : '';
+                        if (!excludeTypes.includes(type)) {
+                            node.army.count = (node.army.count || 1) + 1;
+                        }
                     }
                     enemiesIncreased = true;
                 }
@@ -641,6 +653,8 @@ export default class StrategyScene extends BaseScene {
                 this.cameras.main.flash(500, 255, 0, 0); 
             }
         }
+
+        
 
         if (!isBankrupt && !enemiesIncreased) {
             this.cameras.main.flash(500, 0, 0, 0); 
