@@ -30,35 +30,66 @@ export default class StrategyScene extends BaseScene {
         super('StrategyScene'); 
     }
 
-    // ... (init, preload, create, getCurrentGameData, saveProgress, fetchStrategyConfig, initializeGameWorld 등 기존 유지)
     init(data) {
+        // 1. 전투 결과 데이터 수신
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
         }
-        
-        const savedData = SaveManager.loadGame();
-        this.isNewGame = !savedData; 
 
+        // 2. 수동 로드 데이터 수신 (SystemModal 등에서 전달받은 경우)
+        if (data && data.manualLoadData) {
+            console.log("📂 [StrategyScene] Manual Load Data Applied");
+            const loadData = data.manualLoadData;
+            this.registry.set('playerCoins', loadData.playerCoins);
+            this.registry.set('playerSquad', loadData.playerSquad);
+            this.registry.set('unlockedRoles', loadData.unlockedRoles);
+            this.registry.set('worldMapData', loadData.worldMapData);
+            this.registry.set('leaderPosition', loadData.leaderPosition);
+            this.registry.set('turnCount', loadData.turnCount || 1);
+            this.registry.set('lastSafeNodeId', loadData.lastSafeNodeId);
+            
+            // 수동 로드 시 전투 결과는 무시 (충돌 방지)
+            this.battleResultData = null;
+        }
+
+        // 3. 자동 저장 데이터 불러오기 (디스크)
+        const savedData = SaveManager.loadGame();
+
+        // 4. 데이터 우선순위 병합 (Memory > Disk > Default)
+        // 이미 레지스트리(메모리)에 데이터가 있다면(전투 직후 등), 저장된 데이터를 덮어쓰지 않습니다.
+        
         if (savedData) {
+            // 코인이 메모리에 없으면 저장된 값 사용
             if (this.registry.get('playerCoins') === undefined) {
                 this.registry.set('playerCoins', savedData.playerCoins ?? 10);
             }
+            // 스쿼드가 메모리에 없으면 저장된 값 사용
             if (!this.registry.get('playerSquad')) {
                 this.registry.set('playerSquad', savedData.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
             }
+            // 해금된 역할이 메모리에 없으면 저장된 값 사용
             if (!this.registry.get('unlockedRoles')) {
                 this.registry.set('unlockedRoles', savedData.unlockedRoles || ['Normal']);
             }
-            if (savedData.worldMapData) {
+            // 월드맵 데이터가 메모리에 없으면 저장된 값 사용
+            if (!this.registry.get('worldMapData') && savedData.worldMapData) {
                 this.registry.set('worldMapData', savedData.worldMapData);
             }
-            if (savedData.leaderPosition) {
+            // 리더 위치가 메모리에 없으면 저장된 값 사용
+            if (this.registry.get('leaderPosition') === undefined && savedData.leaderPosition) {
                 this.registry.set('leaderPosition', savedData.leaderPosition);
             }
+            // 턴 카운트가 메모리에 없으면 저장된 값 사용
             if (this.registry.get('turnCount') === undefined) {
                 this.registry.set('turnCount', savedData.turnCount ?? 1);
             }
         }
+
+        // 5. 새 게임 여부 판별 (레지스트리에도 없고, 저장된 데이터도 없을 때만 True)
+        const hasRegistryData = this.registry.get('playerCoins') !== undefined;
+        this.isNewGame = !savedData && !hasRegistryData;
+        
+        console.log(`💾 [StrategyScene] Init - isNewGame: ${this.isNewGame}, Coins: ${this.registry.get('playerCoins')}, Squad: ${this.registry.get('playerSquad')?.length}`);
     }
 
     preload() {
@@ -116,6 +147,7 @@ export default class StrategyScene extends BaseScene {
     saveProgress() {
         const data = this.getCurrentGameData();
         SaveManager.saveGame(data);
+        console.log("💾 [StrategyScene] Progress Saved (Auto)");
     }
 
     async fetchStrategyConfig(map) {
@@ -140,27 +172,30 @@ export default class StrategyScene extends BaseScene {
 
                 if (data.roleDefinitions) {
                     this.registry.set('roleDefinitions', data.roleDefinitions);
-                    console.log("✅ [StrategyScene] Role Definitions saved to Registry");
                 }
             }
         } catch (e) {
             console.error("❌ Failed to load strategy config:", e);
         }
         
-        if (this.isNewGame) {
-             const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
+        // [Fixed] 초기값 설정 로직 수정: 무조건 덮어쓰지 않고 값이 없을 때만 설정
+        const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
+        
+        if (this.registry.get('playerCoins') === undefined) {
              this.registry.set('playerCoins', initialCoins);
-             
-             if (!this.registry.get('playerSquad')) {
-                 this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
-             }
-             if (!this.registry.get('unlockedRoles')) {
-                 this.registry.set('unlockedRoles', ['Normal']);
-             }
-             if (this.registry.get('turnCount') === undefined) {
-                 this.registry.set('turnCount', 1);
-             }
-             console.log(`💰 [StrategyScene] New Game Initialized with Coins: ${initialCoins}`);
+             console.log(`💰 [StrategyScene] Initial Coins Set: ${initialCoins}`);
+        }
+        
+        if (!this.registry.get('playerSquad')) {
+             this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
+        }
+        
+        if (!this.registry.get('unlockedRoles')) {
+             this.registry.set('unlockedRoles', ['Normal']);
+        }
+        
+        if (this.registry.get('turnCount') === undefined) {
+             this.registry.set('turnCount', 1);
         }
 
         this.initializeGameWorld(map, armyData);
@@ -181,6 +216,8 @@ export default class StrategyScene extends BaseScene {
         let battleResultMessage = null;
         if (this.battleResultData) {
             const { targetNodeId, isWin, remainingCoins } = this.battleResultData;
+            
+            // 전투 후 코인 갱신 (전투 씬에서 전달받은 값)
             this.registry.set('playerCoins', remainingCoins);
 
             if (isWin) {
@@ -207,6 +244,7 @@ export default class StrategyScene extends BaseScene {
                 }
             }
             
+            // 전투 종료 후 즉시 저장 (스쿼드 상태, 코인 등)
             this.saveProgress();
             this.battleResultData = null;
         }
@@ -240,7 +278,6 @@ export default class StrategyScene extends BaseScene {
         this.prevPinchDistance = 0;
     }
 
-    // ... (handleStoryUnlocks, unlockUnit, handleResize, createStyledButton, updateCoinText, createUI, drawUIElements, updateUIState, resizeUI, moveLeaderToken, undoMove, selectTerritory, handleNeutralEvent, handleEventResult, shakeNode, shakeStatusText, handleTurnEnd, showFloatingText, startBattle, createAnimations, update, updateCameraLayout, setupCameraControls 등 기존 유지)
     handleStoryUnlocks(conqueredNodeId) {}
 
     unlockUnit(roleName) {
@@ -447,7 +484,6 @@ export default class StrategyScene extends BaseScene {
 
             if (this.selectedTargetId) {
                 let infoText = ""; 
-                // [Modified] 배열 형태의 army count 합산 표시
                 if (node.army) {
                     if (Array.isArray(node.army)) {
                         const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
@@ -470,7 +506,6 @@ export default class StrategyScene extends BaseScene {
         let imageKey = 'dog_token';
         let targetType = 'dog';
 
-        // [Modified] 배열 형태 지원
         if (node.army) {
             let firstUnit = node.army;
             if (Array.isArray(node.army) && node.army.length > 0) firstUnit = node.army[0];
@@ -517,7 +552,6 @@ export default class StrategyScene extends BaseScene {
     handleEventResult(result, node) {
         if (result === 'recruit') {
             if (node.army) {
-                // [Modified] 배열일 경우 첫 번째 유닛 영입 (또는 전체 영입? 일단 첫번째만)
                 let firstUnit = Array.isArray(node.army) ? node.army[0] : node.army;
                 if (firstUnit && firstUnit.type) {
                     const roleName = firstUnit.type.charAt(0).toUpperCase() + firstUnit.type.slice(1);
@@ -624,19 +658,16 @@ export default class StrategyScene extends BaseScene {
         if (turnCount % reinforceInterval === 0) {
             this.mapNodes.forEach(node => {
                 if (node.owner !== 'player' && node.owner !== 'neutral' && node.army) {
-                    // [Fixed] 보스급 유닛(Tanker, Boss)은 증원되지 않도록 필터링
                     const excludeTypes = ['boss', 'tanker', 'leader', 'raccoon'];
 
                     if (Array.isArray(node.army)) {
                         node.army.forEach(u => {
                             const type = u.type ? u.type.toLowerCase() : '';
-                            // 제외 목록에 없으면 +1
                             if (!excludeTypes.includes(type)) {
                                 u.count = (u.count || 1) + 1;
                             }
                         });
                     } else {
-                        // 단일 객체일 경우
                         const type = node.army.type ? node.army.type.toLowerCase() : '';
                         if (!excludeTypes.includes(type)) {
                             node.army.count = (node.army.count || 1) + 1;
@@ -653,8 +684,6 @@ export default class StrategyScene extends BaseScene {
                 this.cameras.main.flash(500, 255, 0, 0); 
             }
         }
-
-        
 
         if (!isBankrupt && !enemiesIncreased) {
             this.cameras.main.flash(500, 0, 0, 0); 
@@ -721,7 +750,6 @@ export default class StrategyScene extends BaseScene {
         if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('boss_idle')) { this.anims.create({ key: 'boss_idle', frames: this.anims.generateFrameNumbers('boss_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        // [New] 추가 유닛 애니메이션
         if (!this.anims.exists('tanker_idle')) { this.anims.create({ key: 'tanker_idle', frames: this.anims.generateFrameNumbers('tanker_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('shooter_idle')) { this.anims.create({ key: 'shooter_idle', frames: this.anims.generateFrameNumbers('shooter_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
         if (!this.anims.exists('healer_idle')) { this.anims.create({ key: 'healer_idle', frames: this.anims.generateFrameNumbers('healer_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
@@ -855,7 +883,6 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
     
-    // [Refactored] createEnemyTokens: 배열 형태 데이터 지원 및 크기 조절
     createEnemyTokens() {
         if (!this.mapNodes) return;
         if (this.enemyTokens && this.enemyTokens.length > 0) {
@@ -868,9 +895,7 @@ export default class StrategyScene extends BaseScene {
                 let topUnitType = 'dog';
                 let totalCount = 0;
 
-                // A. 배열 형태인지 확인하여 대표 유닛과 총 수 계산
                 if (Array.isArray(node.army)) {
-                    // 우선순위: Boss > Tanker > 나머지 (배열 순서대로 탐색)
                     const bossUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'boss');
                     const tankerUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'tanker');
                     
@@ -878,15 +903,12 @@ export default class StrategyScene extends BaseScene {
                     else if (tankerUnit) topUnitType = 'tanker';
                     else if (node.army.length > 0 && node.army[0].type) topUnitType = node.army[0].type.toLowerCase();
 
-                    // 총 유닛 수 합산
                     totalCount = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
                 } else {
-                    // B. 기존 단일 객체 형태 호환
                     topUnitType = node.army.type ? node.army.type.toLowerCase() : 'dog';
                     totalCount = node.army.count || 1;
                 }
 
-                // C. 텍스처 결정
                 let textureKey = 'dog_token';
                 if (topUnitType === 'runner') textureKey = 'runner_token';
                 else if (topUnitType === 'dog') textureKey = 'dog_token';
@@ -897,19 +919,15 @@ export default class StrategyScene extends BaseScene {
                 else if (topUnitType === 'normal') textureKey = 'normal_token';
                 else if (topUnitType === 'boss') textureKey = 'boss_token';
                 
-                // D. 토큰 생성
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
                 if (this.uiCamera) this.uiCamera.ignore(enemyObj);
 
-                // E. 크기 결정 (총 유닛 수 기반)
                 let finalSize = 60; 
                 if (node.owner === 'neutral') finalSize = 60;
                 else { 
                     if (topUnitType === 'tanker') finalSize = 70; 
                     else if (topUnitType === 'boss') finalSize = 100; 
                     else { 
-                        // 기본 40에서 유닛 1마리 추가될 때마다 3씩 증가 (최대 75)
-                        // (기존: 50 시작, 5씩 증가, 최대 90)
                         finalSize = 40 + (totalCount - 1) * 3; 
                         finalSize = Phaser.Math.Clamp(finalSize, 35, 75); 
                     }
@@ -919,12 +937,10 @@ export default class StrategyScene extends BaseScene {
                 enemyObj.setFlipX(false); 
                 enemyObj.setDepth(10); 
                 
-                // F. 애니메이션 재생
                 const animKey = `${topUnitType}_idle`;
                 if (this.anims.exists(animKey)) {
                     enemyObj.play(animKey);
                 } else {
-                    // Fallback to dog_idle if specific idle doesn't exist
                     enemyObj.play('dog_idle');
                 }
                 
