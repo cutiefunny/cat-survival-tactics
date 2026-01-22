@@ -61,7 +61,7 @@
       "mapId": "level6",
       "name": "레드로드",
       "difficulty": 2,
-      "bgm": "level2",
+      "bgm": "level6",
       "unit": "Tanker",
       "text": "이 곳은 중간보스 '탱크'가 지키고 있다."
     },

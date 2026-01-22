@@ -141,8 +141,15 @@ export default class SystemModal {
             if (confirm(`슬롯 ${slotIndex + 1} 데이터를 불러오시겠습니까?`)) {
                 const data = SaveManager.loadFromSlot(slotIndex);
                 if (data) {
-                    SaveManager.saveGame(data);
-                    this.scene.scene.restart();
+                    // [Bugfix] 로드된 데이터를 씬 재시작 시 인자로 전달
+                    console.log("📂 [SystemModal] Loading Data:", data);
+                    SaveManager.saveGame(data); // 자동 저장도 갱신
+                    this.closeSlotModal();
+                    
+                    // StrategyScene.js의 init(data)에서 manualLoadData를 처리하도록 전달
+                    this.scene.scene.restart({ manualLoadData: data });
+                } else {
+                    alert("데이터를 불러오는데 실패했습니다.");
                 }
             }
         }
@@ -153,6 +160,9 @@ export default class SystemModal {
             this.slotModal.destroy();
             this.slotModal = null;
         }
+        // 불러오기 후에는 모달을 다시 보일 필요가 없으므로 visible 처리 주의
+        // 여기서는 저장/취소 시를 위해 기본적으로 보이게 하되, 
+        // load 성공 시에는 scene restart가 일어나므로 이 줄은 실행되더라도 씬이 넘어가서 문제 없음
         this.container.setVisible(true);
     }
 }

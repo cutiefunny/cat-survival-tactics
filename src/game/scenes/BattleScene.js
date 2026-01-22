@@ -40,6 +40,7 @@ import bossSheet from '../../assets/units/boss.png';
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
+import level6 from '../../assets/sounds/level6.mp3';
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
 import hit3 from '../../assets/sounds/Hit3.wav';
@@ -57,6 +58,7 @@ const BGM_SOURCES = {
     'stage1_bgm': stage1BgmFile,
     'level1': level1,
     'level2': level2,
+    'level6': level6,
     'default': stage1BgmFile
 };
 

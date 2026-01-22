@@ -55,6 +55,7 @@ export default class SaveManager {
                 ...data
             };
             localStorage.setItem(`tactics_save_slot_${slotIndex}`, JSON.stringify(saveData));
+            console.log(`💾 Saved to Slot ${slotIndex}: ${saveName}`, data);
             return saveName;
         } catch (e) { console.error("Slot Save Failed:", e); return null; }
     }
@@ -63,7 +64,11 @@ export default class SaveManager {
     static loadFromSlot(slotIndex) {
         try {
             const json = localStorage.getItem(`tactics_save_slot_${slotIndex}`);
-            if (json) return JSON.parse(json);
+            if (json) {
+                const data = JSON.parse(json);
+                console.log(`📂 Loaded from Slot ${slotIndex}`, data);
+                return data;
+            }
         } catch (e) { console.error("Slot Load Failed:", e); }
         return null;
     }

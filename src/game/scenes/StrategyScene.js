@@ -31,6 +31,9 @@ export default class StrategyScene extends BaseScene {
     }
 
     init(data) {
+        // [Flag] 수동 로드 여부 확인
+        this.isManualLoad = false;
+
         // 1. 전투 결과 데이터 수신
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
@@ -38,8 +41,16 @@ export default class StrategyScene extends BaseScene {
 
         // 2. 수동 로드 데이터 수신 (SystemModal 등에서 전달받은 경우)
         if (data && data.manualLoadData) {
-            console.log("📂 [StrategyScene] Manual Load Data Applied");
+            console.log("📂 [StrategyScene] Manual Load Data Applied", data.manualLoadData);
             const loadData = data.manualLoadData;
+            
+            this.isManualLoad = true;
+
+            // [Fix] 기존 레지스트리 데이터를 확실하게 제거하여 꼬임 방지
+            const keysToReset = ['playerCoins', 'playerSquad', 'unlockedRoles', 'worldMapData', 'leaderPosition', 'turnCount', 'lastSafeNodeId'];
+            keysToReset.forEach(key => this.registry.remove(key));
+
+            // 데이터 적용
             this.registry.set('playerCoins', loadData.playerCoins);
             this.registry.set('playerSquad', loadData.playerSquad);
             this.registry.set('unlockedRoles', loadData.unlockedRoles);
@@ -52,44 +63,38 @@ export default class StrategyScene extends BaseScene {
             this.battleResultData = null;
         }
 
-        // 3. 자동 저장 데이터 불러오기 (디스크)
-        const savedData = SaveManager.loadGame();
+        // 3. 자동 저장 데이터 불러오기 (디스크) - 수동 로드가 아닐 때만
+        if (!this.isManualLoad) {
+            const savedData = SaveManager.loadGame();
 
-        // 4. 데이터 우선순위 병합 (Memory > Disk > Default)
-        // 이미 레지스트리(메모리)에 데이터가 있다면(전투 직후 등), 저장된 데이터를 덮어쓰지 않습니다.
-        
-        if (savedData) {
-            // 코인이 메모리에 없으면 저장된 값 사용
-            if (this.registry.get('playerCoins') === undefined) {
-                this.registry.set('playerCoins', savedData.playerCoins ?? 10);
-            }
-            // 스쿼드가 메모리에 없으면 저장된 값 사용
-            if (!this.registry.get('playerSquad')) {
-                this.registry.set('playerSquad', savedData.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
-            }
-            // 해금된 역할이 메모리에 없으면 저장된 값 사용
-            if (!this.registry.get('unlockedRoles')) {
-                this.registry.set('unlockedRoles', savedData.unlockedRoles || ['Normal']);
-            }
-            // 월드맵 데이터가 메모리에 없으면 저장된 값 사용
-            if (!this.registry.get('worldMapData') && savedData.worldMapData) {
-                this.registry.set('worldMapData', savedData.worldMapData);
-            }
-            // 리더 위치가 메모리에 없으면 저장된 값 사용
-            if (this.registry.get('leaderPosition') === undefined && savedData.leaderPosition) {
-                this.registry.set('leaderPosition', savedData.leaderPosition);
-            }
-            // 턴 카운트가 메모리에 없으면 저장된 값 사용
-            if (this.registry.get('turnCount') === undefined) {
-                this.registry.set('turnCount', savedData.turnCount ?? 1);
+            // 4. 데이터 우선순위 병합 (Memory > Disk > Default)
+            if (savedData) {
+                if (this.registry.get('playerCoins') === undefined) {
+                    this.registry.set('playerCoins', savedData.playerCoins ?? 10);
+                }
+                if (!this.registry.get('playerSquad')) {
+                    this.registry.set('playerSquad', savedData.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
+                }
+                if (!this.registry.get('unlockedRoles')) {
+                    this.registry.set('unlockedRoles', savedData.unlockedRoles || ['Normal']);
+                }
+                if (!this.registry.get('worldMapData') && savedData.worldMapData) {
+                    this.registry.set('worldMapData', savedData.worldMapData);
+                }
+                if (this.registry.get('leaderPosition') === undefined && savedData.leaderPosition) {
+                    this.registry.set('leaderPosition', savedData.leaderPosition);
+                }
+                if (this.registry.get('turnCount') === undefined) {
+                    this.registry.set('turnCount', savedData.turnCount ?? 1);
+                }
             }
         }
 
-        // 5. 새 게임 여부 판별 (레지스트리에도 없고, 저장된 데이터도 없을 때만 True)
+        // 5. 새 게임 여부 판별
         const hasRegistryData = this.registry.get('playerCoins') !== undefined;
-        this.isNewGame = !savedData && !hasRegistryData;
+        this.isNewGame = !this.isManualLoad && !hasRegistryData; // 수동 로드면 새 게임 아님
         
-        console.log(`💾 [StrategyScene] Init - isNewGame: ${this.isNewGame}, Coins: ${this.registry.get('playerCoins')}, Squad: ${this.registry.get('playerSquad')?.length}`);
+        console.log(`💾 [StrategyScene] Init - ManualLoad: ${this.isManualLoad}, Coins: ${this.registry.get('playerCoins')}`);
     }
 
     preload() {
@@ -178,24 +183,26 @@ export default class StrategyScene extends BaseScene {
             console.error("❌ Failed to load strategy config:", e);
         }
         
-        // [Fixed] 초기값 설정 로직 수정: 무조건 덮어쓰지 않고 값이 없을 때만 설정
-        const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
-        
-        if (this.registry.get('playerCoins') === undefined) {
-             this.registry.set('playerCoins', initialCoins);
-             console.log(`💰 [StrategyScene] Initial Coins Set: ${initialCoins}`);
-        }
-        
-        if (!this.registry.get('playerSquad')) {
-             this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
-        }
-        
-        if (!this.registry.get('unlockedRoles')) {
-             this.registry.set('unlockedRoles', ['Normal']);
-        }
-        
-        if (this.registry.get('turnCount') === undefined) {
-             this.registry.set('turnCount', 1);
+        // [Fixed] 수동 로드 시에는 초기값으로 덮어쓰지 않도록 주의
+        if (!this.isManualLoad) {
+            const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
+            
+            if (this.registry.get('playerCoins') === undefined) {
+                 this.registry.set('playerCoins', initialCoins);
+                 console.log(`💰 [StrategyScene] Initial Coins Set: ${initialCoins}`);
+            }
+            
+            if (!this.registry.get('playerSquad')) {
+                 this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
+            }
+            
+            if (!this.registry.get('unlockedRoles')) {
+                 this.registry.set('unlockedRoles', ['Normal']);
+            }
+            
+            if (this.registry.get('turnCount') === undefined) {
+                 this.registry.set('turnCount', 1);
+            }
         }
 
         this.initializeGameWorld(map, armyData);
@@ -217,7 +224,6 @@ export default class StrategyScene extends BaseScene {
         if (this.battleResultData) {
             const { targetNodeId, isWin, remainingCoins } = this.battleResultData;
             
-            // 전투 후 코인 갱신 (전투 씬에서 전달받은 값)
             this.registry.set('playerCoins', remainingCoins);
 
             if (isWin) {
@@ -244,7 +250,6 @@ export default class StrategyScene extends BaseScene {
                 }
             }
             
-            // 전투 종료 후 즉시 저장 (스쿼드 상태, 코인 등)
             this.saveProgress();
             this.battleResultData = null;
         }
@@ -834,7 +839,10 @@ export default class StrategyScene extends BaseScene {
                 let armyData = null;
                 if (savedNode) {
                     if (savedNode.owner === 'player') armyData = null;
-                    else if (savedNode.army) armyData = savedNode.army;
+                    else if (savedNode.army !== undefined) { 
+                        // [Fix] 저장된 army 상태가 있다면(빈 배열이나 null이라도) 그대로 신뢰하고 복구
+                        armyData = savedNode.army; 
+                    }
                     else {
                          if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
                          else armyData = configArmy;
