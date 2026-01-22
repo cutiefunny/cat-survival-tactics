@@ -231,6 +231,7 @@ export default class StrategyScene extends BaseScene {
                 if (node) {
                     node.owner = 'player';
                     node.army = null; 
+                    node.script = null; // [New] 점령 시 스크립트 제거 (다시 방문해도 대화 안 뜨게)
                     this.registry.set('worldMapData', this.mapNodes);
                     this.registry.set('leaderPosition', targetNodeId);
                 }
@@ -331,15 +332,127 @@ export default class StrategyScene extends BaseScene {
 
         this.shopModal = new ShopModal(this, this.uiContainer);
         this.systemModal = new SystemModal(this, this.uiContainer);
+        
+        // [New] 대화창 UI 생성
+        this.createDialogueUI();
 
         this.drawUIElements();
     }
 
+    // [New] 대화창 UI 컨테이너 및 요소 생성
+    createDialogueUI() {
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const dialogHeight = 150;
+        
+        this.dialogContainer = this.add.container(0, 0).setVisible(false).setDepth(4000); // SystemModal보다 위
+        
+        // 배경 (하단)
+        const bg = this.add.rectangle(w/2, h - dialogHeight/2 - 20, w * 0.9, dialogHeight, 0x000000, 0.85)
+            .setStrokeStyle(2, 0xffffff, 1)
+            .setInteractive(); // 클릭 시 진행용
+        
+        // 화자 이름 박스
+        const nameBg = this.add.rectangle(w * 0.05 + 80, h - dialogHeight - 35, 160, 40, 0x3333ff, 1)
+            .setStrokeStyle(2, 0xffffff);
+        const nameText = this.add.text(w * 0.05 + 80, h - dialogHeight - 35, "Speaker", {
+            fontSize: '20px', fontStyle: 'bold', color: '#ffffff'
+        }).setOrigin(0.5);
+        
+        // 대화 내용
+        const messageText = this.add.text(w * 0.07, h - dialogHeight - 10, "", {
+            fontSize: '18px', color: '#ffffff', wordWrap: { width: w * 0.86, useAdvancedWrap: true }, lineHeight: 28
+        });
+
+        // 진행 아이콘 (깜빡임)
+        const nextIcon = this.add.text(w * 0.9, h - 50, "▼", { fontSize: '24px', color: '#ffff00' }).setOrigin(0.5);
+        this.tweens.add({ targets: nextIcon, y: h - 40, duration: 500, yoyo: true, repeat: -1 });
+
+        this.dialogContainer.add([bg, nameBg, nameText, messageText, nextIcon]);
+        
+        // 참조 저장
+        this.dialogUI = {
+            container: this.dialogContainer,
+            nameBg: nameBg,
+            nameText: nameText,
+            messageText: messageText,
+            bg: bg
+        };
+        
+        this.uiContainer.add(this.dialogContainer);
+    }
+    
+    // [New] 스크립트 실행기
+    playScript(script, onComplete) {
+        if (!script || !Array.isArray(script) || script.length === 0) {
+            if (onComplete) onComplete();
+            return;
+        }
+
+        let currentIndex = 0;
+        this.input.enabled = false; // 이동 막기
+        
+        const showNext = () => {
+            if (currentIndex >= script.length) {
+                // 종료 처리
+                this.dialogUI.container.setVisible(false);
+                this.input.enabled = true;
+                if (onComplete) onComplete();
+                return;
+            }
+
+            const line = script[currentIndex];
+            currentIndex++;
+
+            if (line.type === 'dialog') {
+                this.dialogUI.container.setVisible(true);
+                this.dialogUI.nameText.setText(line.speaker || '???');
+                this.dialogUI.messageText.setText(line.text || '...');
+                
+                // 클릭 이벤트 바인딩 (한 번만 실행되도록)
+                this.dialogUI.bg.removeAllListeners('pointerdown');
+                this.dialogUI.bg.on('pointerdown', () => {
+                    showNext();
+                });
+            } else {
+                // dialog 타입이 아니면 그냥 넘김 (추후 확장 가능)
+                showNext();
+            }
+        };
+
+        showNext();
+    }
+
     drawUIElements() {
         if (this.uiContainer.list.length > 0) {
+            // UI를 다시 그릴 때 DialogContainer는 보존하거나 다시 생성해야 함.
+            // 여기서는 removeAll(true)를 쓰면 다 날아가므로 주의.
+            // 기존 modal들은 유지하고 재배치만 하는 것이 좋음.
+            // 하지만 resize 대응을 위해 간단히 다시 생성하도록 함.
+            
+            // 기존 모달들은 보존
+            const tempDialog = this.dialogContainer;
+            if (tempDialog) {
+                this.uiContainer.remove(tempDialog); // 리스트에서만 제거
+            }
+            
             this.uiContainer.removeAll(true);
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
+            
+            if (tempDialog && !tempDialog.active) { 
+                // 이미 destroy 되었다면 재생성
+                this.createDialogueUI(); 
+            } else if (tempDialog) {
+                // 살아있다면 다시 추가
+                this.uiContainer.add(tempDialog);
+            } else {
+                this.createDialogueUI();
+            }
+        } else {
+            this.shopModal = new ShopModal(this, this.uiContainer);
+            this.systemModal = new SystemModal(this, this.uiContainer);
+            this.createDialogueUI();
         }
 
         const w = this.scale.width;
@@ -482,28 +595,33 @@ export default class StrategyScene extends BaseScene {
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
             
-            if (node.owner === 'neutral') {
-                this.handleNeutralEvent(node);
-                return; 
-            }
-
-            if (this.selectedTargetId) {
-                let infoText = ""; 
-                if (node.army) {
-                    if (Array.isArray(node.army)) {
-                        const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
-                        infoText = ` (적군: ${total}마리)`;
-                    } else {
-                        infoText = ` (적군: ${node.army.count || 1}마리)`;
-                    }
+            // [New] 스크립트 실행 후 기존 로직 진행
+            this.playScript(node.script, () => {
+                
+                // 스크립트 완료 후 실행될 원래 로직
+                if (node.owner === 'neutral') {
+                    this.handleNeutralEvent(node);
+                    return; 
                 }
-                const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
-                const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
-                this.statusText.setText(finalMsg);
-            } else { 
-                this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
-            }
-            this.updateUIState();
+
+                if (this.selectedTargetId) {
+                    let infoText = ""; 
+                    if (node.army) {
+                        if (Array.isArray(node.army)) {
+                            const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
+                            infoText = ` (적군: ${total}마리)`;
+                        } else {
+                            infoText = ` (적군: ${node.army.count || 1}마리)`;
+                        }
+                    }
+                    const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
+                    const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
+                    this.statusText.setText(finalMsg);
+                } else { 
+                    this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
+                }
+                this.updateUIState();
+            });
         });
     }
 
@@ -563,6 +681,7 @@ export default class StrategyScene extends BaseScene {
                     this.unlockUnit(roleName);
                     this.statusText.setText(`🤝 ${roleName} 영입 성공!`);
                     node.owner = 'player';
+                    node.script = null; // [New] 영입 후에도 스크립트 제거
                     const token = this.enemyTokens.find(t => 
                         Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
                     );
@@ -840,7 +959,6 @@ export default class StrategyScene extends BaseScene {
                 if (savedNode) {
                     if (savedNode.owner === 'player') armyData = null;
                     else if (savedNode.army !== undefined) { 
-                        // [Fix] 저장된 army 상태가 있다면(빈 배열이나 null이라도) 그대로 신뢰하고 복구
                         armyData = savedNode.army; 
                     }
                     else {
@@ -867,7 +985,9 @@ export default class StrategyScene extends BaseScene {
                     desc: config.description || "",
                     text: text,
                     army: armyData, 
-                    bgm: config.bgm || "stage1_bgm" 
+                    bgm: config.bgm || "stage1_bgm",
+                    // [New] 스크립트 데이터 파싱
+                    script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null)
                 };
             });
         }

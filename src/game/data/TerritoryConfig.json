@@ -55,7 +55,14 @@
       "bgm": "level2",
       "neutral": true,
       "unit": "Runner",
-      "text": "여기는 합정파의 영역이다냥!"
+      "text": "여기는 합정파의 영역이다냥!",
+      "script": [
+        {
+          "type": "dialog",
+          "speaker": "합정파 두목",
+          "text": "이 구역은 합정파가 지킨다냥! 얼른 꺼져라냥!"
+        }
+      ]
     },
     "9": {
       "mapId": "level6",
