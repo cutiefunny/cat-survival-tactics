@@ -102,6 +102,10 @@ export default class UnitAI {
         this.lastTargetChangeTime = 0; 
         this.targetSwitchCooldown = 200; 
 
+        // [Vision Settings]
+        this.viewDistance = 350; // 감지 거리
+        this.viewAngle = Phaser.Math.DegToRad(120); // 시야각 (120도)
+
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
 
@@ -120,6 +124,30 @@ export default class UnitAI {
         }
     }
 
+    // [New] 시야 체크 통합 메서드 (거리 + 각도 + 장애물)
+    canSee(target) {
+        if (!target || !target.active || target.isDying) return false;
+
+        // 1. 거리 체크
+        const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, target.x, target.y);
+        if (distSq > this.viewDistance * this.viewDistance) return false;
+
+        // 2. 각도 체크 (비전투 모드일 때만 적용, 전투 중에는 360도 감지)
+        if (!this.isCombatMode && !this.isProvoked) {
+            const angleToTarget = Phaser.Math.Angle.Between(this.unit.x, this.unit.y, target.x, target.y);
+            // flipX === true(오른쪽/0도), false(왼쪽/180도) 가정
+            const facingAngle = this.unit.flipX ? 0 : Math.PI; 
+            
+            let angleDiff = Phaser.Math.Angle.Wrap(angleToTarget - facingAngle);
+            if (Math.abs(angleDiff) > this.viewAngle / 2) {
+                return false; // 시야각 밖
+            }
+        }
+
+        // 3. 장애물(Line of Sight) 체크
+        return this.checkLineOfSightRaw(target);
+    }
+
     updateRoaming(delta) {
         if (this.isReturning) {
             this.handleReturnLogic(delta);
@@ -128,18 +156,22 @@ export default class UnitAI {
 
         if (this.isCombatMode || this.isProvoked) return true;
 
-        const bestEnemy = this.findBestTarget();
+        // [Logic Improvement] 
+        // 기존: '최적' 타겟 1명을 뽑고, 걔가 안 보이면 포기함 (벽 뒤에 있으면 바보됨)
+        // 변경: '보이는' 적들 중에서 최적을 찾음
+        const enemies = this.unit.targetGroup.getChildren();
+        const visibleEnemies = enemies.filter(e => this.canSee(e));
+        
+        let bestEnemy = null;
+        if (visibleEnemies.length > 0) {
+            // 보이는 적들 중에서 가장 가까운/위협적인 적 선정
+            bestEnemy = calculateBestTarget(this.unit, visibleEnemies, Phaser.Math.Distance.Between);
+        }
+
         if (bestEnemy) {
-            const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, bestEnemy.x, bestEnemy.y);
-            if (dist <= 300) {
-                this.currentTarget = bestEnemy;
-                if (!this.checkLineOfSight()) { 
-                    this.currentTarget = null; 
-                    return false; 
-                }
-                this.engageCombat(bestEnemy);
-                return true;
-            }
+            this.currentTarget = bestEnemy;
+            this.engageCombat(bestEnemy);
+            return true;
         }
 
         this.patrolTimer -= delta;
@@ -362,25 +394,22 @@ export default class UnitAI {
                 const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
-                // [Update] 대상을 놓쳤을 때(거리 or 시야) 복귀하지 않고 해당 위치를 거점으로 배회
                 if (distToTarget > CHASE_RANGE || !hasLOS) {
-                    // 원래 로직: this.isReturning = true;
                     this.isReturning = false; 
                     this.isCombatMode = false;
-                    
-                    // 현재 위치를 새로운 spawnPos(배회 중심점)으로 설정 -> 그 자리를 배회
                     this.spawnPos = { x: this.unit.x, y: this.unit.y };
-                    
                     this.currentTarget = null;
                     this.currentPath = [];
-                    this.patrolTimer = 0; // 즉시 새로운 배회 포인트 탐색
-                    
+                    this.patrolTimer = 0; 
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
                     return;
                 }
             } else {
-                 const newTarget = this.findBestTarget();
-                 
+                 // [Targeting Fix] 전투 중 타겟을 잃었을 때도 시야 내 적 우선 탐색
+                 const enemies = this.unit.targetGroup.getChildren();
+                 const visibleEnemies = enemies.filter(e => this.canSee(e));
+                 const newTarget = calculateBestTarget(this.unit, visibleEnemies, Phaser.Math.Distance.Between);
+
                  if (newTarget) {
                      const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, newTarget.x, newTarget.y);
                      if (dist <= 350) { 
@@ -389,10 +418,9 @@ export default class UnitAI {
                      }
                  }
 
-                 // [Update] 타겟 사망 시에도 복귀하지 않고 현 위치 배회
                  this.isReturning = false;
                  this.isCombatMode = false;
-                 this.spawnPos = { x: this.unit.x, y: this.unit.y }; // 배회 거점 갱신
+                 this.spawnPos = { x: this.unit.x, y: this.unit.y }; 
                  this.patrolTimer = 0;
                  return;
             }
@@ -526,7 +554,6 @@ export default class UnitAI {
             repulsion.set(0, Math.sign(dy));
         }
 
-        // [Wall Collision] 반발력(repulsion) 로직 유지 (테스트에서 기대값 조정으로 해결함)
         this.wallCollisionVector.copy(slideDir).scale(0.8).add(repulsion.scale(1.2)).normalize();
         
         this.wallCollisionTimer = 250; 
@@ -542,17 +569,25 @@ export default class UnitAI {
         
         this.losCheckTimer = now + 150;
 
+        const result = this.checkLineOfSightRaw(this.currentTarget);
+        this.lastLosResult = result;
+        return result;
+    }
+
+    // [Refactor] Raycast 로직 분리 (타겟 지정 없이 사용 가능하도록)
+    checkLineOfSightRaw(target) {
+        if (!target) return false;
+        
         const wallLayer = this.scene.wallLayer;
         const blockLayer = this.scene.blockLayer;
 
         if (!wallLayer && !blockLayer && (!this.scene.blockObjectGroup || this.scene.blockObjectGroup.getLength() === 0)) {
-            this.lastLosResult = true;
             return true;
         }
 
         this._tempStart.set(this.unit.x, this.unit.y);
-        this._tempEnd.set(this.currentTarget.x, this.currentTarget.y);
-        const line = new Phaser.Geom.Line(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
+        this._tempEnd.set(target.x, target.y);
+        const line = new Phaser.Geom.Line(this.unit.x, this.unit.y, target.x, target.y);
 
         if (wallLayer || blockLayer) {
             const distance = this._tempStart.distance(this._tempEnd);
@@ -565,10 +600,10 @@ export default class UnitAI {
                 const cy = this._tempStart.y + (this._tempEnd.y - this._tempStart.y) * t;
 
                 if (wallLayer && wallLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
-                    this.lastLosResult = false; return false;
+                    return false;
                 }
                 if (blockLayer && blockLayer.getTileAtWorldXY(cx, cy)?.canCollide) {
-                    this.lastLosResult = false; return false;
+                    return false;
                 }
             }
         }
@@ -578,12 +613,10 @@ export default class UnitAI {
             for (const block of blocks) {
                 const bounds = block.getBounds();
                 if (Phaser.Geom.Intersects.LineToRectangle(line, bounds)) {
-                    this.lastLosResult = false; return false;
+                    return false;
                 }
             }
         }
-
-        this.lastLosResult = true;
         return true;
     }
 

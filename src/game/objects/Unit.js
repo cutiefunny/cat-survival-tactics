@@ -219,7 +219,6 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         if (this.skillTimer > 0) this.skillTimer -= adjustedDelta;
 
-        // [Fixed] !this.ai.isReturning 조건 추가: 복귀 중에는 자동 회복 금지
         if (!isMoving && this.hp < this.maxHp * 0.5 && !this.isTakingDamage && !this.isAttacking && !this.ai.isReturning) {
             this.handleRegen(adjustedDelta);
         }
@@ -477,6 +476,80 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
     }
 
+    // [New] 광선을 쏘아 장애물과의 교차점을 찾는 메서드
+    castVisionRay(angle, radius) {
+        const startPoint = new Phaser.Math.Vector2(this.x, this.y);
+        const endPoint = new Phaser.Math.Vector2(
+            this.x + Math.cos(angle) * radius,
+            this.y + Math.sin(angle) * radius
+        );
+        
+        let closestIntersection = endPoint;
+        let minDistanceSq = radius * radius;
+        
+        const rayLine = new Phaser.Geom.Line(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
+        
+        // 1. Check Block Objects (High Precision - Raycasting)
+        // 사용자가 요청한 'blocks object'는 blockObjectGroup을 의미함
+        if (this.scene.blockObjectGroup) {
+            const blocks = this.scene.blockObjectGroup.getChildren();
+            const tempRect = new Phaser.Geom.Rectangle();
+            
+            for (const block of blocks) {
+                // 최적화: 너무 먼 블록은 스킵 (반경 + 블록크기 체크)
+                if (Phaser.Math.Distance.Squared(this.x, this.y, block.x, block.y) > (radius + block.width)**2) continue;
+
+                // getBounds를 통해 월드 좌표 바운딩 박스 획득
+                if (block.getBounds) {
+                     block.getBounds(tempRect);
+                } else {
+                     continue;
+                }
+
+                // 선분과 사각형 교차 검사
+                if (Phaser.Geom.Intersects.LineToRectangle(rayLine, tempRect)) {
+                     const points = Phaser.Geom.Intersects.GetLineToRectangle(rayLine, tempRect);
+                     // 교차점 중 가장 가까운 점 선택
+                     for (const p of points) {
+                         const dSq = Phaser.Math.Distance.Squared(this.x, this.y, p.x, p.y);
+                         if (dSq < minDistanceSq) {
+                             minDistanceSq = dSq;
+                             closestIntersection = new Phaser.Math.Vector2(p.x, p.y);
+                         }
+                     }
+                }
+            }
+        }
+        
+        // 2. Check Tile Layers (Step based)
+        // 타일맵 레이어도 시야를 가린다면 체크 (스텝 방식)
+        const wallLayer = this.scene.wallLayer;
+        const blockLayer = this.scene.blockLayer;
+        
+        if (wallLayer || blockLayer) {
+            const currentDist = Math.sqrt(minDistanceSq);
+            const stepSize = 20; // 스텝 사이즈 (작을수록 정밀하지만 부하 증가)
+            const steps = Math.ceil(currentDist / stepSize);
+
+            for (let i = 1; i <= steps; i++) {
+                const t = i / steps;
+                const checkX = startPoint.x + (closestIntersection.x - startPoint.x) * t;
+                const checkY = startPoint.y + (closestIntersection.y - startPoint.y) * t;
+                
+                let hit = false;
+                if (wallLayer && wallLayer.getTileAtWorldXY(checkX, checkY)?.canCollide) hit = true;
+                if (!hit && blockLayer && blockLayer.getTileAtWorldXY(checkX, checkY)?.canCollide) hit = true;
+                
+                if (hit) {
+                    closestIntersection = new Phaser.Math.Vector2(checkX, checkY);
+                    break;
+                }
+            }
+        }
+        
+        return closestIntersection;
+    }
+
     updateDebugVisuals() {
         if (!this.debugText || !this.debugGraphic) return;
 
@@ -505,6 +578,38 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
         this.debugText.setText(`${statusStr}\nHP:${hpPct}%`);
         this.debugText.setColor(color);
+
+        // [Update] Draw Field of View with Raycasting (Shadow Casting)
+        if (this.team === 'red' && this.ai && this.ai.viewDistance && this.ai.viewAngle) {
+            const viewRadius = this.ai.viewDistance;
+            const viewAngle = this.ai.viewAngle; // Radians
+            
+            // Direction: flipX=true(Right/0), flipX=false(Left/PI)
+            const facingAngle = this.flipX ? 0 : Math.PI;
+            const startAngle = facingAngle - (viewAngle / 2);
+            // const endAngle = facingAngle + (viewAngle / 2); // Not directly used in loop
+            
+            const isCombat = this.ai.isCombatMode || this.ai.isProvoked;
+            const fovColor = isCombat ? 0xff0000 : 0xffff00; 
+            const fovAlpha = isCombat ? 0.05 : 0.15;
+
+            // FOV Raycasting
+            const rayCount = 40; // 레이 개수 (많을수록 부드럽지만 성능 부하)
+            const points = [];
+            points.push({ x: this.x, y: this.y }); // 시작점(중심)
+
+            for (let i = 0; i <= rayCount; i++) {
+                const rayAngle = startAngle + (viewAngle * (i / rayCount));
+                const hitPoint = this.castVisionRay(rayAngle, viewRadius);
+                points.push(hitPoint);
+            }
+
+            // Draw FOV Polygon
+            this.debugGraphic.fillStyle(fovColor, fovAlpha);
+            this.debugGraphic.fillPoints(points, true);
+            this.debugGraphic.lineStyle(1, fovColor, 0.3);
+            this.debugGraphic.strokePoints(points, true);
+        }
         
         if (this.ai && this.ai.currentTarget && this.ai.currentTarget.active) {
             this.debugGraphic.lineStyle(1, 0xff0000, 0.3);
