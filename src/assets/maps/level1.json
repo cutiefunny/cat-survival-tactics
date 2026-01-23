@@ -100,5 +100,19 @@
  "tilewidth":32,
  "type":"map",
  "version":"1.10",
- "width":40
+ "width":40,
+ "script": [
+       {
+              "type": "dialog",
+              "speaker": "들개",
+              "avatar": "dog",
+              "text": "김냐냐! 아주 형편 없이 약해졌군!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "과연 그럴까?" 
+       }
+  ]
 }

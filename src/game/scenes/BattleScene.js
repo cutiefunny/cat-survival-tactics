@@ -44,7 +44,6 @@ import level6 from '../../assets/sounds/level6.mp3';
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
 import hit3 from '../../assets/sounds/Hit3.wav';
-// [New] 피격 효과음 추가
 import ouch1 from '../../assets/sounds/Ouch1.mp3';
 import ouch2 from '../../assets/sounds/Ouch2.mp3';
 
@@ -85,7 +84,7 @@ export default class BattleScene extends BaseScene {
 
         this.isStrategyMode = data && data.isStrategyMode;
         this.targetNodeId = data ? data.targetNodeId : null;
-        this.armyConfig = data ? data.armyConfig : null; // [Note] StrategyScene에서 넘겨준 적군 데이터
+        this.armyConfig = data ? data.armyConfig : null; 
         this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
         this.deadSquadIndices = [];
@@ -100,6 +99,8 @@ export default class BattleScene extends BaseScene {
         this.currentLevelIndex = targetIndex;
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
         
+        this.hasScriptPlayed = false;
+
         console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}`);
     }
 
@@ -125,8 +126,6 @@ export default class BattleScene extends BaseScene {
         this.load.audio('hit1', hit1);
         this.load.audio('hit2', hit2);
         this.load.audio('hit3', hit3);
-        
-        // [New] Ouch 사운드 로드
         this.load.audio('ouch1', ouch1);
         this.load.audio('ouch2', ouch2);
     }
@@ -148,6 +147,9 @@ export default class BattleScene extends BaseScene {
         this.pathfindingManager = new PathfindingManager(this); 
         
         this.placementZone = null;
+        this.catsArea = null; // 아군 구역 저장용
+        this.dogsArea = null; // 적군 구역 저장용
+        
         this.zoneGraphics = null; 
         this.blocksDebugGraphics = null;
         this.gameConfig = null; 
@@ -157,6 +159,10 @@ export default class BattleScene extends BaseScene {
         this.inputManager.checkMobileAndSetup();
 
         this.input.keyboard.on('keydown-D', (event) => { if (event.shiftKey) this.toggleDebugMode(); });
+        
+        this.events.on('resume', (scene, data) => {
+            console.log("▶️ [BattleScene] Resumed from Cutscene");
+        });
 
         this.fetchConfigAndStart();
     }
@@ -196,7 +202,6 @@ export default class BattleScene extends BaseScene {
 
     async fetchConfigAndStart() {
         if (this.initData && this.initData.debugConfig) {
-            console.log("🛠️ [BattleScene] Using Mock Battle Config!");
             this.gameConfig = this.initData.debugConfig;
             const mapKey = LEVEL_KEYS[this.currentLevelIndex] || 'level1';
             this.uiManager.destroyLoadingText();
@@ -255,6 +260,8 @@ export default class BattleScene extends BaseScene {
     }
 
     startGame(config, mapKey) {
+        let scriptData = null;
+
         if (!mapKey) {
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
@@ -273,12 +280,19 @@ export default class BattleScene extends BaseScene {
             this.spawnUnits(config, null); 
             this.setupPhysicsColliders(null, null);
         } else {
-            const mapData = this.mapManager.createMap(mapKey);
+            if (this.cache.tilemap.exists(mapKey)) {
+                const mapData = this.cache.tilemap.get(mapKey).data;
+                if (mapData && mapData.script) {
+                    scriptData = mapData.script;
+                }
+            }
+
+            const mapDataObj = this.mapManager.createMap(mapKey);
             
-            const map = mapData.map;
-            this.wallLayer = mapData.layers.wallLayer;
-            this.blockLayer = mapData.layers.blockLayer;
-            this.blockObjectGroup = mapData.blockObjectGroup;
+            const map = mapDataObj.map;
+            this.wallLayer = mapDataObj.layers.wallLayer;
+            this.blockLayer = mapDataObj.layers.blockLayer;
+            this.blockObjectGroup = mapDataObj.blockObjectGroup;
 
             this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
@@ -296,6 +310,17 @@ export default class BattleScene extends BaseScene {
         if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
+        }
+
+        if (scriptData && !this.hasScriptPlayed) {
+            console.log("📜 [BattleScene] Script detected. Launching EventScene.");
+            this.hasScriptPlayed = true;
+            this.scene.pause(); 
+            this.scene.launch('EventScene', { 
+                mode: 'overlay', 
+                script: scriptData, 
+                parentScene: 'BattleScene' 
+            });
         }
     }
 
@@ -435,7 +460,6 @@ export default class BattleScene extends BaseScene {
                 finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
                 
                 applyFatigueTint = true; 
-                console.log(`📉 [Fatigue] ${stats.role} (Lv.${level}): Fatigue ${fatigue} -> Stats reduced by ${(penaltyRatio*100).toFixed(0)}%`);
             }
         }
 
@@ -455,14 +479,10 @@ export default class BattleScene extends BaseScene {
         return unit;
     }
 
-    // [Refactored] spawnUnits: 배열 형태 적군 구성 지원 및 보스 핀 배치
-    // src/game/scenes/BattleScene.js 내부 메서드 수정
-
-    // [Refactored] spawnUnits: 배열 형태 적군 구성 지원 및 보스 핀 배치
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
 
-        // 1. 아군 스폰 (기존 로직 유지)
+        // 1. 아군 스폰
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -476,6 +496,9 @@ export default class BattleScene extends BaseScene {
                 this.zoneGraphics.setDepth(0); 
             }
         }
+        
+        // [New] 아군 구역 저장
+        this.catsArea = spawnZone;
 
         const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
         
@@ -502,7 +525,6 @@ export default class BattleScene extends BaseScene {
         let redSpawnArea = null;
         let bossSpawnPoint = null; 
         
-        // 맵에서 구역(Rect)과 핀(Point) 찾기
         if (map) {
             const dogLayer = map.getObjectLayer('Dogs');
             if (dogLayer && dogLayer.objects.length > 0) {
@@ -513,31 +535,26 @@ export default class BattleScene extends BaseScene {
                 const pointObj = dogLayer.objects.find(obj => !obj.width && !obj.height);
                 if (pointObj) {
                     bossSpawnPoint = { x: pointObj.x, y: pointObj.y };
-                    console.log(`📍 Boss Pin found at (${pointObj.x}, ${pointObj.y})`);
                 }
             }
         }
-
-        // 3. 소환할 적 목록 작성 (Army Roster)
-        let enemyRoster = [];
         
-        // A. 전략 맵에서 넘어온 armyConfig가 있는 경우 (배열 or 객체)
+        // [New] 적군 구역 저장
+        this.dogsArea = redSpawnArea;
+
+        let enemyRoster = [];
         if (this.armyConfig) {
             const configs = Array.isArray(this.armyConfig) ? this.armyConfig : [this.armyConfig];
-            console.log("🛠️ [SpawnUnits] ArmyConfig:", JSON.stringify(configs)); // [Debug] 입력 설정 확인
 
             configs.forEach(cfg => {
                 const count = cfg.count || 1;
                 const type = cfg.type || 'NormalDog';
                 const role = type.charAt(0).toUpperCase() + type.slice(1);
-                
                 for(let i=0; i<count; i++) {
                     enemyRoster.push(role);
                 }
             });
-        } 
-        // B. 기본 구성 (일반 맵)
-        else {
+        } else {
             const redCount = config.gameSettings.redCount ?? 6;
             const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
             for(let i=0; i<redCount; i++) {
@@ -546,27 +563,18 @@ export default class BattleScene extends BaseScene {
             }
         }
 
-        console.log(`📋 [SpawnUnits] Initial Roster (${enemyRoster.length}):`, enemyRoster); // [Debug] 초기 로스터 확인
-
-        // 4. 보스(핀 위치 배치용) 선정
         let bossUnitRole = null;
         let bossIndex = -1;
 
         if (this.armyConfig) {
-            // 우선순위: Boss > Tanker > Leader > Raccoon > Shooter...
             const priority = ['Boss', 'Tanker', 'Leader', 'Raccoon', 'Shooter', 'Healer', 'Runner'];
-            
-            // [Fix] 정확히 일치하는 역할을 먼저 찾고, 없으면 포함하는 역할 찾기 (오매칭 방지)
             for (const pRole of priority) {
-                // 1차 시도: 정확 일치
                 bossIndex = enemyRoster.findIndex(r => r === pRole);
                 if (bossIndex !== -1) {
                     bossUnitRole = enemyRoster[bossIndex];
                     break;
                 }
             }
-            
-            // 2차 시도: 부분 일치 (정확 일치가 없을 경우만)
             if (bossIndex === -1) {
                 for (const pRole of priority) {
                     bossIndex = enemyRoster.findIndex(r => r.includes(pRole));
@@ -576,15 +584,12 @@ export default class BattleScene extends BaseScene {
                     }
                 }
             }
-            
-            // 특수 역할이 없다면 첫 번째 유닛을 리더로 간주
             if (bossIndex === -1 && enemyRoster.length > 0) {
                 bossIndex = 0;
                 bossUnitRole = enemyRoster[0];
             }
         }
 
-        // 5. 보스 소환 (핀 위치 또는 구역 중앙)
         if (bossIndex !== -1) {
             let bossX, bossY;
             if (bossSpawnPoint) {
@@ -601,32 +606,24 @@ export default class BattleScene extends BaseScene {
             const bossStats = { 
                 role: bossUnitRole, 
                 name: `Boss ${bossUnitRole}`,
-                level: 5 // 보스급은 레벨 보정
+                level: 5
             };
             
             const bossUnit = this.createUnitInstance(bossX, bossY, 'red', this.blueTeam, bossStats, false);
-            
             if (bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') {
                 bossUnit.setScale(1.1); 
             }
             this.redTeam.add(bossUnit);
-            console.log(`👹 Boss/Leader Spawned: ${bossUnitRole} at (${bossX}, ${bossY})`);
-
-            // [Fix] 리스트에서 제거 및 로그 확인 (중복 소환 방지 핵심)
             const removed = enemyRoster.splice(bossIndex, 1);
-            console.log(`✂️ [SpawnUnits] Removed Boss from roster: ${removed[0]}. Remaining: ${enemyRoster.length}`);
         }
 
-        // 6. 나머지 졸개 소환 (구역 내 랜덤)
         enemyRoster.forEach((role, i) => {
             const stats = { role: role, name: `${role} ${i+1}` };
-            
             let spawnX, spawnY;
             if (redSpawnArea) {
                 spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
                 spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
             } else {
-                // 구역 없으면 일렬 배치 (보스가 없을 때 대비 약간 오프셋)
                 spawnX = 1300 + Phaser.Math.Between(-50, 50);
                 spawnY = startY + (i * spawnGap);
             }
@@ -638,6 +635,17 @@ export default class BattleScene extends BaseScene {
         this.initialRedCount = this.redTeam.getLength();
     }
     
+    // [New] 화자(Speaker)에 따른 카메라 타겟 좌표 반환
+    getCameraTarget(speaker) {
+        if (speaker === '들개' && this.dogsArea) {
+            return { x: this.dogsArea.centerX, y: this.dogsArea.centerY };
+        }
+        if (speaker === '김냐냐' && this.catsArea) {
+            return { x: this.catsArea.centerX, y: this.catsArea.centerY };
+        }
+        return null; // 매칭 안되거나 구역 없으면 null
+    }
+
     animateCoinDrop(startX, startY, amount) {
         const coin = this.add.graphics();
         coin.fillStyle(0xFFD700, 1); coin.fillCircle(0, 0, 8); coin.lineStyle(2, 0xFFFFFF, 1); coin.strokeCircle(0, 0, 8);

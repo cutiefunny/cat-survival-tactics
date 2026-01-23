@@ -5,194 +5,272 @@ export default class EventScene extends Phaser.Scene {
         super('EventScene');
     }
 
-    preload() {
-        // 오프닝에 사용할 이미지 5장 로드
-        // (/src/assets/cutscenes/ 폴더에 이미지가 있다고 가정)
-        for (let i = 1; i <= 5; i++) {
-            this.load.image(`opening${i}`, `cutscenes/opening${i}.png`);
+    init(data) {
+        this.eventConfig = data || {};
+        
+        // 스크립트 데이터 설정 (없으면 오프닝 로드)
+        if (data && data.script && data.script.length > 0) {
+            this.currentScript = data.script;
+        } else {
+            this.currentScript = this.getOpeningSequence();
         }
-        this.load.audio('intermission', 'sounds/intermission.mp3');
+
+        this.viewMode = (data && data.mode) ? data.mode : 'scene'; // 'scene' | 'overlay'
+        this.parentSceneKey = (data && data.parentScene) ? data.parentScene : null;
+        this.nextSceneKey = (data && data.nextScene) ? data.nextScene : 'StrategyScene';
+        this.nextSceneData = (data && data.nextSceneData) ? data.nextSceneData : {};
+        
+        console.log(`🎬 [EventScene] Init - Mode: ${this.viewMode}, Script Len: ${this.currentScript.length}`);
+    }
+
+    preload() {
+        // 기본 오프닝 이미지 로드
+        for (let i = 1; i <= 5; i++) {
+            if (!this.textures.exists(`opening${i}`)) {
+                this.load.image(`opening${i}`, `cutscenes/opening${i}.png`);
+            }
+        }
+        
+        // BGM 로드
+        if (!this.cache.audio.exists('intermission')) {
+            this.load.audio('intermission', 'sounds/intermission.mp3');
+        }
     }
 
     create() {
-        this.bgm = this.sound.add('intermission', { loop: true, volume: 0.5 });
-        this.bgm.play();
-        // 오프닝 스토리보드 데이터 설정
-        this.openingSequence = [
-            {
-                image: 'opening1',
-                text: "상수동은 원래 거대 고양이 김냐냐씨의 영역이었다.\n그가 이끄는 상수동 고양이회는 지역을 평화롭게 다스렸다.",
-            },
-            {
-                image: 'opening2',
-                text: "어느 날부터 구역 내에 들개들이 점점 늘어나기 시작했지만\n상수동의 길냥이들은 크게 신경 쓰지 않았다.\n상수동은 강력한 김냐냐씨의 영역이었으니까.",
-            },
-            {
-                image: 'opening3',
-                text: "그러던 어느 날,\n영역의 급식소를 순찰하던 김냐냐씨는",
-            },
-            {
-                image: 'opening4',
-                text: "상수동 고양이회의 2인자 '탱크'의 계략에 빠져\n영역 최남단의 유니타워에 고립 되고 말았다!",
-            },
-            {
-                image: 'opening5',
-                text: "그 사이 상수동 전체는 들개들에게 점령 되었고\n레드로드 서쪽은 배신의 대가로 탱크가 다스리게 되었다.\n",
-            },
-            {
-                image: 'opening5',
-                text: "이제, 전략가인 당신의 시간이다!\n흩어진 길냥이들을 규합하고 영토를 수복하라!\n",
-            }
-        ];
+        // 씬을 최상단으로 이동 (다른 씬에 가려지지 않게 함)
+        this.scene.bringToTop();
 
+        // BGM 재생
+        if (this.viewMode === 'scene' && !this.sound.get('intermission')) {
+            this.bgm = this.sound.add('intermission', { loop: true, volume: 0.5 });
+            this.bgm.play();
+        }
+
+        // 입력 리스너
+        this.input.on('pointerdown', this.handleInput, this);
+        this.input.keyboard.on('keydown', this.handleInput, this);
+
+        // UI 컨테이너 생성 및 화면 고정 설정
+        this.uiContainer = this.add.container(0, 0).setDepth(100);
+        this.uiContainer.setScrollFactor(0); 
+
+        // 요소 생성 (초기화)
+        this.createUIElements();
+
+        // 초기 레이아웃 설정
+        this.updateLayout();
+
+        // 화면 크기 변경 감지
+        this.scale.on('resize', this.updateLayout, this);
+
+        // 상태 변수 초기화
         this.currentCutIndex = 0;
         this.isTyping = false;
         this.fullText = "";
         this.typingTimer = null;
 
-        const { width, height } = this.scale;
-
-        // 카메라 기본 배경을 흰색으로 설정 (이미지의 투명 부분이 흰색으로 보이게 함)
-        this.cameras.main.setBackgroundColor('#ffffff');
-
-        // 흰색 배경 박스 (이미지 뒤에 놓음)
-        this.bgFill = this.add.rectangle(0, 0, this.cameras.main.width, this.cameras.main.height, 0xffffff)
-            .setOrigin(0)
-            .setDepth(0);
-
-        // 배경 이미지 객체 (위에 표시)
-        this.bgImage = this.add.image(this.cameras.main.centerX, this.cameras.main.centerY, 'opening1')
-            .setOrigin(0.5, 0.6)
-            .setDepth(1);
-
-        // 화면에 맞게 늘리되 최대 가로 너비 1000px로 제한
-        this.fitImageToScreen(this.bgImage);
-        const maxWidth = 1000;
-        if (this.bgImage.displayWidth > maxWidth) {
-            const capScale = maxWidth / this.bgImage.width;
-            this.bgImage.setScale(capScale);
+        // 첫 컷 실행
+        if (this.currentScript && this.currentScript.length > 0) {
+            this.showCut(0);
+        } else {
+            this.endEvent();
         }
+    }
 
-        // 텍스트 배경 박스 (가독성 향상)
-        this.textBox = this.add.rectangle(0, 0, 1280, 200, 0x000000, 0.7)
-            .setOrigin(0);
-        
-        // 텍스트 객체
-        const isMobile = (this.scale && this.scale.width && this.scale.width <= 640) ||
-                 (this.sys && this.sys.game && this.sys.game.device && (this.sys.game.device.os && (this.sys.game.device.os.android || this.sys.game.device.os.iOS)));
+    createUIElements() {
+        // 1. 배경 이미지 (Scene 모드용)
+        this.bgImage = this.add.image(0, 0, 'opening1')
+            .setOrigin(0.5, 0.5)
+            .setDepth(0)
+            .setVisible(false);
+
+        // 2. 텍스트 박스 배경
+        this.textBox = this.add.rectangle(0, 0, 100, 100, 0x000000, 0.8).setOrigin(0);
+        this.uiContainer.add(this.textBox);
+
+        // 3. 아바타 이미지
+        this.avatarImage = this.add.image(0, 0, 'leader', 0)
+            .setOrigin(0.5)
+            .setVisible(false);
+        this.uiContainer.add(this.avatarImage);
+
+        // 4. 화자 이름
+        this.speakerText = this.add.text(0, 0, '', {
+            fontFamily: 'NeoDunggeunmo',
+            fontSize: '28px',
+            color: '#FFD700',
+            stroke: '#000000',
+            strokeThickness: 4
+        });
+        this.uiContainer.add(this.speakerText);
+
+        // 5. 본문 텍스트
         this.storyText = this.add.text(0, 0, '', {
             fontFamily: 'NeoDunggeunmo',
-            fontSize: isMobile ? '14px' : '32px',
-            color: '#000000',
-            strokeThickness: 4,
-            lineSpacing: 10
+            fontSize: '24px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2,
+            lineSpacing: 8
         });
+        this.uiContainer.add(this.storyText);
 
-        // 6. [NEW] Skip 버튼 (우측 상단)
-        const skipBtn = this.add.text(width - 30, 30, "SKIP ≫", {
+        // 6. Skip 버튼
+        this.skipBtn = this.add.text(0, 0, "SKIP ≫", {
             fontSize: '24px',
             fontStyle: 'bold',
             color: '#ffffff',
             backgroundColor: '#00000088',
             padding: { x: 15, y: 10 }
         })
-        .setOrigin(1, 0) // 우측 상단 기준점
+        .setOrigin(1, 0)
         .setInteractive({ useHandCursor: true })
         .setScrollFactor(0)
-        .setDepth(100); // 항상 최상단 노출
+        .setDepth(200);
 
-        // Skip 버튼 클릭 이벤트
-        skipBtn.on('pointerdown', () => {
-            console.log("Skipping Cutscene...");
-            this.endOpening();
-        });
-
-        // Skip 버튼 호버 효과
-        skipBtn.on('pointerover', () => skipBtn.setStyle({ backgroundColor: '#44444488' }));
-        skipBtn.on('pointerout', () => skipBtn.setStyle({ backgroundColor: '#00000088' }));
-
-        // 입력 리스너 등록 (마우스/터치 + 키보드)
-        this.input.on('pointerdown', this.handleInput, this);
-        this.input.keyboard.on('keydown', this.handleInput, this);
-
-        // 첫 번째 컷 시작
-        this.showCut(0);
+        this.skipBtn.on('pointerdown', () => this.endEvent());
     }
 
-    // 이미지를 화면 크기에 꽉 차게 조절 (비율 유지 or 채우기 선택)
-    fitImageToScreen(image) {
-        const screenWidth = this.cameras.main.width;
-        const screenHeight = this.cameras.main.height;
-        const maxWidth = 1000; // 최대 가로 너비 픽셀
+    updateLayout() {
+        const { width, height } = this.scale;
+        const isOverlay = (this.viewMode === 'overlay');
+        const isMobile = width <= 640;
 
-        // 화면에 맞게 비율 유지(Contain 모드)
-        const scaleX = screenWidth / image.width;
-        const scaleY = screenHeight / image.height;
-        let scale = Math.min(scaleX, scaleY);
-
-        // 최대 가로 너비 제한 적용
-        if (image.width * scale > maxWidth) {
-            scale = maxWidth / image.width;
+        // 배경 설정
+        if (isOverlay) {
+            this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
+        } else {
+            this.cameras.main.setBackgroundColor('#ffffff');
+            if (this.bgImage.visible) {
+                this.bgImage.setPosition(width / 2, height / 2);
+                this.fitImageToScreen(this.bgImage);
+            }
         }
 
-        image.setScale(scale);
+        // 박스 레이아웃 계산
+        const boxHeight = isOverlay ? 160 : 200;
+        const marginY = isOverlay ? 30 : 0; 
+        const boxY = isOverlay ? marginY : (height - boxHeight);
+        
+        const marginX = isOverlay ? (isMobile ? 10 : 40) : 0;
+        const boxWidth = width - (marginX * 2);
+        const boxX = marginX;
 
-        // 화면 중앙에 배치 (이미지의 origin에 따라 위치가 조정됨)
-        image.setPosition(this.cameras.main.centerX, this.cameras.main.centerY);
+        this.textBox.setPosition(boxX, boxY);
+        this.textBox.setDisplaySize(boxWidth, boxHeight);
+        
+        const padding = 20;
+        const avatarSize = 100;
+        
+        const avatarX = boxX + padding + avatarSize / 2;
+        const avatarY = boxY + boxHeight / 2;
+        this.avatarImage.setPosition(avatarX, avatarY);
+        
+        this.baseTextX = boxX + padding;
+        this.avatarTextX = boxX + padding + avatarSize + padding;
+
+        const textY = boxY + 25;
+
+        const nameSize = isMobile ? '24px' : '28px';
+        const textSize = isMobile ? '20px' : '26px';
+
+        this.speakerText.setStyle({ fontSize: nameSize });
+        this.speakerText.setPosition(this.baseTextX, textY); 
+
+        this.storyText.setStyle({ 
+            fontSize: textSize,
+            wordWrap: { width: boxWidth - (isOverlay ? 140 : 80) } 
+        });
+        this.storyText.setPosition(this.baseTextX, textY + 40); 
+
+        if (isOverlay) {
+            this.skipBtn.setPosition(width - marginX, boxY + boxHeight + 10);
+        } else {
+            this.skipBtn.setPosition(width - 30, 30);
+        }
+        
+        if (this.currentScript && this.currentScript[this.currentCutIndex]) {
+            const data = this.currentScript[this.currentCutIndex];
+            if (data.avatar) {
+                this.speakerText.setX(this.avatarTextX);
+                this.storyText.setX(this.avatarTextX);
+            } else {
+                this.speakerText.setX(this.baseTextX);
+                this.storyText.setX(this.baseTextX);
+            }
+        }
     }
 
     showCut(index) {
-        if (index >= this.openingSequence.length) {
-            this.endOpening();
+        if (index >= this.currentScript.length) {
+            this.endEvent();
             return;
         }
 
-        const data = this.openingSequence[index];
+        const data = this.currentScript[index];
+        const type = data.type || 'dialog';
 
-        // 이미지 변경 및 페이드 인 효과
-        this.bgImage.setTexture(data.image);
-        this.bgImage.setAlpha(0);
-        this.tweens.add({
-            targets: this.bgImage,
-            alpha: 1,
-            duration: 500
-        });
-        this.fitImageToScreen(this.bgImage);
-
-        // 텍스트 박스 및 텍스트 위치 설정
-        // 텍스트 위치에 맞춰 박스 위치도 조정하거나, 박스는 하단 고정하고 텍스트만 움직이게 할 수 있음.
-        // 여기서는 텍스트 위치를 기준으로 박스를 그리는 대신, 텍스트 가독성을 위한 배경을 깔아줍니다.
-        const padding = 20;
-        // 가로 가운데 정렬을 기본으로 사용하되, data.x가 명시되면 그 값을 사용
-        const x = (typeof data.x === 'number') ? data.x : this.cameras.main.centerX;
-        const y = (typeof data.y === 'number') ? data.y : this.cameras.main.height - 150;
-        // 텍스트를 가로 가운데 정렬하려면 origin.x를 0.5로 설정
-        this.storyText.setOrigin(0.5, 0.5);
-        // 이후에 호출되는 setPosition(data.x, data.y)가 올바르게 동작하도록 덮어쓰기
-        this.storyText.setPosition(x, y);
+        // 1. 이미지 처리
+        if (type === 'image') {
+            if (this.bgImage && data.image) {
+                this.bgImage.setVisible(true);
+                if (this.bgImage.texture.key !== data.image) {
+                    this.bgImage.setTexture(data.image);
+                    this.bgImage.setAlpha(0);
+                    this.tweens.add({ targets: this.bgImage, alpha: 1, duration: 500 });
+                }
+                this.fitImageToScreen(this.bgImage);
+            }
+        } else {
+             // 다이얼로그 모드: 오버레이면 배경 이미지 숨김 필요 시 추가
+        }
         
-        // 텍스트 배경 박스 위치 및 크기 조정 (텍스트 주변을 감싸도록)
-        // 일단 텍스트가 타이핑되기 전이라 크기를 알 수 없으므로, 
-        // 타이핑 효과에서는 박스 크기를 동적으로 조절하거나 고정된 UI를 사용하는 것이 좋습니다.
-        // 여기서는 심플하게 텍스트 위치 주변에 박스를 배치합니다.
-        this.textBox.setOrigin(0.5, 0);
-        this.textBox.setPosition(x, y);
-        this.textBox.setSize(100, 100); // 임시 크기, 타이핑 하면서 갱신 필요 없으면 고정 크기 사용
-        this.textBox.setVisible(false); // 타이핑 시작 시 켜기
+        // 2. 아바타 처리
+        if (data.avatar) {
+            this.avatarImage.setVisible(true);
+            this.avatarImage.setTexture(data.avatar, 0); 
+            
+            this.speakerText.setX(this.avatarTextX);
+            this.storyText.setX(this.avatarTextX);
+        } else {
+            this.avatarImage.setVisible(false);
+            
+            this.speakerText.setX(this.baseTextX);
+            this.storyText.setX(this.baseTextX);
+        }
 
-        // 타이핑 시작
-        this.fullText = data.text;
+        // [New] 3. 카메라 이동 처리 (오버레이 모드)
+        if (this.viewMode === 'overlay' && this.parentSceneKey) {
+            const parent = this.scene.get(this.parentSceneKey);
+            if (parent && typeof parent.getCameraTarget === 'function') {
+                const target = parent.getCameraTarget(data.speaker);
+                if (target) {
+                    const cam = parent.cameras.main;
+                    // 타겟 좌표가 화면 중앙에 오도록 scroll 값 계산
+                    // scrollX = 타겟X - (화면너비 / 2) / 줌
+                    const targetScrollX = target.x - (cam.width / 2) / cam.zoom;
+                    const targetScrollY = target.y - (cam.height / 2) / cam.zoom;
+
+                    // 부모 씬의 카메라는 씬이 일시정지 상태여도 tween으로 움직일 수 있습니다.
+                    this.tweens.add({
+                        targets: cam,
+                        scrollX: targetScrollX,
+                        scrollY: targetScrollY,
+                        duration: 1000,
+                        ease: 'Cubic.easeOut'
+                    });
+                }
+            }
+        }
+        
+        // 4. 텍스트 설정
+        this.speakerText.setText(data.speaker || '');
+        this.fullText = data.text || '';
         this.storyText.setText('');
-        this.isTyping = true;
         
-        // 배경 박스 켜기 (텍스트 길이에 대략 맞춰서)
-        // 줄바꿈이 포함된 텍스트의 대략적 크기 계산
-        // const lines = this.fullText.split('\n').length;
-        // const widthEst = 600; // 대략적인 너비
-        // const heightEst = lines * 40 + 40;
-        // this.textBox.setSize(widthEst, heightEst);
-        // this.textBox.setVisible(true);
-
+        // 타이핑 시작
+        this.isTyping = true;
         this.startTyping(this.fullText);
     }
 
@@ -203,11 +281,10 @@ export default class EventScene extends Phaser.Scene {
         const length = text.length;
 
         this.typingTimer = this.time.addEvent({
-            delay: 50, // 타이핑 속도 (ms)
+            delay: 40, 
             callback: () => {
                 this.storyText.text += text[currentIndex];
                 currentIndex++;
-
                 if (currentIndex >= length) {
                     this.completeTyping();
                 }
@@ -223,31 +300,59 @@ export default class EventScene extends Phaser.Scene {
         }
         this.storyText.setText(this.fullText);
         this.isTyping = false;
-        
-        // 텍스트 완성을 알리는 깜빡임 아이콘 등을 추가할 수 있음
     }
 
     handleInput() {
         if (this.isTyping) {
-            // 타이핑 중이면 즉시 완성
             this.completeTyping();
         } else {
-            // 타이핑이 끝났으면 다음 컷으로
             this.currentCutIndex++;
             this.showCut(this.currentCutIndex);
         }
     }
 
-    endOpening() {
-        // 모든 컷이 끝나면 다음 씬으로 전환
-        // 보통 로딩 씬으로 넘어가서 본 게임 에셋을 로드하거나,
-        // 이미 로드되어 있다면 메인 메뉴/게임 씬으로 이동
-        console.log("Opening Finished. Moving to StrategyScene.");
+    fitImageToScreen(image) {
+        if (!image) return;
+        const { width, height } = this.scale;
         
-        // 페이드 아웃 후 씬 전환
-        this.cameras.main.fade(1000, 0, 0, 0);
-        this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-            this.scene.start('StrategyScene'); // 다음에 실행될 씬 이름
-        });
+        const scaleX = width / image.width;
+        const scaleY = height / image.height;
+        let scale = Math.min(scaleX, scaleY);
+        
+        const maxWidth = 1000;
+        if (image.width * scale > maxWidth) scale = maxWidth / image.width;
+
+        image.setScale(scale);
+        image.setPosition(width / 2, height / 2);
+    }
+
+    endEvent() {
+        console.log("🎬 [EventScene] Finished.");
+        
+        this.scale.off('resize', this.updateLayout, this);
+
+        if (this.viewMode === 'overlay') {
+            if (this.parentSceneKey) {
+                this.scene.resume(this.parentSceneKey);
+            }
+            this.scene.stop();
+        } else {
+            this.cameras.main.fade(1000, 0, 0, 0);
+            this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+                if (this.bgm) this.bgm.stop();
+                this.scene.start(this.nextSceneKey, this.nextSceneData);
+            });
+        }
+    }
+    
+    getOpeningSequence() {
+        return [
+            { type: 'image', image: 'opening1', text: "상수동은 원래 거대 고양이 김냐냐씨의 영역이었다.\n그가 이끄는 상수동 고양이회는 지역을 평화롭게 다스렸다." },
+            { type: 'image', image: 'opening2', text: "어느 날부터 구역 내에 들개들이 점점 늘어나기 시작했지만\n상수동의 길냥이들은 크게 신경 쓰지 않았다.\n상수동은 강력한 김냐냐씨의 영역이었으니까." },
+            { type: 'image', image: 'opening3', text: "그러던 어느 날,\n영역의 급식소를 순찰하던 김냐냐씨는" },
+            { type: 'image', image: 'opening4', text: "상수동 고양이회의 2인자 '탱크'의 계략에 빠져\n영역 최남단의 유니타워에 고립 되고 말았다!" },
+            { type: 'image', image: 'opening5', text: "그 사이 상수동 전체는 들개들에게 점령 되었고\n레드로드 서쪽은 배신의 대가로 탱크가 다스리게 되었다.\n" },
+            { type: 'image', image: 'opening5', text: "이제, 전략가인 당신의 시간이다!\n흩어진 길냥이들을 규합하고 영토를 수복하라!\n" }
+        ];
     }
 }
