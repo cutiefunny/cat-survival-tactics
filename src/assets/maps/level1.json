@@ -113,6 +113,16 @@
               "speaker": "김냐냐",
               "avatar": "leader",
               "text": "과연 그럴까?" 
+       },
+       {
+              "type": "mov",
+              "file": "tutorial1",
+              "text": "적절한 대형으로 부대를 배치하자!" 
+       },
+       {
+              "type": "mov",
+              "file": "tutorial2",
+              "text": "행동 명령으로 부대원들을 컨트롤!" 
        }
   ]
 }
