@@ -7,6 +7,10 @@ export default class SystemModal {
         this.container = null;
         this.slotModal = null;
         this.isOpen = false;
+        
+        // [New] 초기 설정 로드 (기본값: false - 컷씬 보기)
+        this.isSkipCutscene = localStorage.getItem('setting_skip_cutscenes') === 'true';
+        this.cutsceneBtnText = null; // 텍스트 객체 참조용
     }
 
     toggle() {
@@ -15,13 +19,18 @@ export default class SystemModal {
         }
         this.isOpen = !this.isOpen;
         this.container.setVisible(this.isOpen);
+        
+        // 메뉴가 열릴 때마다 컷씬 버튼 텍스트 최신화 (혹시 모를 동기화)
+        if (this.isOpen && this.cutsceneBtnText) {
+            this.updateCutsceneButtonText();
+        }
     }
 
     create() {
         const { width, height } = this.scene.scale;
         this.container = this.scene.add.container(width / 2, height / 2).setDepth(3000).setVisible(false);
         const modalW = 280;
-        const modalH = 320;
+        const modalH = 380; // 높이 약간 증가 (버튼 추가 공간)
 
         const bg = this.scene.add.rectangle(0, 0, modalW, modalH, 0x111111, 0.95).setStrokeStyle(3, 0xaaaaaa);
         const title = this.scene.add.text(0, -modalH / 2 + 30, "시스템 메뉴", { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
@@ -37,16 +46,29 @@ export default class SystemModal {
         const startY = -modalH / 2 + 80;
         const gap = 55;
 
+        // [New] 컷씬 토글 버튼 추가
         const buttons = [
-            // { text: "🔑 로그인 (Device ID)", color: 0x444444, callback: () => this.showDeviceId() },
             { text: "✨ 새 게임", color: 0xcc4444, callback: () => this.resetGame() },
             { text: "💾 저장", color: 0x4444cc, callback: () => this.createSlotSelectionModal('save') },
             { text: "📂 불러오기", color: 0x448844, callback: () => this.createSlotSelectionModal('load') },
+            { 
+                id: 'cutscene',
+                text: this.getCutsceneLabel(), 
+                color: 0x444444, 
+                callback: () => this.toggleCutsceneSetting() 
+            },
             { text: "📘 공략집", color: 0x884488, callback: () => window.open('https://musclecat-studio.com/document/캣틀필드', '_blank') }
         ];
 
         buttons.forEach((btn, i) => {
             const btnObj = this.createButton(0, startY + i * gap, btn.text, btn.color, btn.callback);
+            
+            // 컷씬 버튼의 텍스트 객체 참조 저장
+            if (btn.id === 'cutscene') {
+                // createButton에서 반환된 컨테이너의 두 번째 자식이 텍스트임
+                this.cutsceneBtnText = btnObj.list[1]; 
+            }
+            
             this.container.add(btnObj);
         });
     }
@@ -64,6 +86,26 @@ export default class SystemModal {
         });
         btn.add([btnBg, btnTxt]);
         return btn;
+    }
+
+    // [New] 컷씬 라벨 텍스트 반환
+    getCutsceneLabel() {
+        return this.isSkipCutscene ? "🎬 컷씬 보기" : "🎬 컷씬 생략";
+    }
+
+    // [New] 컷씬 설정 토글
+    toggleCutsceneSetting() {
+        this.isSkipCutscene = !this.isSkipCutscene;
+        localStorage.setItem('setting_skip_cutscenes', this.isSkipCutscene);
+        this.updateCutsceneButtonText();
+    }
+
+    // [New] 버튼 텍스트 업데이트
+    updateCutsceneButtonText() {
+        if (this.cutsceneBtnText) {
+            this.cutsceneBtnText.setText(this.getCutsceneLabel());
+            // 시각적 피드백 (색상 변경 등 필요시 추가)
+        }
     }
 
     showDeviceId() {
@@ -141,12 +183,9 @@ export default class SystemModal {
             if (confirm(`슬롯 ${slotIndex + 1} 데이터를 불러오시겠습니까?`)) {
                 const data = SaveManager.loadFromSlot(slotIndex);
                 if (data) {
-                    // [Bugfix] 로드된 데이터를 씬 재시작 시 인자로 전달
                     console.log("📂 [SystemModal] Loading Data:", data);
-                    SaveManager.saveGame(data); // 자동 저장도 갱신
+                    SaveManager.saveGame(data); 
                     this.closeSlotModal();
-                    
-                    // StrategyScene.js의 init(data)에서 manualLoadData를 처리하도록 전달
                     this.scene.scene.restart({ manualLoadData: data });
                 } else {
                     alert("데이터를 불러오는데 실패했습니다.");
@@ -160,9 +199,6 @@ export default class SystemModal {
             this.slotModal.destroy();
             this.slotModal = null;
         }
-        // 불러오기 후에는 모달을 다시 보일 필요가 없으므로 visible 처리 주의
-        // 여기서는 저장/취소 시를 위해 기본적으로 보이게 하되, 
-        // load 성공 시에는 scene restart가 일어나므로 이 줄은 실행되더라도 씬이 넘어가서 문제 없음
         this.container.setVisible(true);
     }
 }

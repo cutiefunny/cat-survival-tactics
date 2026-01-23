@@ -31,26 +31,21 @@ export default class StrategyScene extends BaseScene {
     }
 
     init(data) {
-        // [Flag] 수동 로드 여부 확인
         this.isManualLoad = false;
 
-        // 1. 전투 결과 데이터 수신
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
         }
 
-        // 2. 수동 로드 데이터 수신 (SystemModal 등에서 전달받은 경우)
         if (data && data.manualLoadData) {
             console.log("📂 [StrategyScene] Manual Load Data Applied", data.manualLoadData);
             const loadData = data.manualLoadData;
             
             this.isManualLoad = true;
 
-            // [Fix] 기존 레지스트리 데이터를 확실하게 제거하여 꼬임 방지
             const keysToReset = ['playerCoins', 'playerSquad', 'unlockedRoles', 'worldMapData', 'leaderPosition', 'turnCount', 'lastSafeNodeId'];
             keysToReset.forEach(key => this.registry.remove(key));
 
-            // 데이터 적용
             this.registry.set('playerCoins', loadData.playerCoins);
             this.registry.set('playerSquad', loadData.playerSquad);
             this.registry.set('unlockedRoles', loadData.unlockedRoles);
@@ -59,15 +54,12 @@ export default class StrategyScene extends BaseScene {
             this.registry.set('turnCount', loadData.turnCount || 1);
             this.registry.set('lastSafeNodeId', loadData.lastSafeNodeId);
             
-            // 수동 로드 시 전투 결과는 무시 (충돌 방지)
             this.battleResultData = null;
         }
 
-        // 3. 자동 저장 데이터 불러오기 (디스크) - 수동 로드가 아닐 때만
         if (!this.isManualLoad) {
             const savedData = SaveManager.loadGame();
 
-            // 4. 데이터 우선순위 병합 (Memory > Disk > Default)
             if (savedData) {
                 if (this.registry.get('playerCoins') === undefined) {
                     this.registry.set('playerCoins', savedData.playerCoins ?? 10);
@@ -90,9 +82,8 @@ export default class StrategyScene extends BaseScene {
             }
         }
 
-        // 5. 새 게임 여부 판별
         const hasRegistryData = this.registry.get('playerCoins') !== undefined;
-        this.isNewGame = !this.isManualLoad && !hasRegistryData; // 수동 로드면 새 게임 아님
+        this.isNewGame = !this.isManualLoad && !hasRegistryData; 
         
         console.log(`💾 [StrategyScene] Init - ManualLoad: ${this.isManualLoad}, Coins: ${this.registry.get('playerCoins')}`);
     }
@@ -133,6 +124,15 @@ export default class StrategyScene extends BaseScene {
                 if (layer) layer.setDepth(0);
             });
         }
+
+        // [New] Resume 이벤트 리스너 추가 (EventScene 종료 후 복귀 시 처리)
+        this.events.on('resume', (scene, data) => {
+            if (this.pendingNode) {
+                // 대화 이벤트가 끝났으면 해당 노드 도착 처리 로직 실행
+                this.handleNodeArrival(this.pendingNode);
+                this.pendingNode = null;
+            }
+        });
 
         this.fetchStrategyConfig(map);
     }
@@ -183,7 +183,6 @@ export default class StrategyScene extends BaseScene {
             console.error("❌ Failed to load strategy config:", e);
         }
         
-        // [Fixed] 수동 로드 시에는 초기값으로 덮어쓰지 않도록 주의
         if (!this.isManualLoad) {
             const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
             
@@ -231,7 +230,7 @@ export default class StrategyScene extends BaseScene {
                 if (node) {
                     node.owner = 'player';
                     node.army = null; 
-                    node.script = null; // [New] 점령 시 스크립트 제거 (다시 방문해도 대화 안 뜨게)
+                    node.script = null; 
                     this.registry.set('worldMapData', this.mapNodes);
                     this.registry.set('leaderPosition', targetNodeId);
                 }
@@ -333,126 +332,20 @@ export default class StrategyScene extends BaseScene {
         this.shopModal = new ShopModal(this, this.uiContainer);
         this.systemModal = new SystemModal(this, this.uiContainer);
         
-        // [New] 대화창 UI 생성
-        this.createDialogueUI();
+        // [Modified] 기존 createDialogueUI() 삭제됨 (EventScene 사용)
 
         this.drawUIElements();
     }
 
-    // [New] 대화창 UI 컨테이너 및 요소 생성
-    createDialogueUI() {
-        const w = this.scale.width;
-        const h = this.scale.height;
-        const dialogHeight = 150;
-        
-        this.dialogContainer = this.add.container(0, 0).setVisible(false).setDepth(4000); // SystemModal보다 위
-        
-        // 배경 (하단)
-        const bg = this.add.rectangle(w/2, h - dialogHeight/2 - 20, w * 0.9, dialogHeight, 0x000000, 0.85)
-            .setStrokeStyle(2, 0xffffff, 1)
-            .setInteractive(); // 클릭 시 진행용
-        
-        // 화자 이름 박스
-        const nameBg = this.add.rectangle(w * 0.05 + 80, h - dialogHeight - 35, 160, 40, 0x3333ff, 1)
-            .setStrokeStyle(2, 0xffffff);
-        const nameText = this.add.text(w * 0.05 + 80, h - dialogHeight - 35, "Speaker", {
-            fontSize: '20px', fontStyle: 'bold', color: '#ffffff'
-        }).setOrigin(0.5);
-        
-        // 대화 내용
-        const messageText = this.add.text(w * 0.07, h - dialogHeight - 10, "", {
-            fontSize: '18px', color: '#ffffff', wordWrap: { width: w * 0.86, useAdvancedWrap: true }, lineHeight: 28
-        });
-
-        // 진행 아이콘 (깜빡임)
-        const nextIcon = this.add.text(w * 0.9, h - 50, "▼", { fontSize: '24px', color: '#ffff00' }).setOrigin(0.5);
-        this.tweens.add({ targets: nextIcon, y: h - 40, duration: 500, yoyo: true, repeat: -1 });
-
-        this.dialogContainer.add([bg, nameBg, nameText, messageText, nextIcon]);
-        
-        // 참조 저장
-        this.dialogUI = {
-            container: this.dialogContainer,
-            nameBg: nameBg,
-            nameText: nameText,
-            messageText: messageText,
-            bg: bg
-        };
-        
-        this.uiContainer.add(this.dialogContainer);
-    }
-    
-    // [New] 스크립트 실행기
-    playScript(script, onComplete) {
-        if (!script || !Array.isArray(script) || script.length === 0) {
-            if (onComplete) onComplete();
-            return;
-        }
-
-        let currentIndex = 0;
-        this.input.enabled = false; // 이동 막기
-        
-        const showNext = () => {
-            if (currentIndex >= script.length) {
-                // 종료 처리
-                this.dialogUI.container.setVisible(false);
-                this.input.enabled = true;
-                if (onComplete) onComplete();
-                return;
-            }
-
-            const line = script[currentIndex];
-            currentIndex++;
-
-            if (line.type === 'dialog') {
-                this.dialogUI.container.setVisible(true);
-                this.dialogUI.nameText.setText(line.speaker || '???');
-                this.dialogUI.messageText.setText(line.text || '...');
-                
-                // 클릭 이벤트 바인딩 (한 번만 실행되도록)
-                this.dialogUI.bg.removeAllListeners('pointerdown');
-                this.dialogUI.bg.on('pointerdown', () => {
-                    showNext();
-                });
-            } else {
-                // dialog 타입이 아니면 그냥 넘김 (추후 확장 가능)
-                showNext();
-            }
-        };
-
-        showNext();
-    }
-
     drawUIElements() {
+        // [Modified] DialogUI 관련 재생성 로직 제거
         if (this.uiContainer.list.length > 0) {
-            // UI를 다시 그릴 때 DialogContainer는 보존하거나 다시 생성해야 함.
-            // 여기서는 removeAll(true)를 쓰면 다 날아가므로 주의.
-            // 기존 modal들은 유지하고 재배치만 하는 것이 좋음.
-            // 하지만 resize 대응을 위해 간단히 다시 생성하도록 함.
-            
-            // 기존 모달들은 보존
-            const tempDialog = this.dialogContainer;
-            if (tempDialog) {
-                this.uiContainer.remove(tempDialog); // 리스트에서만 제거
-            }
-            
             this.uiContainer.removeAll(true);
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
-            
-            if (tempDialog && !tempDialog.active) { 
-                // 이미 destroy 되었다면 재생성
-                this.createDialogueUI(); 
-            } else if (tempDialog) {
-                // 살아있다면 다시 추가
-                this.uiContainer.add(tempDialog);
-            } else {
-                this.createDialogueUI();
-            }
         } else {
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
-            this.createDialogueUI();
         }
 
         const w = this.scale.width;
@@ -592,37 +485,49 @@ export default class StrategyScene extends BaseScene {
         if (node.owner !== 'player' && node.owner !== 'neutral') { this.selectedTargetId = node.id; } else { this.selectedTargetId = null; }
         
         this.statusText.setText(`🚶 ${node.name}(으)로 이동 중...`);
+        
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
             
-            // [New] 스크립트 실행 후 기존 로직 진행
-            this.playScript(node.script, () => {
-                
-                // 스크립트 완료 후 실행될 원래 로직
-                if (node.owner === 'neutral') {
-                    this.handleNeutralEvent(node);
-                    return; 
-                }
-
-                if (this.selectedTargetId) {
-                    let infoText = ""; 
-                    if (node.army) {
-                        if (Array.isArray(node.army)) {
-                            const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
-                            infoText = ` (적군: ${total}마리)`;
-                        } else {
-                            infoText = ` (적군: ${node.army.count || 1}마리)`;
-                        }
-                    }
-                    const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
-                    const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
-                    this.statusText.setText(finalMsg);
-                } else { 
-                    this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
-                }
-                this.updateUIState();
-            });
+            // [Modified] 스크립트가 있다면 EventScene 실행, 아니면 바로 도착 처리
+            if (node.script) {
+                this.pendingNode = node; // Resume 후 처리를 위해 저장
+                this.scene.pause(); // 현재 씬 일시 정지
+                this.scene.launch('EventScene', { 
+                    mode: 'overlay', 
+                    script: node.script, 
+                    parentScene: 'StrategyScene' 
+                });
+            } else {
+                this.handleNodeArrival(node);
+            }
         });
+    }
+
+    // [New] 노드 도착 후 로직 (스크립트 종료 후 호출됨)
+    handleNodeArrival(node) {
+        if (node.owner === 'neutral') {
+            this.handleNeutralEvent(node);
+            return; 
+        }
+
+        if (this.selectedTargetId) {
+            let infoText = ""; 
+            if (node.army) {
+                if (Array.isArray(node.army)) {
+                    const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
+                    infoText = ` (적군: ${total}마리)`;
+                } else {
+                    infoText = ` (적군: ${node.army.count || 1}마리)`;
+                }
+            }
+            const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
+            const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
+            this.statusText.setText(finalMsg);
+        } else { 
+            this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
+        }
+        this.updateUIState();
     }
 
     handleNeutralEvent(node) {
@@ -661,6 +566,11 @@ export default class StrategyScene extends BaseScene {
         });
 
         this.input.enabled = false;
+        
+        // [Check] 여기서도 EventScene을 쓰는데, EventScene이 이 양식을 지원하는지 확인 필요.
+        // 만약 EventScene이 script 배열만 받는 구조로 변경되었다면, 이 부분도 수정이 필요할 수 있음.
+        // 현재는 개발자님의 EventScene.js가 스크립트 기반이므로, 호환성을 위해 여기는 그대로 둡니다.
+        // (EventScene 내부 구현에 따라 작동 여부가 갈림)
         this.scene.launch('EventScene', {
             title: node.name,
             description: node.text || "아무 일도 일어나지 않았습니다.",
@@ -681,7 +591,7 @@ export default class StrategyScene extends BaseScene {
                     this.unlockUnit(roleName);
                     this.statusText.setText(`🤝 ${roleName} 영입 성공!`);
                     node.owner = 'player';
-                    node.script = null; // [New] 영입 후에도 스크립트 제거
+                    node.script = null; 
                     const token = this.enemyTokens.find(t => 
                         Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
                     );
@@ -698,6 +608,16 @@ export default class StrategyScene extends BaseScene {
         
         this.updateUIState();
         this.input.enabled = true;
+    }
+
+    // [New] 화자(Speaker)에 따른 카메라 타겟 좌표 반환 (EventScene용)
+    getCameraTarget(speaker) {
+        // 전략맵에서는 화자별 카메라 이동을 리더 토큰으로 단순화하거나 노드 위치로 설정 가능
+        // 현재는 리더 위치 반환 예시
+        if (this.leaderObj) {
+            return { x: this.leaderObj.x, y: this.leaderObj.y };
+        }
+        return null;
     }
 
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
@@ -986,7 +906,6 @@ export default class StrategyScene extends BaseScene {
                     text: text,
                     army: armyData, 
                     bgm: config.bgm || "stage1_bgm",
-                    // [New] 스크립트 데이터 파싱
                     script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null)
                 };
             });

@@ -22,28 +22,28 @@
       "mapId": "level3",
       "name": "무대륙",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level1"
     },
     "4": {
       "mapId": "level4",
       "name": "상점가",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level1"
     },
     "5": {
       "mapId": "level5",
       "name": "상점가2",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level1"
     },
     "6": {
-      "mapId": "level0",
+      "mapId": "level10",
       "name": "광장-서쪽",
       "difficulty": 2,
       "bgm": "level2"
     },
     "7": {
-      "mapId": "level0",
+      "mapId": "level9",
       "name": "광장-동쪽",
       "difficulty": 2,
       "bgm": "level2"

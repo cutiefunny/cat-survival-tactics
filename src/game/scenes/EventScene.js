@@ -6,6 +6,9 @@ export default class EventScene extends Phaser.Scene {
     }
 
     init(data) {
+        // [New] 컷씬 생략 설정 확인
+        const isSkipEnabled = localStorage.getItem('setting_skip_cutscenes') === 'true';
+        
         this.eventConfig = data || {};
         
         if (data && data.script && data.script.length > 0) {
@@ -19,23 +22,24 @@ export default class EventScene extends Phaser.Scene {
         this.nextSceneKey = (data && data.nextScene) ? data.nextScene : 'StrategyScene';
         this.nextSceneData = (data && data.nextSceneData) ? data.nextSceneData : {};
         
-        console.log(`🎬 [EventScene] Init - Mode: ${this.viewMode}, Script Len: ${this.currentScript.length}`);
+        // [New] 스킵 활성화 시 플래그 설정
+        this.shouldSkipImmediately = isSkipEnabled;
+
+        console.log(`🎬 [EventScene] Init - Mode: ${this.viewMode}, Skip: ${this.shouldSkipImmediately}`);
     }
 
     preload() {
-        // 1. 이미지 로드
+        // 스킵 모드여도 기본적인 리소스 로딩은 유지 (에러 방지)
         for (let i = 1; i <= 5; i++) {
             if (!this.textures.exists(`opening${i}`)) {
                 this.load.image(`opening${i}`, `cutscenes/opening${i}.png`);
             }
         }
         
-        // 2. BGM 로드
         if (!this.cache.audio.exists('intermission')) {
             this.load.audio('intermission', 'sounds/intermission.mp3');
         }
 
-        // 3. 비디오 로드
         if (this.currentScript) {
             this.currentScript.forEach(step => {
                 if (step.type === 'mov' && step.file) {
@@ -48,6 +52,13 @@ export default class EventScene extends Phaser.Scene {
     }
 
     create() {
+        // [New] 스킵 활성화 시 즉시 종료 처리
+        if (this.shouldSkipImmediately) {
+            console.log("⏩ [EventScene] Skipping due to user setting.");
+            this.endEvent();
+            return;
+        }
+
         this.scene.bringToTop();
 
         if (this.viewMode === 'scene' && !this.sound.get('intermission')) {
@@ -58,11 +69,9 @@ export default class EventScene extends Phaser.Scene {
         this.input.on('pointerdown', this.handleInput, this);
         this.input.keyboard.on('keydown', this.handleInput, this);
 
-        // --- UI 컨테이너 ---
         this.uiContainer = this.add.container(0, 0).setDepth(100);
         this.uiContainer.setScrollFactor(0); 
 
-        // --- 비디오 컨테이너 ---
         this.videoContainer = this.add.container(0, 0).setDepth(150);
         this.videoContainer.setScrollFactor(0);
         this.videoContainer.setVisible(false);
@@ -85,18 +94,14 @@ export default class EventScene extends Phaser.Scene {
         }
     }
 
-    // [New] 매 프레임 호출되는 업데이트 루프
+    // ... (이하 createUIElements, createVideoElements, updateLayout, resizeVideoLayout1to1 등 기존 메서드 유지) ...
     update(time, delta) {
-        // 비디오 컨테이너가 보일 때만 실행 (비디오 모드)
-        if (this.videoContainer.visible) {
-            // 지속적으로 크기와 위치를 강제 동기화하여 
-            // 영상 로딩 직후 크기가 튀는 현상을 방지
+        if (this.videoContainer && this.videoContainer.visible) {
             this.resizeVideoLayout1to1();
         }
     }
 
     createUIElements() {
-        // 다이얼로그 UI
         this.bgImage = this.add.image(0, 0, 'opening1').setOrigin(0.5).setDepth(0).setVisible(false);
         this.textBox = this.add.rectangle(0, 0, 100, 100, 0x000000, 0.8).setOrigin(0);
         this.uiContainer.add(this.textBox);
@@ -126,27 +131,22 @@ export default class EventScene extends Phaser.Scene {
     }
 
     createVideoElements() {
-        // 1. 비디오 배경 (Dim)
         this.videoDim = this.add.rectangle(0, 0, 100, 100, 0x000000, 0.7).setOrigin(0.5);
         this.videoContainer.add(this.videoDim);
 
-        // 2. 비디오 프레임 (테두리)
         this.videoFrame = this.add.rectangle(0, 0, 100, 100, 0x222222, 1).setOrigin(0.5);
         this.videoFrame.setStrokeStyle(4, 0xffffff);
         this.videoContainer.add(this.videoFrame);
 
-        // 3. 비디오 객체
         this.videoObject = this.add.video(0, 0); 
-        this.videoObject.setOrigin(0.5); // [중요] 중심점 중앙 정렬
+        this.videoObject.setOrigin(0.5); 
         this.videoContainer.add(this.videoObject);
 
-        // 4. 설명 텍스트
         this.videoText = this.add.text(0, 0, '', {
             fontFamily: 'NeoDunggeunmo', fontSize: '24px', color: '#ffffff', align: 'center', stroke: '#000000', strokeThickness: 3, wordWrap: { width: 600 }
         }).setOrigin(0.5, 0);
         this.videoContainer.add(this.videoText);
 
-        // 5. 안내 텍스트
         this.videoGuideText = this.add.text(0, 0, "▼ 화면을 터치하면 다음으로 넘어갑니다", {
             fontFamily: 'Arial', fontSize: '16px', color: '#cccccc'
         }).setOrigin(0.5);
@@ -158,7 +158,6 @@ export default class EventScene extends Phaser.Scene {
         const isOverlay = (this.viewMode === 'overlay');
         const isMobile = width <= 640;
 
-        // 배경색
         if (isOverlay) {
             this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
         } else {
@@ -168,7 +167,6 @@ export default class EventScene extends Phaser.Scene {
             }
         }
 
-        // 다이얼로그 레이아웃
         const boxHeight = isOverlay ? 160 : 200;
         const marginY = isOverlay ? 30 : 0; 
         const boxY = isOverlay ? marginY : (height - boxHeight);
@@ -191,19 +189,16 @@ export default class EventScene extends Phaser.Scene {
         this.storyText.setPosition(this.baseTextX, textY + 40); 
         this.storyText.setStyle({ wordWrap: { width: boxWidth - 100 } });
 
-        // Skip 버튼
         if (isOverlay) {
             this.skipBtn.setPosition(width - marginX, boxY + boxHeight + 10);
         } else {
             this.skipBtn.setPosition(width - 30, 30);
         }
 
-        // 비디오 레이아웃 갱신
         this.videoDim.setPosition(width / 2, height / 2);
         this.videoDim.setDisplaySize(width, height);
         this.videoContainer.setPosition(width / 2, height / 2);
         
-        // * update()에서 계속 호출하므로 여기서는 텍스트 위치 정도만 갱신해도 됨
         if (this.currentScript && this.currentScript[this.currentCutIndex]) {
             const data = this.currentScript[this.currentCutIndex];
             if (data.type !== 'mov') {
@@ -218,34 +213,26 @@ export default class EventScene extends Phaser.Scene {
         }
     }
 
-    // 1:1 레이아웃 계산 (비디오 객체 포함)
     resizeVideoLayout1to1() {
         const { width, height } = this.scale;
         const isMobile = width <= 640;
         
         let targetSize;
-
         if (isMobile) {
-            // 모바일: 가로 최대 350px
             targetSize = Math.min(350, width - 40, height - 160); 
         } else {
-            // PC: 최대 600px
             targetSize = Math.min(600, width - 100, height - 160);
         }
 
-        // 프레임 크기 적용
         if (this.videoFrame) {
             this.videoFrame.setDisplaySize(targetSize + 20, targetSize + 20);
         }
 
-        // 비디오 크기 및 위치 적용
-        // update 루프에서 계속 호출되므로, 비디오가 재생 시작되어 크기가 변해도 바로 다시 잡아줌
         if (this.videoObject) {
             this.videoObject.setDisplaySize(targetSize, targetSize);
-            this.videoObject.setPosition(0, 0); // 컨테이너 중앙
+            this.videoObject.setPosition(0, 0); 
         }
 
-        // 텍스트 위치 조정
         if (this.videoText && this.videoGuideText) {
             const textWidth = Math.max(300, targetSize);
             this.videoText.setStyle({ wordWrap: { width: textWidth } });
@@ -263,38 +250,39 @@ export default class EventScene extends Phaser.Scene {
         const data = this.currentScript[index];
         const type = data.type || 'dialog';
 
-        // 이전 비디오 정지
         if (this.videoObject && this.videoObject.isPlaying()) {
             this.videoObject.stop();
         }
 
         if (type === 'mov') {
-            // [비디오 모드]
+            const storageKey = `tutorial_played_${data.file}`;
+            if (localStorage.getItem(storageKey)) {
+                console.log(`⏩ Skipping played tutorial: ${data.file}`);
+                this.currentCutIndex++;
+                this.showCut(this.currentCutIndex);
+                return;
+            }
+            localStorage.setItem(storageKey, 'true');
+
             this.uiContainer.setVisible(false);
             if (this.bgImage) this.bgImage.setVisible(false);
             
-            // 1. 프레임 표시
             this.videoContainer.setVisible(true);
-            
-            // 2. 초기 레이아웃 잡기
             this.resizeVideoLayout1to1();
 
             this.videoText.setText(data.text || '');
             this.isTyping = false;
 
-            // 3. 딜레이 후 비디오 재생 (프레임이 먼저 보이도록)
             this.time.delayedCall(100, () => {
                 if (this.videoContainer.visible) {
                     this.videoObject.changeSource(data.file);
-                    this.videoObject.play(true);
-                    
-                    // 여기서 다시 잡아주지만, update()에서도 계속 잡아주므로 안전함
+                    this.videoObject.setLoop(true); 
+                    this.videoObject.play();
                     this.resizeVideoLayout1to1();
                 }
             });
 
         } else {
-            // [다이얼로그 모드]
             this.videoContainer.setVisible(false);
             this.uiContainer.setVisible(true);
 

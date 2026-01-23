@@ -31,6 +31,9 @@ const TILESET_MAPPING = {
     'Road': new URL('../../assets/tilesets/road.png', import.meta.url).href,
     'road': new URL('../../assets/tilesets/road.png', import.meta.url).href,
 
+    'baekam': new URL('../../assets/tilesets/baekam.jpg', import.meta.url).href,
+    'mega_coffee': new URL('../../assets/tilesets/mega_coffee.jpg', import.meta.url).href,
+
     'Big_city': new URL('../../assets/tilesets/big_city.png', import.meta.url).href,
     'Big_Street': new URL('../../assets/tilesets/big_street.png', import.meta.url).href,
 
