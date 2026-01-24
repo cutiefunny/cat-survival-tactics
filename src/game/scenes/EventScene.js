@@ -6,14 +6,16 @@ export default class EventScene extends Phaser.Scene {
     }
 
     init(data) {
-        // [New] 컷씬 생략 설정 확인
+        // [설정] 컷씬 생략 설정 확인 (localStorage 사용)
         const isSkipEnabled = localStorage.getItem('setting_skip_cutscenes') === 'true';
         
         this.eventConfig = data || {};
         
+        // 데이터에 스크립트가 있으면 사용하고, 없으면 오프닝으로 간주
         if (data && data.script && data.script.length > 0) {
             this.currentScript = data.script;
         } else {
+            // 전달된 스크립트가 없으면 오프닝 시퀀스 로드
             this.currentScript = this.getOpeningSequence();
         }
 
@@ -22,14 +24,15 @@ export default class EventScene extends Phaser.Scene {
         this.nextSceneKey = (data && data.nextScene) ? data.nextScene : 'StrategyScene';
         this.nextSceneData = (data && data.nextSceneData) ? data.nextSceneData : {};
         
-        // [New] 스킵 활성화 시 플래그 설정
-        this.shouldSkipImmediately = isSkipEnabled;
+        // 스킵 활성화 시 플래그 설정 (오프닝인 경우에만 적용)
+        const isOpeningSequence = (!data || !data.script);
+        this.shouldSkipImmediately = isSkipEnabled && isOpeningSequence;
 
-        console.log(`🎬 [EventScene] Init - Mode: ${this.viewMode}, Skip: ${this.shouldSkipImmediately}`);
+        console.log(`🎬 [EventScene] Init - Mode: ${this.viewMode}, IsOpening: ${isOpeningSequence}`);
     }
 
     preload() {
-        // 스킵 모드여도 기본적인 리소스 로딩은 유지 (에러 방지)
+        // 기본 리소스 로딩
         for (let i = 1; i <= 5; i++) {
             if (!this.textures.exists(`opening${i}`)) {
                 this.load.image(`opening${i}`, `cutscenes/opening${i}.png`);
@@ -52,7 +55,6 @@ export default class EventScene extends Phaser.Scene {
     }
 
     create() {
-        // [New] 스킵 활성화 시 즉시 종료 처리
         if (this.shouldSkipImmediately) {
             console.log("⏩ [EventScene] Skipping due to user setting.");
             this.endEvent();
@@ -61,6 +63,7 @@ export default class EventScene extends Phaser.Scene {
 
         this.scene.bringToTop();
 
+        // 오버레이 모드가 아니고 오디오가 없다면 BGM 재생
         if (this.viewMode === 'scene' && !this.sound.get('intermission')) {
             this.bgm = this.sound.add('intermission', { loop: true, volume: 0.5 });
             this.bgm.play();
@@ -71,6 +74,11 @@ export default class EventScene extends Phaser.Scene {
 
         this.uiContainer = this.add.container(0, 0).setDepth(100);
         this.uiContainer.setScrollFactor(0); 
+
+        // 선택지 버튼을 담을 컨테이너 추가
+        this.choiceContainer = this.add.container(0, 0).setDepth(200);
+        this.choiceContainer.setScrollFactor(0);
+        this.choiceContainer.setVisible(false);
 
         this.videoContainer = this.add.container(0, 0).setDepth(150);
         this.videoContainer.setScrollFactor(0);
@@ -84,17 +92,18 @@ export default class EventScene extends Phaser.Scene {
 
         this.currentCutIndex = 0;
         this.isTyping = false;
+        this.isWaitingForChoice = false; 
         this.fullText = "";
         this.typingTimer = null;
 
         if (this.currentScript && this.currentScript.length > 0) {
             this.showCut(0);
         } else {
+            console.warn("⚠️ [EventScene] No script provided.");
             this.endEvent();
         }
     }
 
-    // ... (이하 createUIElements, createVideoElements, updateLayout, resizeVideoLayout1to1 등 기존 메서드 유지) ...
     update(time, delta) {
         if (this.videoContainer && this.videoContainer.visible) {
             this.resizeVideoLayout1to1();
@@ -159,7 +168,7 @@ export default class EventScene extends Phaser.Scene {
         const isMobile = width <= 640;
 
         if (isOverlay) {
-            this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
+            this.cameras.main.setBackgroundColor('rgba(0,0,0,0.5)'); 
         } else {
             this.cameras.main.setBackgroundColor('#ffffff');
             if (this.bgImage.visible) {
@@ -179,6 +188,7 @@ export default class EventScene extends Phaser.Scene {
         
         const padding = 20;
         const avatarSize = 100;
+        
         this.avatarImage.setPosition(boxX + padding + avatarSize / 2, boxY + boxHeight / 2);
         
         this.baseTextX = boxX + padding;
@@ -194,6 +204,8 @@ export default class EventScene extends Phaser.Scene {
         } else {
             this.skipBtn.setPosition(width - 30, 30);
         }
+        
+        this.choiceContainer.setPosition(width / 2, boxY - 20);
 
         this.videoDim.setPosition(width / 2, height / 2);
         this.videoDim.setDisplaySize(width, height);
@@ -201,7 +213,13 @@ export default class EventScene extends Phaser.Scene {
         
         if (this.currentScript && this.currentScript[this.currentCutIndex]) {
             const data = this.currentScript[this.currentCutIndex];
-            if (data.type !== 'mov') {
+            const type = data.type || 'dialog';
+            
+            // Notice 처리 시 텍스트 위치 리셋
+            if (type === 'notice') {
+                this.speakerText.setX(this.baseTextX);
+                this.storyText.setX(this.baseTextX);
+            } else if (type !== 'mov') {
                 if (data.avatar) {
                     this.speakerText.setX(this.avatarTextX);
                     this.storyText.setX(this.avatarTextX);
@@ -272,6 +290,7 @@ export default class EventScene extends Phaser.Scene {
 
             this.videoText.setText(data.text || '');
             this.isTyping = false;
+            this.isWaitingForChoice = false;
 
             this.time.delayedCall(100, () => {
                 if (this.videoContainer.visible) {
@@ -286,6 +305,9 @@ export default class EventScene extends Phaser.Scene {
             this.videoContainer.setVisible(false);
             this.uiContainer.setVisible(true);
 
+            // [New] Notice 타입 여부 확인
+            const isNotice = (type === 'notice');
+
             if (type === 'image') {
                 if (this.bgImage && data.image) {
                     this.bgImage.setVisible(true);
@@ -296,29 +318,54 @@ export default class EventScene extends Phaser.Scene {
                     }
                     this.fitImageToScreen(this.bgImage);
                 }
+            } else if (this.viewMode === 'overlay') {
+                if (this.bgImage) this.bgImage.setVisible(false);
             }
             
-            if (data.avatar) {
+            // 아바타 및 화자 텍스트 처리 (Notice일 경우 숨김)
+            if (!isNotice && data.avatar) {
                 this.avatarImage.setVisible(true);
-                this.avatarImage.setTexture(data.avatar, 0); 
+                if (this.textures.exists(data.avatar)) {
+                    this.avatarImage.setTexture(data.avatar, 0); 
+                }
                 this.speakerText.setX(this.avatarTextX);
                 this.storyText.setX(this.avatarTextX);
+                this.speakerText.setText(data.speaker || '');
             } else {
+                // 아바타가 없거나 Notice인 경우
                 this.avatarImage.setVisible(false);
                 this.speakerText.setX(this.baseTextX);
                 this.storyText.setX(this.baseTextX);
+                
+                // Notice면 화자 이름 비우기
+                if (isNotice) {
+                    this.speakerText.setText('');
+                } else {
+                    this.speakerText.setText(data.speaker || '');
+                }
             }
             
-            this.speakerText.setText(data.speaker || '');
             this.fullText = data.text || '';
             this.storyText.setText('');
             
             this.isTyping = true;
             this.startTyping(this.fullText);
 
+            // 선택지(Choices) 처리
+            this.choiceContainer.removeAll(true);
+            this.choiceContainer.setVisible(false);
+            this.isWaitingForChoice = false;
+
+            if (data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
+                this.isWaitingForChoice = true;
+                this.createChoices(data.choices);
+            }
+
+            // 카메라 이동 (Overlay 모드)
             if (this.viewMode === 'overlay' && this.parentSceneKey) {
                 const parent = this.scene.get(this.parentSceneKey);
                 if (parent && typeof parent.getCameraTarget === 'function') {
+                    // Notice일 때는 화자 이동 안함 (또는 옵션)
                     const target = parent.getCameraTarget(data.speaker);
                     if (target) {
                         const cam = parent.cameras.main;
@@ -331,6 +378,46 @@ export default class EventScene extends Phaser.Scene {
                 }
             }
         }
+    }
+
+    createChoices(choices) {
+        this.choiceContainer.setVisible(true);
+        let yOffset = 0;
+        const btnHeight = 50;
+        const btnWidth = 300;
+        const spacing = 15;
+
+        choices.slice().reverse().forEach((choice, index) => {
+            const btn = this.add.container(0, -yOffset);
+            
+            const bg = this.add.rectangle(0, 0, btnWidth, btnHeight, 0x000000, 0.9)
+                .setStrokeStyle(2, 0xffffff);
+            
+            const text = this.add.text(0, 0, choice.text, {
+                fontSize: '20px', fontFamily: 'NeoDunggeunmo', color: '#ffffff'
+            }).setOrigin(0.5);
+
+            const hitArea = this.add.rectangle(0, 0, btnWidth, btnHeight).setInteractive({ useHandCursor: true });
+            
+            hitArea.on('pointerover', () => bg.setStrokeStyle(2, 0xffff00));
+            hitArea.on('pointerout', () => bg.setStrokeStyle(2, 0xffffff));
+            hitArea.on('pointerdown', () => this.handleChoice(choice.value));
+
+            btn.add([bg, text, hitArea]);
+            this.choiceContainer.add(btn);
+
+            yOffset += (btnHeight + spacing);
+        });
+    }
+
+    handleChoice(value) {
+        this.completeTyping();
+        
+        if (this.eventConfig.onResult) {
+            this.eventConfig.onResult(value);
+        }
+
+        this.endEvent();
     }
 
     startTyping(text) {
@@ -362,6 +449,13 @@ export default class EventScene extends Phaser.Scene {
         if (this.videoContainer.visible) {
             this.currentCutIndex++;
             this.showCut(this.currentCutIndex);
+            return;
+        }
+
+        if (this.isWaitingForChoice) {
+            if (this.isTyping) {
+                this.completeTyping(); 
+            }
             return;
         }
 

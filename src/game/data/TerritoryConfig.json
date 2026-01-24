@@ -55,12 +55,39 @@
       "bgm": "level2",
       "neutral": true,
       "unit": "Runner",
-      "text": "여기는 합정파의 영역이다냥!",
+      "text": "이제 러너와 슈터를 동료로 영입할 수 있다!",
       "script": [
         {
           "type": "dialog",
           "speaker": "합정파 두목",
-          "text": "이 구역은 합정파가 지킨다냥! 얼른 꺼져라냥!"
+          "avatar": "runner",
+          "text": "김냐냐! 내 구역의 들개들을 쫓아내줘서 고맙다냥!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "별말씀을! 합정냐 나와 함께 싸워줄테냥?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "합정파 두목",
+          "avatar": "runner",
+          "text": "물론이지! 우리 합정파는 항상 너의 편이다냥!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "턱시도",
+          "avatar": "shooter",
+          "text": "나도 돕겠다냥! 도움이 될거다냐!"
+        },
+        {
+          "type": "notice",
+          "text": "이제 러너와 슈터를 동료로 영입할 수 있다!"
+        },
+        {
+          "type": "notice",
+          "text": "여기서 다이소를 이용할 수 있다!"
         }
       ]
     },

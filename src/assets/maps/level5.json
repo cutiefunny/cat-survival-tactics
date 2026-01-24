@@ -141,7 +141,7 @@
         {
          "columns":40,
          "firstgid":1,
-         "image":"..\/tilesets\/road.png",
+         "image":"..\/tilesets\/road.jpg",
          "imageheight":1280,
          "imagewidth":1280,
          "margin":0,
@@ -154,7 +154,7 @@
         {
          "columns":40,
          "firstgid":1601,
-         "image":"..\/tilesets\/street2.png",
+         "image":"..\/tilesets\/street2.jpg",
          "imageheight":1280,
          "imagewidth":1280,
          "margin":0,

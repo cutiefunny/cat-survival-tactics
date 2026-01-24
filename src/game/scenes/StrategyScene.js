@@ -332,13 +332,10 @@ export default class StrategyScene extends BaseScene {
         this.shopModal = new ShopModal(this, this.uiContainer);
         this.systemModal = new SystemModal(this, this.uiContainer);
         
-        // [Modified] 기존 createDialogueUI() 삭제됨 (EventScene 사용)
-
         this.drawUIElements();
     }
 
     drawUIElements() {
-        // [Modified] DialogUI 관련 재생성 로직 제거
         if (this.uiContainer.list.length > 0) {
             this.uiContainer.removeAll(true);
             this.shopModal = new ShopModal(this, this.uiContainer);
@@ -489,7 +486,7 @@ export default class StrategyScene extends BaseScene {
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
             
-            // [Modified] 스크립트가 있다면 EventScene 실행, 아니면 바로 도착 처리
+            // 스크립트가 있다면 EventScene 실행, 아니면 바로 도착 처리
             if (node.script) {
                 this.pendingNode = node; // Resume 후 처리를 위해 저장
                 this.scene.pause(); // 현재 씬 일시 정지
@@ -504,29 +501,64 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
-    // [New] 노드 도착 후 로직 (스크립트 종료 후 호출됨)
     handleNodeArrival(node) {
+        // 1. 중립 지역 이벤트 처리 (기존 로직 유지)
         if (node.owner === 'neutral') {
             this.handleNeutralEvent(node);
             return; 
         }
 
+        // 2. 현재 노드의 적군 수 계산
+        let enemyCount = 0;
+        if (node.army) {
+            if (Array.isArray(node.army)) {
+                enemyCount = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
+            } else {
+                enemyCount = node.army.count || 1;
+            }
+        }
+
+        // 3. [NEW] 적 땅이지만 군대가 없는 경우 -> 자동 점령 처리
+        if (node.owner !== 'player' && enemyCount <= 0) {
+            console.log(`🚩 [StrategyScene] 빈 영토 자동 점령: ${node.name}`);
+
+            // 소유권 변경 및 군대 정보 초기화
+            node.owner = 'player';
+            node.army = null;
+            
+            // 전투 대상 ID 해제 (이게 null이어야 '전투 시작' 대신 '턴 종료' 버튼이 뜸)
+            this.selectedTargetId = null;
+
+            // 변경된 맵 데이터 레지스트리 저장
+            this.registry.set('worldMapData', this.mapNodes);
+            this.saveProgress();
+
+            // 지도 상의 노드 색상을 파란색(아군)으로 즉시 변경
+            const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
+            if (circle) circle.setFillStyle(0x4488ff);
+
+            // 상태 메시지 업데이트
+            this.statusText.setText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
+            
+            // UI 버튼 상태 갱신 (전투 시작 -> 턴 종료)
+            this.updateUIState();
+            return;
+        }
+
+        // 4. 적군이 있는 경우 (기존 전투 대기 로직)
         if (this.selectedTargetId) {
             let infoText = ""; 
-            if (node.army) {
-                if (Array.isArray(node.army)) {
-                    const total = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
-                    infoText = ` (적군: ${total}마리)`;
-                } else {
-                    infoText = ` (적군: ${node.army.count || 1}마리)`;
-                }
+            if (enemyCount > 0) {
+                infoText = ` (적군: ${enemyCount}마리)`;
             }
             const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
             const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
             this.statusText.setText(finalMsg);
         } else { 
+            // 이미 내 땅이거나 안전한 곳인 경우
             this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
         }
+        
         this.updateUIState();
     }
 
@@ -555,27 +587,35 @@ export default class StrategyScene extends BaseScene {
         
         if (node.army) {
             choices.push({
-                text: "동료로 영입하기",
+                text: "🤝 동료로 영입하기",
                 value: "recruit"
             });
         }
         
         choices.push({
-            text: "그냥 지나가기",
+            text: "👋 그냥 지나가기",
             value: "leave"
         });
 
         this.input.enabled = false;
         
-        // [Check] 여기서도 EventScene을 쓰는데, EventScene이 이 양식을 지원하는지 확인 필요.
-        // 만약 EventScene이 script 배열만 받는 구조로 변경되었다면, 이 부분도 수정이 필요할 수 있음.
-        // 현재는 개발자님의 EventScene.js가 스크립트 기반이므로, 호환성을 위해 여기는 그대로 둡니다.
-        // (EventScene 내부 구현에 따라 작동 여부가 갈림)
+        // [Fixed] EventScene에 스크립트 형식으로 데이터 전달
+        // 이 형식을 지켜야 EventScene에서 오프닝으로 오해하지 않습니다.
+        const neutralScript = [
+            {
+                type: 'dialog',
+                speaker: node.name,
+                text: node.text || "이곳에는 누군가 살고 있는 것 같다...",
+                avatar: imageKey, // 아바타 이미지로 유닛 표시
+                choices: choices // EventScene에서 처리할 선택지
+            }
+        ];
+
+        this.scene.pause(); // StrategyScene 일시 정지
         this.scene.launch('EventScene', {
-            title: node.name,
-            description: node.text || "아무 일도 일어나지 않았습니다.",
-            imageKey: imageKey,
-            choices: choices,
+            mode: 'overlay', // 맵 위에 오버레이
+            script: neutralScript,
+            parentScene: 'StrategyScene',
             onResult: (result) => {
                 this.handleEventResult(result, node);
             }
@@ -583,6 +623,9 @@ export default class StrategyScene extends BaseScene {
     }
 
     handleEventResult(result, node) {
+        // EventScene이 종료되면 StrategyScene은 자동으로 resume되지 않으므로 수동 resume 필요할 수 있음
+        // 하지만 EventScene에서 overlay 모드 종료 시 resume을 호출해주므로 여기서는 결과 처리만 집중
+        
         if (result === 'recruit') {
             if (node.army) {
                 let firstUnit = Array.isArray(node.army) ? node.army[0] : node.army;
@@ -592,12 +635,17 @@ export default class StrategyScene extends BaseScene {
                     this.statusText.setText(`🤝 ${roleName} 영입 성공!`);
                     node.owner = 'player';
                     node.script = null; 
+                    
+                    // 맵 상의 적 토큰 제거
                     const token = this.enemyTokens.find(t => 
                         Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
                     );
                     if (token) token.destroy();
+                    
                     this.registry.set('worldMapData', this.mapNodes);
                     this.saveProgress();
+                    
+                    // 영토 색상 변경
                     const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
                     if (circle) circle.setFillStyle(0x4488ff);
                 }
@@ -610,10 +658,7 @@ export default class StrategyScene extends BaseScene {
         this.input.enabled = true;
     }
 
-    // [New] 화자(Speaker)에 따른 카메라 타겟 좌표 반환 (EventScene용)
     getCameraTarget(speaker) {
-        // 전략맵에서는 화자별 카메라 이동을 리더 토큰으로 단순화하거나 노드 위치로 설정 가능
-        // 현재는 리더 위치 반환 예시
         if (this.leaderObj) {
             return { x: this.leaderObj.x, y: this.leaderObj.y };
         }
