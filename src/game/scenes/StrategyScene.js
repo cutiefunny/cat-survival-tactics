@@ -562,64 +562,62 @@ export default class StrategyScene extends BaseScene {
         this.updateUIState();
     }
 
+    // [Modified] 중립 지역 이벤트 처리 (대화창 없이 즉시 해금 로직으로 변경)
     handleNeutralEvent(node) {
-        let imageKey = 'dog_token';
-        let targetType = 'dog';
+        let unlockedUnits = [];
 
-        if (node.army) {
-            let firstUnit = node.army;
-            if (Array.isArray(node.army) && node.army.length > 0) firstUnit = node.army[0];
-            
-            if (firstUnit && firstUnit.type) {
-                targetType = firstUnit.type.toLowerCase();
+        // 1. 노드에 설정된 스크립트 확인
+        if (node.script && Array.isArray(node.script)) {
+            // 'unlock_unit' 타입의 명령어를 찾음
+            const unlockCommand = node.script.find(cmd => cmd.type === 'unlock_unit');
+
+            if (unlockCommand && Array.isArray(unlockCommand.unit)) {
+                console.log(`🎁 [StrategyScene] 유닛 해금 이벤트 발생:`, unlockCommand.unit);
+
+                // 2. 유닛 해금 처리
+                unlockCommand.unit.forEach(roleName => {
+                    this.unlockUnit(roleName); // 기존 unlockUnit 메서드 활용
+                    unlockedUnits.push(roleName);
+                });
             }
         }
 
-        if (targetType === 'runner') imageKey = 'runner_token';
-        else if (targetType === 'tanker') imageKey = 'tanker_token';
-        else if (targetType === 'shooter') imageKey = 'shooter_token';
-        else if (targetType === 'healer') imageKey = 'healer_token';
-        else if (targetType === 'raccoon') imageKey = 'raccoon_token';
-        else if (targetType === 'boss') imageKey = 'boss_token';
-        else imageKey = 'dog_token';
+        // 3. 영토 점령 처리
+        node.owner = 'player';
+        node.script = null; // 스크립트 1회성 소모 처리
+        node.army = null;   // 중립 군대 데이터 제거
 
-        const choices = [];
+        // 4. 맵 데이터 및 UI 갱신
+        this.registry.set('worldMapData', this.mapNodes);
         
-        if (node.army) {
-            choices.push({
-                text: "🤝 동료로 영입하기",
-                value: "recruit"
-            });
+        // 지도 상의 토큰 제거
+        const token = this.enemyTokens.find(t => 
+            Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
+        );
+        if (token) {
+            token.destroy();
+            this.enemyTokens = this.enemyTokens.filter(t => t !== token);
         }
-        
-        choices.push({
-            text: "👋 그냥 지나가기",
-            value: "leave"
-        });
 
-        this.input.enabled = false;
-        
-        // [Fixed] EventScene에 스크립트 형식으로 데이터 전달
-        // 이 형식을 지켜야 EventScene에서 오프닝으로 오해하지 않습니다.
-        const neutralScript = [
-            {
-                type: 'dialog',
-                speaker: node.name,
-                text: node.text || "이곳에는 누군가 살고 있는 것 같다...",
-                avatar: imageKey, // 아바타 이미지로 유닛 표시
-                choices: choices // EventScene에서 처리할 선택지
-            }
-        ];
+        // 지도 상의 노드 색상 변경 (파란색)
+        const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
+        if (circle) circle.setFillStyle(0x4488ff);
 
-        this.scene.pause(); // StrategyScene 일시 정지
-        this.scene.launch('EventScene', {
-            mode: 'overlay', // 맵 위에 오버레이
-            script: neutralScript,
-            parentScene: 'StrategyScene',
-            onResult: (result) => {
-                this.handleEventResult(result, node);
-            }
-        });
+        // 5. 결과 메시지 출력 및 저장
+        if (unlockedUnits.length > 0) {
+            const unitListStr = unlockedUnits.join(', ');
+            this.statusText.setText(`🤝 ${node.name} 합류! 새로운 동료: ${unitListStr}`);
+            this.cameras.main.flash(500, 255, 255, 0); // 획득 효과 (노란 번쩍임)
+        } else {
+            // 해금 유닛이 없는 일반 중립 지역인 경우
+            this.statusText.setText(`✅ ${node.name}을(를) 별다른 일 없이 점령했습니다.`);
+        }
+
+        this.saveProgress();
+        this.updateUIState();
+        
+        // 입력 잠금 해제 (EventScene을 띄우지 않으므로 즉시 해제)
+        this.input.enabled = true;
     }
 
     handleEventResult(result, node) {

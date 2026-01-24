@@ -42,22 +42,17 @@ export default class Shooter extends Unit {
             return; 
         }
 
-        // [Logic] 도발 상태 처리
+        // [Logic] 도발 상태 처리 (타이머 감소)
         this.ai.processAggro(delta);
-        if (this.ai.isProvoked) {
-            if (this.ai.currentTarget && this.ai.currentTarget.active) {
-                // 도발 시에도 패스파인딩 사용 권장 (직선 이동 대신)
-                this.ai.moveToTargetSmart(delta);
-            }
-            return; 
-        }
 
         // 타겟 유효성 체크
         if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying) {
             this.ai.thinkTimer = 0;
+            // 타겟이 죽거나 사라지면 도발 상태도 해제
+            if (this.ai.isProvoked) this.ai.provokedTimer = 0;
         }
 
-        // 1. [생존] 카이팅 (Kiting)
+        // 1. [생존] 카이팅 (Kiting) - 도발 상태여도 생존을 위해 너무 가까운 적에게서는 도망침
         if (!isFormationMode) {
             const nearestThreat = this.ai.findNearestEnemy(); 
             if (nearestThreat) {
@@ -76,7 +71,9 @@ export default class Shooter extends Unit {
         this.ai.thinkTimer -= delta;
 
         // 2. [타겟팅] 스마트 타겟 선정
-        if (this.ai.thinkTimer <= 0) {
+        // [Modified] 도발 상태(isProvoked)가 아닐 때만 새로운 타겟을 탐색
+        // 도발 상태라면 현재 타겟(도발 시전자)을 계속 유지함
+        if (!this.ai.isProvoked && this.ai.thinkTimer <= 0) {
             const { thinkTimeMin, thinkTimeVar } = this.aiConfig.common || { thinkTimeMin: 150, thinkTimeVar: 100 };
             this.ai.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
             
@@ -84,7 +81,8 @@ export default class Shooter extends Unit {
         }
 
         // 3. [이동] 사거리 유지 및 추격
-        this.executeMovement(delta); // delta 전달
+        // [Modified] 도발 상태일 때도 무조건 돌진하지 않고, 이 메서드를 통해 사거리 유지(카이팅)를 수행함
+        this.executeMovement(delta); 
         
         // 4. [시선] 타겟 바라보기
         if (this.ai.currentTarget && this.ai.currentTarget.active) {
@@ -181,11 +179,15 @@ export default class Shooter extends Unit {
         const kiteDistSq = (atkRange * 0.8) ** 2;
 
         if (distSq > atkRangeSq) {
-            // [Fix 3] 사거리 밖이면 접근: 단순 이동(moveToObject) 대신 스마트 패스파인딩 사용
-            this.ai.moveToTargetSmart(delta);
+            // [Fix 3] 사거리 밖이면 접근: UnitAI에 추가된 moveToTargetSmart 사용
+            if (this.ai.moveToTargetSmart) {
+                this.ai.moveToTargetSmart(delta);
+            } else {
+                // 혹시 UnitAI 업데이트가 안 되었을 경우를 대비한 폴백
+                this.ai.moveToLocationSmart(target.x, target.y, delta);
+            }
         } else if (distSq < kiteDistSq) {
             // 너무 가까우면 뒤로 살짝 빠짐 (Micro-Kiting)
-            // Kiting은 즉각 반응이 중요하므로 직선 이동 유지하되, 끼임 발생 시 처리는 AI 클래스가 도움을 줄 수 있음
             const angle = Phaser.Math.Angle.Between(target.x, target.y, this.x, this.y);
             this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 0.5, this.body.velocity);
             

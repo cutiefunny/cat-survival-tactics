@@ -215,6 +215,15 @@ export default class UnitAI {
         }
     }
 
+    // [New] Shooter 등에서 호출하는 타겟 추적 래퍼 함수 (누락되었던 부분)
+    moveToTargetSmart(delta) {
+        if (!this.currentTarget || !this.currentTarget.active || this.currentTarget.isDying) {
+            this.unit.setVelocity(0, 0);
+            return;
+        }
+        this.moveToLocationSmart(this.currentTarget.x, this.currentTarget.y, delta);
+    }
+
     moveToLocationSmart(targetX, targetY, delta, speedFactor = 1.0) {
         const unit = this.unit;
         const moveSpeed = unit.moveSpeed * speedFactor;

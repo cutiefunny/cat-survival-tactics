@@ -88,6 +88,10 @@
         {
           "type": "notice",
           "text": "여기서 다이소를 이용할 수 있다!"
+        },
+        {
+          "type": "unlock_unit",
+          "unit": ["Runner", "Shooter"]
         }
       ]
     },
