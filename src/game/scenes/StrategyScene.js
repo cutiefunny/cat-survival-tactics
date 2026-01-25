@@ -604,14 +604,14 @@ export default class StrategyScene extends BaseScene {
         if (circle) circle.setFillStyle(0x4488ff);
 
         // 5. 결과 메시지 출력 및 저장
-        if (unlockedUnits.length > 0) {
-            const unitListStr = unlockedUnits.join(', ');
-            this.statusText.setText(`🤝 ${node.name} 합류! 새로운 동료: ${unitListStr}`);
-            this.cameras.main.flash(500, 255, 255, 0); // 획득 효과 (노란 번쩍임)
-        } else {
-            // 해금 유닛이 없는 일반 중립 지역인 경우
-            this.statusText.setText(`✅ ${node.name}을(를) 별다른 일 없이 점령했습니다.`);
-        }
+        // if (unlockedUnits.length > 0) {
+        //     const unitListStr = unlockedUnits.join(', ');
+        //     this.statusText.setText(`🤝 ${node.name} 합류! 새로운 동료: ${unitListStr}`);
+        //     this.cameras.main.flash(500, 255, 255, 0); // 획득 효과 (노란 번쩍임)
+        // } else {
+        //     // 해금 유닛이 없는 일반 중립 지역인 경우
+        //     this.statusText.setText(`✅ ${node.name}을(를) 별다른 일 없이 점령했습니다.`);
+        // }
 
         this.saveProgress();
         this.updateUIState();

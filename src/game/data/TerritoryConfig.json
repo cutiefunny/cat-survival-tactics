@@ -82,16 +82,13 @@
           "text": "나도 돕겠다냥! 도움이 될거다냐!"
         },
         {
-          "type": "notice",
+          "type": "unlock_unit",
+          "unit": ["Runner", "Shooter"],
           "text": "이제 러너와 슈터를 동료로 영입할 수 있다!"
         },
         {
           "type": "notice",
           "text": "여기서 다이소를 이용할 수 있다!"
-        },
-        {
-          "type": "unlock_unit",
-          "unit": ["Runner", "Shooter"]
         }
       ]
     },

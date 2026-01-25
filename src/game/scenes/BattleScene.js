@@ -610,12 +610,13 @@ export default class BattleScene extends BaseScene {
             const bossStats = { 
                 role: bossUnitRole, 
                 name: `Boss ${bossUnitRole}`,
-                level: 5
+                level: 10
             };
             
             const bossUnit = this.createUnitInstance(bossX, bossY, 'red', this.blueTeam, bossStats, false);
-            if (bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') {
-                bossUnit.setScale(1.1); 
+            if ((bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') && bossUnit.team === 'red') {
+                bossUnit.baseSize *= 2;
+                bossUnit.resetVisuals();
             }
             this.redTeam.add(bossUnit);
             const removed = enemyRoster.splice(bossIndex, 1);
