@@ -102,9 +102,8 @@ export default class UnitAI {
         this.lastTargetChangeTime = 0; 
         this.targetSwitchCooldown = 200; 
         
-        // [New] 타겟 상실 타이머 (3초 딜레이용)
-        this.lostTargetTimer = 0; 
-
+        // [삭제됨] lostTargetTimer 관련 로직 제거
+        
         // [Vision Settings]
         this.viewDistance = 350; // 감지 거리
         this.baseViewDistance = 350; // 기본 시야 거리 저장
@@ -322,7 +321,7 @@ export default class UnitAI {
 
         this.isCombatMode = true;
         this.currentTarget = target;
-        this.lostTargetTimer = 0; // [New] 타겟 확보 시 타이머 리셋
+        // lostTargetTimer 관련 제거
         
         if (this.unit.showEmote) {
             this.unit.showEmote("!", "#ff0000");
@@ -422,59 +421,8 @@ export default class UnitAI {
 
         this.processAggro(delta);
 
-        // [Fix] 적군(Red Team)의 3초 추적 유지 로직
-        if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
-            let isValidTarget = false;
-            
-            // 1. 타겟 유효성 및 범위 체크
-            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
-                const CHASE_RANGE = 500;
-                const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
-                const hasLOS = this.checkLineOfSight();
-                
-                if (dist <= CHASE_RANGE && hasLOS) {
-                    isValidTarget = true;
-                }
-            }
-
-            if (isValidTarget) {
-                this.lostTargetTimer = 0; // 타겟 확보 중
-            } else {
-                // 타겟 상실!
-                this.lostTargetTimer += delta;
-                
-                // 죽은 타겟은 참조 해제 (시체 쳐다보지 않기 위해)
-                if (this.currentTarget && (this.currentTarget.isDying || !this.currentTarget.active)) {
-                    this.currentTarget = null;
-                }
-
-                if (this.lostTargetTimer <= 3000) {
-                    // [대기 모드] 3초 동안은 제자리에서 경계하며 새 타겟 탐색
-                    this.unit.setVelocity(0, 0);
-                    
-                    // 대기 중에도 지속적으로 주변 탐색 (thinkTimer 실행)
-                    this.thinkTimer -= delta;
-                    if (this.thinkTimer <= 0) {
-                        this.thinkTimer = 150 + Math.random() * 100;
-                        // 여기서 새로운 타겟을 찾으면 engageCombat이 호출되어 lostTargetTimer가 0이 됨
-                        this.updateTargetSelection(); 
-                    }
-                    return; // 이동 로직 실행 방지
-                } else {
-                    // [배회 복귀] 3초 초과 -> 배회 모드로 전환
-                    this.isCombatMode = false;
-                    this.viewDistance = this.baseViewDistance;
-                    this.spawnPos = { x: this.unit.x, y: this.unit.y }; // 현재 위치를 배회 중심으로
-                    this.currentTarget = null;
-                    this.currentPath = [];
-                    this.lostTargetTimer = 0;
-                    
-                    if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
-                    this.unit.setVelocity(0, 0);
-                    return;
-                }
-            }
-        }
+        // [삭제됨] 적군(Red Team)의 3초 추적 룰 제거
+        // 이제 아래의 일반 타겟팅 로직을 따릅니다.
 
         this.thinkTimer -= delta;
         if (this.thinkTimer <= 0) {
@@ -532,8 +480,8 @@ export default class UnitAI {
         } else {
             this.unit.setVelocity(0, 0);
             
-            // [Fix] 전투 해제 로직: 적군(Red)은 위에서 처리하므로 여기서 해제되지 않도록 함
-            if (this.isCombatMode && this.unit.team !== 'red') {
+            // [수정] 적군도 타겟이 없으면 전투 모드를 해제하여 다시 배회하거나 대기하도록 함
+            if (this.isCombatMode) {
                 this.isCombatMode = false;
                 this.viewDistance = this.baseViewDistance;
             }

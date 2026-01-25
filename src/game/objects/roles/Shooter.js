@@ -28,11 +28,11 @@ export default class Shooter extends Unit {
     updateAI(delta) {
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
-        // [Fix 1] UnitAI의 타이머 수동 갱신 (Shooter가 ai.update를 안 쓰므로 직접 해줘야 함)
+        // [Fix 1] UnitAI의 타이머 수동 갱신
         if (this.ai.wallCollisionTimer > 0) this.ai.wallCollisionTimer -= delta;
         if (this.ai.forcePathfindingTimer > 0) this.ai.forcePathfindingTimer -= delta;
 
-        // [Fix 2] 벽 충돌 중이라면 AI의 회피 기동(미끄러짐)을 우선 수행하고 리턴
+        // [Fix 2] 벽 충돌 회피 우선
         if (this.ai.wallCollisionTimer > 0) {
             this.setVelocity(
                 this.ai.wallCollisionVector.x * this.moveSpeed, 
@@ -42,17 +42,15 @@ export default class Shooter extends Unit {
             return; 
         }
 
-        // [Logic] 도발 상태 처리 (타이머 감소)
         this.ai.processAggro(delta);
 
-        // 타겟 유효성 체크
+        // 타겟 유효성 체크 및 도발 해제
         if (!this.ai.currentTarget || !this.ai.currentTarget.active || this.ai.currentTarget.isDying) {
             this.ai.thinkTimer = 0;
-            // 타겟이 죽거나 사라지면 도발 상태도 해제
             if (this.ai.isProvoked) this.ai.provokedTimer = 0;
         }
 
-        // 1. [생존] 카이팅 (Kiting) - 도발 상태여도 생존을 위해 너무 가까운 적에게서는 도망침
+        // 1. [생존] 카이팅 (Kiting)
         if (!isFormationMode) {
             const nearestThreat = this.ai.findNearestEnemy(); 
             if (nearestThreat) {
@@ -60,7 +58,9 @@ export default class Shooter extends Unit {
                 const kiteDist = this.aiConfig.shooter?.kiteDistance || 200;
                 const kiteDistSq = kiteDist * kiteDist;
 
+                // [수정] 위험 반경(60%) 내로 적이 들어오면 무조건 그 적을 타겟으로 변경하고 도망침
                 if (distSq < kiteDistSq * 0.6) { 
+                    this.ai.currentTarget = nearestThreat; // 타겟 강제 변경 (시선 불일치 방지)
                     this.fleeFrom(nearestThreat);
                     this.lookAt(nearestThreat);
                     return;
@@ -71,8 +71,6 @@ export default class Shooter extends Unit {
         this.ai.thinkTimer -= delta;
 
         // 2. [타겟팅] 스마트 타겟 선정
-        // [Modified] 도발 상태(isProvoked)가 아닐 때만 새로운 타겟을 탐색
-        // 도발 상태라면 현재 타겟(도발 시전자)을 계속 유지함
         if (!this.ai.isProvoked && this.ai.thinkTimer <= 0) {
             const { thinkTimeMin, thinkTimeVar } = this.aiConfig.common || { thinkTimeMin: 150, thinkTimeVar: 100 };
             this.ai.thinkTimer = thinkTimeMin + Math.random() * thinkTimeVar;
@@ -81,13 +79,13 @@ export default class Shooter extends Unit {
         }
 
         // 3. [이동] 사거리 유지 및 추격
-        // [Modified] 도발 상태일 때도 무조건 돌진하지 않고, 이 메서드를 통해 사거리 유지(카이팅)를 수행함
         this.executeMovement(delta); 
         
         // 4. [시선] 타겟 바라보기
         if (this.ai.currentTarget && this.ai.currentTarget.active) {
             this.lookAt(this.ai.currentTarget);
         } else {
+            // 타겟이 없을 때는 이동 방향대로 시선 처리
             if (this.body.velocity.x < -5) this.setFlipX(false);
             else if (this.body.velocity.x > 5) this.setFlipX(true);
         }
@@ -101,7 +99,7 @@ export default class Shooter extends Unit {
             return;
         }
 
-        // 2. 전략적 타겟 탐색 (점수제)
+        // 2. 전략적 타겟 탐색 (기본 점수제)
         const enemies = this.targetGroup.getChildren();
         let bestTarget = null;
         let highestScore = -Infinity;
@@ -134,11 +132,12 @@ export default class Shooter extends Unit {
 
         let strategicTarget = bestTarget;
 
-        // 3. 기회주의적 사격 (가까운 적 우선 전환)
+        // 3. [수정] 기회주의적 사격 + 근접 위협 즉시 대응
         const nearest = this.ai.findNearestEnemy();
         if (nearest && nearest.active && !nearest.isDying) {
             const distToNearest = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
             
+            // [중요] 공격 사거리 내에 들어왔다면
             if (distToNearest <= this.attackRange) {
                 let shouldSwitch = false;
 
@@ -146,7 +145,10 @@ export default class Shooter extends Unit {
                     shouldSwitch = true;
                 } else {
                     const distToStrategic = Phaser.Math.Distance.Between(this.x, this.y, strategicTarget.x, strategicTarget.y);
-                    if (distToStrategic > this.attackRange) {
+                    
+                    // [버그 수정] 기존 타겟이 사거리 밖이거나, 
+                    // 혹은 가장 가까운 적이 너무 가까워서(150px 이내) 당장 처리가 급할 때 타겟 변경
+                    if (distToStrategic > this.attackRange || distToNearest < 150) {
                         shouldSwitch = true;
                     }
                 }
@@ -167,7 +169,6 @@ export default class Shooter extends Unit {
             return;
         }
 
-        // 대열 유지 모드라면 제자리 사수 (이동 금지)
         if (this.team === 'blue' && this.scene.squadState === 'FORMATION') {
             this.setVelocity(0, 0);
             return;
@@ -179,22 +180,17 @@ export default class Shooter extends Unit {
         const kiteDistSq = (atkRange * 0.8) ** 2;
 
         if (distSq > atkRangeSq) {
-            // [Fix 3] 사거리 밖이면 접근: UnitAI에 추가된 moveToTargetSmart 사용
             if (this.ai.moveToTargetSmart) {
                 this.ai.moveToTargetSmart(delta);
             } else {
-                // 혹시 UnitAI 업데이트가 안 되었을 경우를 대비한 폴백
                 this.ai.moveToLocationSmart(target.x, target.y, delta);
             }
         } else if (distSq < kiteDistSq) {
-            // 너무 가까우면 뒤로 살짝 빠짐 (Micro-Kiting)
+            // Micro-Kiting
             const angle = Phaser.Math.Angle.Between(target.x, target.y, this.x, this.y);
             this.scene.physics.velocityFromRotation(angle, this.moveSpeed * 0.5, this.body.velocity);
-            
-            // 직접 이동 중에는 경로 배열을 비워 꼬임 방지
             this.ai.currentPath = [];
         } else {
-            // 적정 거리면 정지
             this.setVelocity(0, 0);
             this.ai.currentPath = [];
         }
@@ -225,17 +221,22 @@ export default class Shooter extends Unit {
         this.body.velocity.x = Math.cos(angle) * speed;
         this.body.velocity.y = Math.sin(angle) * speed;
         
-        // 도망갈 때도 경로는 초기화
         this.ai.currentPath = [];
     }
 
+    // [수정] 팀 구분 로직 제거 및 시선 처리 단순화
+    // 이동 방향(Velocity)과 바라보는 방향(FlipX)의 로직을 일치시켜 흔들림 방지
     lookAt(target) {
         const diffX = target.x - this.x;
-        if (Math.abs(diffX) < 10) return;
+        if (Math.abs(diffX) < 10) return; // 10px 이내는 현상 유지
 
-        const isBlue = this.team === 'blue';
-        if (target.x < this.x) this.setFlipX(isBlue ? false : true);
-        else this.setFlipX(isBlue ? true : false);
+        // Unit.js의 updateFlipX 로직(속도 < 0 일때 FlipX=false)과 일치시킴
+        // 타겟이 왼쪽에 있으면 false, 오른쪽에 있으면 true
+        if (target.x < this.x) {
+            this.setFlipX(false);
+        } else {
+            this.setFlipX(true);
+        }
     }
 
     onTakeDamage() {}

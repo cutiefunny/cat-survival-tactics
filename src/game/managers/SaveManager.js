@@ -73,14 +73,22 @@ export default class SaveManager {
         return null;
     }
 
-    // [Info] 모든 슬롯의 정보 가져오기 (UI용)
+    // [Info] 모든 슬롯의 정보 가져오기 (UI용) - [수정됨]
     static getSlotInfo() {
         const info = [];
         for (let i = 0; i < 3; i++) {
             const json = localStorage.getItem(`tactics_save_slot_${i}`);
             if (json) {
-                const data = JSON.parse(json);
-                info.push({ index: i, name: data.saveName || 'Unknown', empty: false });
+                try {
+                    // [수정] 파싱 시도
+                    const data = JSON.parse(json);
+                    info.push({ index: i, name: data.saveName || 'Unknown', empty: false });
+                } catch (e) {
+                    // [수정] 파싱 실패(데이터 손상) 시 처리
+                    console.error(`Slot ${i} corrupted:`, e);
+                    // empty: true로 처리하여 덮어쓸 수 있게 함
+                    info.push({ index: i, name: '(데이터 손상됨)', empty: true });
+                }
             } else {
                 info.push({ index: i, name: '빈 슬롯', empty: true });
             }
