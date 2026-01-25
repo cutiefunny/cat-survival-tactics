@@ -101,9 +101,13 @@ export default class UnitAI {
         
         this.lastTargetChangeTime = 0; 
         this.targetSwitchCooldown = 200; 
+        
+        // [New] 타겟 상실 타이머 (3초 딜레이용)
+        this.lostTargetTimer = 0; 
 
         // [Vision Settings]
         this.viewDistance = 350; // 감지 거리
+        this.baseViewDistance = 350; // 기본 시야 거리 저장
         this.viewAngle = Phaser.Math.DegToRad(120); // 시야각 (120도)
 
         this._tempStart = new Phaser.Math.Vector2();
@@ -124,7 +128,28 @@ export default class UnitAI {
         }
     }
 
-    // [New] 시야 체크 통합 메서드 (거리 + 각도 + 장애물)
+    // [New] 현재 유닛이 바라보는 각도를 계산 (타겟 우선, 없으면 이동방향/몸방향)
+    getFacingAngle() {
+        // 1. 타겟이 있으면 타겟을 응시
+        if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+            return Phaser.Math.Angle.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
+        }
+
+        // 2. 최근 공격자가 있으면 그쪽 응시
+        const now = this.scene.time.now;
+        if (this.lastAttacker && this.lastAttacker.active && (now - this.lastAttackedTime < 3000)) {
+             return Phaser.Math.Angle.Between(this.unit.x, this.unit.y, this.lastAttacker.x, this.lastAttacker.y);
+        }
+
+        // 3. 이동 중이면 이동 방향 응시
+        if (this.unit.body.speed > 10) {
+            return this.unit.body.velocity.angle();
+        }
+
+        // 4. 기본: flipX에 따른 좌우 방향
+        return this.unit.flipX ? 0 : Math.PI; 
+    }
+
     canSee(target) {
         if (!target || !target.active || target.isDying) return false;
 
@@ -132,15 +157,18 @@ export default class UnitAI {
         const distSq = Phaser.Math.Distance.Squared(this.unit.x, this.unit.y, target.x, target.y);
         if (distSq > this.viewDistance * this.viewDistance) return false;
 
-        // 2. 각도 체크 (비전투 모드일 때만 적용, 전투 중에는 360도 감지)
-        if (!this.isCombatMode && !this.isProvoked) {
-            const angleToTarget = Phaser.Math.Angle.Between(this.unit.x, this.unit.y, target.x, target.y);
-            // flipX === true(오른쪽/0도), false(왼쪽/180도) 가정
-            const facingAngle = this.unit.flipX ? 0 : Math.PI; 
-            
-            let angleDiff = Phaser.Math.Angle.Wrap(angleToTarget - facingAngle);
-            if (Math.abs(angleDiff) > this.viewAngle / 2) {
-                return false; // 시야각 밖
+        // 2. 각도 체크 (동적 시선 처리)
+        const angleToTarget = Phaser.Math.Angle.Between(this.unit.x, this.unit.y, target.x, target.y);
+        const facingAngle = this.getFacingAngle(); 
+        
+        let angleDiff = Phaser.Math.Angle.Wrap(angleToTarget - facingAngle);
+        
+        // 시야각(120도) 절반인 60도 이내인지 확인
+        if (Math.abs(angleDiff) > this.viewAngle / 2) {
+            // 예외: 전투 중이고 타겟이 '나'를 공격했다면 뒤에 있어도 감지
+            const isEmergency = (this.isCombatMode || this.isProvoked) && (target === this.currentTarget || target === this.lastAttacker);
+            if (!isEmergency) {
+                return false; 
             }
         }
 
@@ -156,15 +184,11 @@ export default class UnitAI {
 
         if (this.isCombatMode || this.isProvoked) return true;
 
-        // [Logic Improvement] 
-        // 기존: '최적' 타겟 1명을 뽑고, 걔가 안 보이면 포기함 (벽 뒤에 있으면 바보됨)
-        // 변경: '보이는' 적들 중에서 최적을 찾음
         const enemies = this.unit.targetGroup.getChildren();
         const visibleEnemies = enemies.filter(e => this.canSee(e));
         
         let bestEnemy = null;
         if (visibleEnemies.length > 0) {
-            // 보이는 적들 중에서 가장 가까운/위협적인 적 선정
             bestEnemy = calculateBestTarget(this.unit, visibleEnemies, Phaser.Math.Distance.Between);
         }
 
@@ -176,7 +200,6 @@ export default class UnitAI {
 
         this.patrolTimer -= delta;
         if (this.patrolTimer <= 0) {
-            // [Logic] spawnPos를 중심으로 반경 150px 내 랜덤 배회
             const rad = 150;
             const rx = this.spawnPos.x + (Math.random() * rad * 2 - rad);
             const ry = this.spawnPos.y + (Math.random() * rad * 2 - rad);
@@ -215,7 +238,6 @@ export default class UnitAI {
         }
     }
 
-    // [New] Shooter 등에서 호출하는 타겟 추적 래퍼 함수 (누락되었던 부분)
     moveToTargetSmart(delta) {
         if (!this.currentTarget || !this.currentTarget.active || this.currentTarget.isDying) {
             this.unit.setVelocity(0, 0);
@@ -294,8 +316,13 @@ export default class UnitAI {
     engageCombat(target) {
         if (this.isReturning) return;
 
+        if (!this.isCombatMode) {
+             this.viewDistance = this.baseViewDistance * 1.2;
+        }
+
         this.isCombatMode = true;
         this.currentTarget = target;
+        this.lostTargetTimer = 0; // [New] 타겟 확보 시 타이머 리셋
         
         if (this.unit.showEmote) {
             this.unit.showEmote("!", "#ff0000");
@@ -395,43 +422,57 @@ export default class UnitAI {
 
         this.processAggro(delta);
 
+        // [Fix] 적군(Red Team)의 3초 추적 유지 로직
         if (this.unit.team === 'red' && this.isCombatMode && !this.isProvoked) {
-            const isValidTarget = this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
-
-            if (isValidTarget) {
-                const CHASE_RANGE = 500; 
-                const distToTarget = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
+            let isValidTarget = false;
+            
+            // 1. 타겟 유효성 및 범위 체크
+            if (this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying) {
+                const CHASE_RANGE = 500;
+                const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, this.currentTarget.x, this.currentTarget.y);
                 const hasLOS = this.checkLineOfSight();
                 
-                if (distToTarget > CHASE_RANGE || !hasLOS) {
-                    this.isReturning = false; 
+                if (dist <= CHASE_RANGE && hasLOS) {
+                    isValidTarget = true;
+                }
+            }
+
+            if (isValidTarget) {
+                this.lostTargetTimer = 0; // 타겟 확보 중
+            } else {
+                // 타겟 상실!
+                this.lostTargetTimer += delta;
+                
+                // 죽은 타겟은 참조 해제 (시체 쳐다보지 않기 위해)
+                if (this.currentTarget && (this.currentTarget.isDying || !this.currentTarget.active)) {
+                    this.currentTarget = null;
+                }
+
+                if (this.lostTargetTimer <= 3000) {
+                    // [대기 모드] 3초 동안은 제자리에서 경계하며 새 타겟 탐색
+                    this.unit.setVelocity(0, 0);
+                    
+                    // 대기 중에도 지속적으로 주변 탐색 (thinkTimer 실행)
+                    this.thinkTimer -= delta;
+                    if (this.thinkTimer <= 0) {
+                        this.thinkTimer = 150 + Math.random() * 100;
+                        // 여기서 새로운 타겟을 찾으면 engageCombat이 호출되어 lostTargetTimer가 0이 됨
+                        this.updateTargetSelection(); 
+                    }
+                    return; // 이동 로직 실행 방지
+                } else {
+                    // [배회 복귀] 3초 초과 -> 배회 모드로 전환
                     this.isCombatMode = false;
-                    this.spawnPos = { x: this.unit.x, y: this.unit.y };
+                    this.viewDistance = this.baseViewDistance;
+                    this.spawnPos = { x: this.unit.x, y: this.unit.y }; // 현재 위치를 배회 중심으로
                     this.currentTarget = null;
                     this.currentPath = [];
-                    this.patrolTimer = 0; 
+                    this.lostTargetTimer = 0;
+                    
                     if (this.unit.showEmote) this.unit.showEmote("?", "#ffff00");
+                    this.unit.setVelocity(0, 0);
                     return;
                 }
-            } else {
-                 // [Targeting Fix] 전투 중 타겟을 잃었을 때도 시야 내 적 우선 탐색
-                 const enemies = this.unit.targetGroup.getChildren();
-                 const visibleEnemies = enemies.filter(e => this.canSee(e));
-                 const newTarget = calculateBestTarget(this.unit, visibleEnemies, Phaser.Math.Distance.Between);
-
-                 if (newTarget) {
-                     const dist = Phaser.Math.Distance.Between(this.unit.x, this.unit.y, newTarget.x, newTarget.y);
-                     if (dist <= 350) { 
-                         this.engageCombat(newTarget);
-                         return; 
-                     }
-                 }
-
-                 this.isReturning = false;
-                 this.isCombatMode = false;
-                 this.spawnPos = { x: this.unit.x, y: this.unit.y }; 
-                 this.patrolTimer = 0;
-                 return;
             }
         }
 
@@ -441,7 +482,7 @@ export default class UnitAI {
             this.updateTargetSelection();
         }
 
-        if (this.unit.role !== 'Tanker') {
+        if (this.unit.role !== 'Tanker' && this.unit.role !== 'Wawa') {
             const fleeThreshold = this.unit.aiConfig.common?.fleeHpThreshold ?? 0.2;
             const hpRatio = this.unit.hp / this.unit.maxHp;
             
@@ -490,7 +531,12 @@ export default class UnitAI {
             }
         } else {
             this.unit.setVelocity(0, 0);
-            this.isCombatMode = false; 
+            
+            // [Fix] 전투 해제 로직: 적군(Red)은 위에서 처리하므로 여기서 해제되지 않도록 함
+            if (this.isCombatMode && this.unit.team !== 'red') {
+                this.isCombatMode = false;
+                this.viewDistance = this.baseViewDistance;
+            }
         }
 
         if (this.unit.team !== 'blue' || this.unit.scene.isAutoBattle) {

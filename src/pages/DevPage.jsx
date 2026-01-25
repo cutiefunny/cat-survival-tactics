@@ -15,13 +15,14 @@ const DEFAULT_ROLE_DEFS = {
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4, missChance: 0.02 },
   Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25, maintenance: 5, missChance: 0.02 },
   Raccoon: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20, maintenance: 2, missChance: 0.02 },
+  Wawa: { hp: 150, attackPower: 20, moveSpeed: 100, defense: 0, attackCooldown: 400, skillCooldown: 8000, killReward: 20, maintenance: 2, missChance: 0.02 },
   Normal: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 1, missChance: 0.02 },
   NormalDog: { hp: 140, attackPower: 15, moveSpeed: 70, defense: 0, attackCooldown: 500, killReward: 10, maintenance: 0, missChance: 0.02 }
 };
 
 // [설정] 기본 유닛 가격
 const DEFAULT_UNIT_COSTS = {
-    'Tanker': 10, 'Shooter': 20, 'Healer': 25, 'Raccoon': 10, 'Runner': 10, 'Normal': 5
+    'Tanker': 10, 'Shooter': 20, 'Healer': 25, 'Raccoon': 10, 'Wawa': 10, 'Runner': 10, 'Normal': 5
 };
 
 const DEFAULT_CONFIG = {

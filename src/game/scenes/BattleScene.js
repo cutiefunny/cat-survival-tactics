@@ -11,6 +11,7 @@ import Normal from '../objects/roles/Normal';
 import Leader from '../objects/roles/Leader';
 import Healer from '../objects/roles/Healer';
 import Raccoon from '../objects/roles/Raccoon';
+import Wawa from '../objects/roles/Wawa';
 
 // [Data & Config]
 import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS, getRandomUnitName } from '../data/UnitData'; 
@@ -29,6 +30,7 @@ import PathfindingManager from '../managers/PathfindingManager';
 import leaderSheet from '../../assets/units/leader.png';
 import dogSheet from '../../assets/units/dog.png';
 import raccoonSheet from '../../assets/units/raccoon.png';
+import wawaSheet from '../../assets/units/wawa.png';
 import shooterSheet from '../../assets/units/shooter.png';
 import tankerSheet from '../../assets/units/tanker.png';
 import runnerSheet from '../../assets/units/runner.png';
@@ -50,7 +52,7 @@ import ouch2 from '../../assets/sounds/Ouch2.mp3';
 const UnitClasses = {
     'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
     'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 
-    'Healer': Healer, 'Raccoon': Raccoon, 'NormalDog': Unit 
+    'Healer': Healer, 'Raccoon': Raccoon, 'Wawa': Wawa,'NormalDog': Unit 
 };
 
 const BGM_SOURCES = {
@@ -112,6 +114,7 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('leader', leaderSheet, sheetConfig);
         this.load.spritesheet('dog', dogSheet, sheetConfig); 
         this.load.spritesheet('raccoon', raccoonSheet, sheetConfig);
+        this.load.spritesheet('wawa', wawaSheet, sheetConfig);
         this.load.spritesheet('shooter', shooterSheet, sheetConfig);
         this.load.spritesheet('tanker', tankerSheet, sheetConfig);
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
@@ -402,7 +405,8 @@ export default class BattleScene extends BaseScene {
     }
     
     createStandardAnimations() {
-        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal']; 
+        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal', 'wawa']; 
+        
         unitTextures.forEach(key => {
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
                 const frameRate = (key === 'healer') ? 3 : 6;

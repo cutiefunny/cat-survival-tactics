@@ -419,7 +419,8 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     takeDamage(amount, attacker = null) {
         if (!this.scene.battleStarted || this.isDying) return; 
         
-        const damage = Math.max(1, amount - this.defense);
+        let damage = Math.max(1, amount - this.defense);
+        if(damage <= 0) damage = 1;
         this.hp -= damage;
 
         if (this.ai && typeof this.ai.onDamage === 'function') {
