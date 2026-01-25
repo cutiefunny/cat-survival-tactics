@@ -125,10 +125,8 @@ export default class StrategyScene extends BaseScene {
             });
         }
 
-        // [New] Resume 이벤트 리스너 추가 (EventScene 종료 후 복귀 시 처리)
         this.events.on('resume', (scene, data) => {
             if (this.pendingNode) {
-                // 대화 이벤트가 끝났으면 해당 노드 도착 처리 로직 실행
                 this.handleNodeArrival(this.pendingNode);
                 this.pendingNode = null;
             }
@@ -518,7 +516,7 @@ export default class StrategyScene extends BaseScene {
             }
         }
 
-        // 3. [NEW] 적 땅이지만 군대가 없는 경우 -> 자동 점령 처리
+        // 3. 적 땅이지만 군대가 없는 경우 -> 자동 점령 처리
         if (node.owner !== 'player' && enemyCount <= 0) {
             console.log(`🚩 [StrategyScene] 빈 영토 자동 점령: ${node.name}`);
 
@@ -526,21 +524,16 @@ export default class StrategyScene extends BaseScene {
             node.owner = 'player';
             node.army = null;
             
-            // 전투 대상 ID 해제 (이게 null이어야 '전투 시작' 대신 '턴 종료' 버튼이 뜸)
             this.selectedTargetId = null;
 
-            // 변경된 맵 데이터 레지스트리 저장
             this.registry.set('worldMapData', this.mapNodes);
             this.saveProgress();
 
-            // 지도 상의 노드 색상을 파란색(아군)으로 즉시 변경
             const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
             if (circle) circle.setFillStyle(0x4488ff);
 
-            // 상태 메시지 업데이트
             this.statusText.setText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
             
-            // UI 버튼 상태 갱신 (전투 시작 -> 턴 종료)
             this.updateUIState();
             return;
         }
@@ -555,42 +548,34 @@ export default class StrategyScene extends BaseScene {
             const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
             this.statusText.setText(finalMsg);
         } else { 
-            // 이미 내 땅이거나 안전한 곳인 경우
             this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
         }
         
         this.updateUIState();
     }
 
-    // [Modified] 중립 지역 이벤트 처리 (대화창 없이 즉시 해금 로직으로 변경)
     handleNeutralEvent(node) {
         let unlockedUnits = [];
 
-        // 1. 노드에 설정된 스크립트 확인
         if (node.script && Array.isArray(node.script)) {
-            // 'unlock_unit' 타입의 명령어를 찾음
             const unlockCommand = node.script.find(cmd => cmd.type === 'unlock_unit');
 
             if (unlockCommand && Array.isArray(unlockCommand.unit)) {
                 console.log(`🎁 [StrategyScene] 유닛 해금 이벤트 발생:`, unlockCommand.unit);
 
-                // 2. 유닛 해금 처리
                 unlockCommand.unit.forEach(roleName => {
-                    this.unlockUnit(roleName); // 기존 unlockUnit 메서드 활용
+                    this.unlockUnit(roleName); 
                     unlockedUnits.push(roleName);
                 });
             }
         }
 
-        // 3. 영토 점령 처리
         node.owner = 'player';
-        node.script = null; // 스크립트 1회성 소모 처리
-        node.army = null;   // 중립 군대 데이터 제거
+        node.script = null; 
+        node.army = null;   
 
-        // 4. 맵 데이터 및 UI 갱신
         this.registry.set('worldMapData', this.mapNodes);
         
-        // 지도 상의 토큰 제거
         const token = this.enemyTokens.find(t => 
             Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
         );
@@ -599,31 +584,15 @@ export default class StrategyScene extends BaseScene {
             this.enemyTokens = this.enemyTokens.filter(t => t !== token);
         }
 
-        // 지도 상의 노드 색상 변경 (파란색)
         const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
         if (circle) circle.setFillStyle(0x4488ff);
 
-        // 5. 결과 메시지 출력 및 저장
-        // if (unlockedUnits.length > 0) {
-        //     const unitListStr = unlockedUnits.join(', ');
-        //     this.statusText.setText(`🤝 ${node.name} 합류! 새로운 동료: ${unitListStr}`);
-        //     this.cameras.main.flash(500, 255, 255, 0); // 획득 효과 (노란 번쩍임)
-        // } else {
-        //     // 해금 유닛이 없는 일반 중립 지역인 경우
-        //     this.statusText.setText(`✅ ${node.name}을(를) 별다른 일 없이 점령했습니다.`);
-        // }
-
         this.saveProgress();
         this.updateUIState();
-        
-        // 입력 잠금 해제 (EventScene을 띄우지 않으므로 즉시 해제)
         this.input.enabled = true;
     }
 
     handleEventResult(result, node) {
-        // EventScene이 종료되면 StrategyScene은 자동으로 resume되지 않으므로 수동 resume 필요할 수 있음
-        // 하지만 EventScene에서 overlay 모드 종료 시 resume을 호출해주므로 여기서는 결과 처리만 집중
-        
         if (result === 'recruit') {
             if (node.army) {
                 let firstUnit = Array.isArray(node.army) ? node.army[0] : node.army;
@@ -634,7 +603,6 @@ export default class StrategyScene extends BaseScene {
                     node.owner = 'player';
                     node.script = null; 
                     
-                    // 맵 상의 적 토큰 제거
                     const token = this.enemyTokens.find(t => 
                         Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
                     );
@@ -643,7 +611,6 @@ export default class StrategyScene extends BaseScene {
                     this.registry.set('worldMapData', this.mapNodes);
                     this.saveProgress();
                     
-                    // 영토 색상 변경
                     const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
                     if (circle) circle.setFillStyle(0x4488ff);
                 }
@@ -740,39 +707,85 @@ export default class StrategyScene extends BaseScene {
         const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
 
         let warningMsg = "";
-        let enemiesIncreased = false; 
         
+        // [수정] 적군 증원 로직 (플레이어 위치 회피 추가)
         if (turnCount % reinforceInterval === 0) {
-            this.mapNodes.forEach(node => {
-                if (node.owner !== 'player' && node.owner !== 'neutral' && node.army) {
-                    const excludeTypes = ['boss', 'tanker', 'leader', 'raccoon'];
+            const playerNodes = this.mapNodes.filter(n => n.owner === 'player');
+            
+            if (playerNodes.length > 0) {
+                // ID 내림차순 정렬 (큰 숫자 우선)
+                playerNodes.sort((a, b) => b.id - a.id);
+                
+                let targetNode = playerNodes[0];
+                const leaderPos = this.registry.get('leaderPosition');
 
-                    if (Array.isArray(node.army)) {
-                        node.army.forEach(u => {
-                            const type = u.type ? u.type.toLowerCase() : '';
-                            if (!excludeTypes.includes(type)) {
-                                u.count = (u.count || 1) + 1;
+                // [New] 가장 큰 숫자의 땅에 아군(리더)이 있는 경우
+                if (targetNode.id === leaderPos) {
+                    if (playerNodes.length > 1) {
+                        // 바로 다음 숫자의 땅을 타겟으로 변경
+                        targetNode = playerNodes[1];
+                        console.log(`⚠️ [Invasion] Leader detected at Node ${leaderPos}. Targeting next node: ${targetNode.id}`);
+                    } else {
+                        // 땅이 하나뿐인데 거기 플레이어가 있다면 침공 스킵 (안전지대)
+                        targetNode = null;
+                        console.log("⚠️ [Invasion] Skipped: Player is defending the only territory.");
+                    }
+                }
+
+                // 타겟이 유효할 경우에만 침공 진행
+                if (targetNode) {
+                    const spawnCount = 5 + Math.floor(turnCount / 10);
+                    console.log(`⚠️ [Invasion] Node ${targetNode.id} (${targetNode.name}) taken by Enemy! Spawn: ${spawnCount}`);
+
+                    targetNode.owner = 'enemy';
+                    
+                    // unit type: 'normalDog' (BattleScene 클래스 매핑용)
+                    targetNode.army = { type: 'normalDog', count: spawnCount };
+
+                    this.registry.set('worldMapData', this.mapNodes);
+
+                    const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === targetNode.id);
+
+                    this.createEnemyTokens();
+
+                    const token = this.enemyTokens.find(t => Math.abs(t.x - targetNode.x) < 5 && Math.abs(t.y - targetNode.y) < 5);
+                    
+                    if (token) {
+                        const originalScale = token.scaleX; 
+                        token.setScale(0); 
+                        
+                        this.tweens.killTweensOf(token);
+
+                        this.tweens.add({
+                            targets: token,
+                            scaleX: originalScale,
+                            scaleY: originalScale,
+                            duration: 2000,
+                            ease: 'Cubic.out',
+                            onComplete: () => {
+                                if (circle) circle.setFillStyle(0xff4444);
+                                
+                                this.tweens.add({ 
+                                    targets: token, 
+                                    scaleY: originalScale * 0.95, 
+                                    yoyo: true, 
+                                    repeat: -1, 
+                                    duration: 900, 
+                                    ease: 'Sine.easeInOut' 
+                                });
                             }
                         });
                     } else {
-                        const type = node.army.type ? node.army.type.toLowerCase() : '';
-                        if (!excludeTypes.includes(type)) {
-                            node.army.count = (node.army.count || 1) + 1;
-                        }
+                        if (circle) circle.setFillStyle(0xff4444);
                     }
-                    enemiesIncreased = true;
-                }
-            });
 
-            if (enemiesIncreased) {
-                this.registry.set('worldMapData', this.mapNodes);
-                this.createEnemyTokens(); 
-                warningMsg = `\n⚠️ 적군 세력 강화! (${reinforceInterval}턴 경과)`;
-                this.cameras.main.flash(500, 255, 0, 0); 
+                    warningMsg = `\n⚠️ [경고] 영토 침공! ${targetNode.name}을(를) 뺏겼습니다! (들개 ${spawnCount}마리)`;
+                    this.cameras.main.flash(500, 255, 0, 0); 
+                }
             }
         }
 
-        if (!isBankrupt && !enemiesIncreased) {
+        if (!isBankrupt && !warningMsg) {
             this.cameras.main.flash(500, 0, 0, 0); 
         }
         
