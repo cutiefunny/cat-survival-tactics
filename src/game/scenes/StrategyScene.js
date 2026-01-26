@@ -20,7 +20,7 @@ import { db } from "../../firebaseConfig";
 import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData'; 
 
 import SaveManager from '../managers/SaveManager';
-import StrategyUIManager from '../managers/StrategyUIManager'; // [New] Manager Import
+import StrategyUIManager from '../managers/StrategyUIManager'; 
 import pathData from '../data/path.json'; 
 
 export default class StrategyScene extends BaseScene {
@@ -30,6 +30,8 @@ export default class StrategyScene extends BaseScene {
 
     init(data) {
         this.isManualLoad = false;
+        // 턴 처리 중 입력 방지 플래그
+        this.isProcessingTurn = false;
 
         if (data && data.battleResult) {
             this.battleResultData = data.battleResult;
@@ -82,8 +84,6 @@ export default class StrategyScene extends BaseScene {
 
         const hasRegistryData = this.registry.get('playerCoins') !== undefined;
         this.isNewGame = !this.isManualLoad && !hasRegistryData; 
-        
-        console.log(`💾 [StrategyScene] Init - ManualLoad: ${this.isManualLoad}, Coins: ${this.registry.get('playerCoins')}`);
     }
 
     preload() {
@@ -106,7 +106,6 @@ export default class StrategyScene extends BaseScene {
     create() {
         super.create(); 
 
-        // [New] UI Manager 초기화
         this.uiManager = new StrategyUIManager(this);
 
         this.scene.stop('UIScene');
@@ -187,7 +186,6 @@ export default class StrategyScene extends BaseScene {
             
             if (this.registry.get('playerCoins') === undefined) {
                  this.registry.set('playerCoins', initialCoins);
-                 console.log(`💰 [StrategyScene] Initial Coins Set: ${initialCoins}`);
             }
             
             if (!this.registry.get('playerSquad')) {
@@ -261,7 +259,6 @@ export default class StrategyScene extends BaseScene {
         this.createEnemyTokens();
         this.createPlayerToken();
 
-        // [Modified] UI Manager 생성 호출
         this.uiManager.createUI();
         
         if (battleResultMessage) {
@@ -293,19 +290,15 @@ export default class StrategyScene extends BaseScene {
 
     handleResize(gameSize) {
         this.updateCameraLayout();
-        // [Modified] UI 리사이즈 위임
         this.uiManager.resize(gameSize);
     }
 
-    // [Moved] openDaiso -> UI Manager가 호출하지만 로직은 Scene에 남겨둘 수도 있고 Manager로 완전히 넘길 수도 있음. 
-    // 여기서는 Scene의 메서드로 유지하고 Manager가 호출하도록 함 (StrategyUIManager.js 참조)
     openDaiso() {
         console.log("Open Daiso Shop");
         this.uiManager.setStatusText("🛍️ 다이소에 오신 것을 환영합니다! (준비중)");
         this.cameras.main.flash(200, 255, 255, 255);
     }
 
-    // toggleBgmMute 헬퍼 (UI에서 호출)
     toggleBgmMute() {
         if (this.bgm) {
             this.bgm.setMute(!this.bgm.mute);
@@ -345,6 +338,8 @@ export default class StrategyScene extends BaseScene {
     }
 
     selectTerritory(circleObj) {
+        if (this.isProcessingTurn) return;
+
         const node = circleObj.nodeData;
         const currentLeaderId = this.registry.get('leaderPosition');
         const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
@@ -513,7 +508,109 @@ export default class StrategyScene extends BaseScene {
 
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
 
+    findPath(startId, endId) {
+        if (startId === endId) return [startId];
+        
+        const queue = [[startId]];
+        const visited = new Set([startId]);
+        
+        while (queue.length > 0) {
+            const path = queue.shift();
+            const lastNodeId = path[path.length - 1];
+            
+            const node = this.mapNodes.find(n => n.id === lastNodeId);
+            if (!node) continue;
+
+            for (const neighborId of node.connectedTo) {
+                if (!visited.has(neighborId)) {
+                    visited.add(neighborId);
+                    const newPath = [...path, neighborId];
+                    
+                    if (neighborId === endId) {
+                        return newPath; 
+                    }
+                    queue.push(newPath);
+                }
+            }
+        }
+        return null; 
+    }
+
+    moveEnemies(onComplete) {
+        const playerPosId = this.registry.get('leaderPosition');
+        const enemyNodes = this.mapNodes.filter(n => n.owner === 'enemy' && n.army && n.army.isReinforcement);
+
+        if (enemyNodes.length === 0) {
+            if (onComplete) onComplete(0);
+            return 0;
+        }
+
+        const moves = [];
+
+        enemyNodes.forEach(node => {
+            const path = this.findPath(node.id, playerPosId);
+            if (path && path.length > 1) {
+                const nextNodeId = path[1];
+                const targetNode = this.mapNodes.find(n => n.id === nextNodeId);
+                const isBlocked = targetNode.army !== null && targetNode.army !== undefined;
+                
+                if (!isBlocked) {
+                    moves.push({ fromNode: node, toNode: targetNode });
+                }
+            }
+        });
+
+        if (moves.length === 0) {
+            if (onComplete) onComplete(0);
+            return 0;
+        }
+
+        let completedCount = 0;
+
+        moves.forEach(move => {
+            const token = this.enemyTokens.find(t => 
+                Math.abs(t.x - move.fromNode.x) < 5 && Math.abs(t.y - move.fromNode.y) < 5
+            );
+
+            if (token) {
+                this.tweens.add({
+                    targets: token,
+                    x: move.toNode.x,
+                    y: move.toNode.y,
+                    duration: 800,
+                    ease: 'Power2',
+                    onComplete: () => {
+                        move.toNode.army = move.fromNode.army;
+                        move.toNode.owner = 'enemy';
+                        move.fromNode.army = null;
+                        
+                        const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === move.toNode.id);
+                        if (circle) circle.setFillStyle(0xff4444);
+
+                        completedCount++;
+                        if (completedCount === moves.length) {
+                            if (onComplete) onComplete(moves.length);
+                        }
+                    }
+                });
+            } else {
+                 move.toNode.army = move.fromNode.army;
+                 move.toNode.owner = 'enemy';
+                 move.fromNode.army = null;
+                 completedCount++;
+                 if (completedCount === moves.length) {
+                     if (onComplete) onComplete(moves.length);
+                 }
+            }
+        });
+        
+        return moves.length;
+    }
+
     handleTurnEnd() {
+        if (this.isProcessingTurn) return;
+        this.isProcessingTurn = true; 
+
         const squad = this.registry.get('playerSquad') || [];
         const recoveryAmount = this.hasMoved ? 1 : 3;
         
@@ -584,10 +681,58 @@ export default class StrategyScene extends BaseScene {
         turnCount++;
         this.registry.set('turnCount', turnCount);
 
-        const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
+        if (isBankrupt) {
+            this.uiManager.setStatusText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`, '#ff4444');
+        } else {
+            const incomeMsg = totalIncome > 0 ? ` (+${totalIncome})` : "";
+            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (-${totalMaintenanceCost})` : "";
+            this.uiManager.setStatusText(`🌙 턴 종료${incomeMsg}${maintenanceMsg}`, '#ffffff');
+            
+            if (totalIncome > 0) {
+                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
+            }
+            if (totalMaintenanceCost > 0) {
+                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
+            }
+        }
+        this.saveProgress();
 
+        this.moveEnemies((movedCount) => {
+             if (movedCount > 0) {
+                 this.registry.set('worldMapData', this.mapNodes);
+                 this.createEnemyTokens(); 
+                 
+                 const currentText = (this.uiManager.statusText && this.uiManager.statusText.text) ? this.uiManager.statusText.text : "";
+                 this.uiManager.setStatusText(currentText + `\n⚔️ 적군 ${movedCount}부대가 이동했습니다!`, '#ffaaaa');
+
+                 const leaderPos = this.registry.get('leaderPosition');
+                 const playerNode = this.mapNodes.find(n => n.id === leaderPos);
+                 
+                 if (playerNode && playerNode.owner === 'enemy') {
+                     console.log("⚔️ Enemy caught the player! Starting Battle...");
+                     this.selectedTargetId = leaderPos;
+                     
+                     this.cameras.main.flash(500, 255, 0, 0);
+                     this.time.delayedCall(500, () => {
+                         this.startBattle();
+                     });
+                     return; 
+                 }
+                 
+                 this.time.delayedCall(1000, () => {
+                     this.handleInvasion(turnCount);
+                 });
+             } else {
+                 this.handleInvasion(turnCount);
+             }
+        });
+    }
+
+    handleInvasion(turnCount) {
+        const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
+        let invasionHappened = false;
         let warningMsg = "";
-        
+
         if (turnCount % reinforceInterval === 0) {
             const playerNodes = this.mapNodes.filter(n => n.owner === 'player');
             
@@ -612,78 +757,61 @@ export default class StrategyScene extends BaseScene {
                     console.log(`⚠️ [Invasion] Node ${targetNode.id} (${targetNode.name}) taken by Enemy! Spawn: ${spawnCount}`);
 
                     targetNode.owner = 'enemy';
-                    
-                    targetNode.army = { type: 'normalDog', count: spawnCount };
+                    targetNode.army = { type: 'normalDog', count: spawnCount, isReinforcement: true };
 
                     this.registry.set('worldMapData', this.mapNodes);
 
                     const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === targetNode.id);
+                    if (circle) circle.setFillStyle(0xff4444);
 
                     this.createEnemyTokens();
 
                     const token = this.enemyTokens.find(t => Math.abs(t.x - targetNode.x) < 5 && Math.abs(t.y - targetNode.y) < 5);
-                    
                     if (token) {
                         const originalScale = token.scaleX; 
                         token.setScale(0); 
                         
-                        this.tweens.killTweensOf(token);
-
                         this.tweens.add({
                             targets: token,
                             scaleX: originalScale,
                             scaleY: originalScale,
-                            duration: 2000,
-                            ease: 'Cubic.out',
-                            onComplete: () => {
-                                if (circle) circle.setFillStyle(0xff4444);
-                                
-                                this.tweens.add({ 
-                                    targets: token, 
-                                    scaleY: originalScale * 0.95, 
-                                    yoyo: true, 
-                                    repeat: -1, 
-                                    duration: 900, 
-                                    ease: 'Sine.easeInOut' 
-                                });
-                            }
+                            duration: 1000,
+                            ease: 'Back.out'
                         });
-                    } else {
-                        if (circle) circle.setFillStyle(0xff4444);
                     }
 
-                    warningMsg = `\n⚠️ [경고] 영토 침공! ${targetNode.name}을(를) 뺏겼습니다! (들개 ${spawnCount}마리)`;
+                    warningMsg = `\n⚠️ [경고] 영토 침공! ${targetNode.name}을(를) 뺏겼습니다!`;
                     this.cameras.main.flash(500, 255, 0, 0); 
+                    
+                    invasionHappened = true;
                 }
             }
         }
 
-        if (!isBankrupt && !warningMsg) {
-            this.cameras.main.flash(500, 0, 0, 0); 
+        if (invasionHappened) {
+            const currentText = (this.uiManager.statusText && this.uiManager.statusText.text) ? this.uiManager.statusText.text : "";
+            this.uiManager.setStatusText(currentText + warningMsg, '#ffaaaa');
         }
-        
-        if (isBankrupt) {
-            this.uiManager.setStatusText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`, '#ff4444');
-        } else {
-            const incomeMsg = totalIncome > 0 ? ` (+${totalIncome})` : "";
-            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (-${totalMaintenanceCost})` : "";
-            const finalText = `🌙 턴 종료${incomeMsg}${maintenanceMsg}${warningMsg}`;
-            const color = warningMsg ? '#ffaaaa' : '#ffffff';
-            
-            this.uiManager.setStatusText(finalText, color);
-            
-            if (totalIncome > 0) {
-                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
-            }
-            if (totalMaintenanceCost > 0) {
-                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
-            }
-        }
-        
+
+        this.isProcessingTurn = false;
         this.uiManager.updateState();
         this.saveProgress();
     }
 
+    createAnimations() {
+        if (!this.anims.exists('leader_idle')) { this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
+        if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('boss_idle')) { this.anims.create({ key: 'boss_idle', frames: this.anims.generateFrameNumbers('boss_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('tanker_idle')) { this.anims.create({ key: 'tanker_idle', frames: this.anims.generateFrameNumbers('tanker_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('shooter_idle')) { this.anims.create({ key: 'shooter_idle', frames: this.anims.generateFrameNumbers('shooter_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('healer_idle')) { this.anims.create({ key: 'healer_idle', frames: this.anims.generateFrameNumbers('healer_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('raccoon_idle')) { this.anims.create({ key: 'raccoon_idle', frames: this.anims.generateFrameNumbers('raccoon_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+        if (!this.anims.exists('normal_idle')) { this.anims.create({ key: 'normal_idle', frames: this.anims.generateFrameNumbers('normal_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
+    }
+
+    // [Restored] startBattle 메서드 복구
     startBattle() {
         const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
         if (!targetNode) return;
@@ -704,19 +832,6 @@ export default class StrategyScene extends BaseScene {
             targetScene: 'BattleScene',
             targetData: battleData
         });
-    }
-
-    createAnimations() {
-        if (!this.anims.exists('leader_idle')) { this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
-        if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('boss_idle')) { this.anims.create({ key: 'boss_idle', frames: this.anims.generateFrameNumbers('boss_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('tanker_idle')) { this.anims.create({ key: 'tanker_idle', frames: this.anims.generateFrameNumbers('tanker_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('shooter_idle')) { this.anims.create({ key: 'shooter_idle', frames: this.anims.generateFrameNumbers('shooter_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('healer_idle')) { this.anims.create({ key: 'healer_idle', frames: this.anims.generateFrameNumbers('healer_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('raccoon_idle')) { this.anims.create({ key: 'raccoon_idle', frames: this.anims.generateFrameNumbers('raccoon_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('normal_idle')) { this.anims.create({ key: 'normal_idle', frames: this.anims.generateFrameNumbers('normal_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
     }
 
     update(time, delta) {
@@ -886,7 +1001,6 @@ export default class StrategyScene extends BaseScene {
                 else if (topUnitType === 'boss') textureKey = 'boss_token';
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                // [Modified] UI Manager 통해 무시 설정
                 this.uiManager.ignoreObject(enemyObj);
 
                 let finalSize = 60; 
