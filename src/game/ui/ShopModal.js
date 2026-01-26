@@ -40,7 +40,6 @@ export default class ShopModal {
         const { width, height } = this.scene.scale;
         this.container = this.scene.add.container(width / 2, height / 2).setDepth(2000);
         
-        // [Modified] 부대원이 많아질 것을 대비해 팝업 높이를 80% -> 90%로 확대
         const popupW = Math.min(600, width * 0.95);
         const popupH = Math.min(600, height * 0.9);
         
@@ -60,9 +59,8 @@ export default class ShopModal {
     createUnitButtons(popupW, popupH) {
         const cols = 3;
         const gapX = 120;
-        const gapY = 90; // [Modified] 상단 버튼 간격을 조금 좁혀 하단 공간 확보
+        const gapY = 90; 
         const startX = -((cols * gapX) / 2) + gapX / 2;
-        // [Modified] 버튼 시작 위치를 위로 조금 올림
         const startY = -popupH / 2 + 90;
 
         const unlockedRoles = this.scene.registry.get('unlockedRoles') || ['Normal'];
@@ -79,7 +77,6 @@ export default class ShopModal {
             if (isUnlocked) {
                 const btnBg = this.scene.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
                 const textureKey = this.roleToTexture[unit.role] || 'leader_token';
-                // [Check] 스프라이트 시트의 1번 프레임을 아이콘으로 사용
                 const unitSprite = this.scene.add.sprite(0, -10, textureKey, 1).setDisplaySize(50, 50);
                 const costTxt = this.scene.add.text(0, 25, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
                 
@@ -95,8 +92,6 @@ export default class ShopModal {
     }
 
     createSquadInfo(popupW, popupH) {
-        // [Modified] 하단 부대원 목록 영역 위치 설정 (팝업 하단 기준에서 역산하여 공간 확보)
-        // 약 3~4줄의 유닛이 들어갈 수 있도록 여유를 둠
         const squadInfoY = popupH / 2 - 160; 
         
         this.squadCountText = this.scene.add.text(0, squadInfoY, `현재 부대원: 0명`, { fontSize: '18px', color: '#aaaaaa' }).setOrigin(0.5);
@@ -114,10 +109,8 @@ export default class ShopModal {
         
         const iconSize = 40; 
         const gap = 8; 
-        // [Modified] 한 줄에 10명 표시 (10명 초과시 다음 줄로 이동)
         const maxCols = 10; 
 
-        // 전체 그리드의 너비 계산 (최대 10개 기준 중앙 정렬을 위함)
         const colsInRow = Math.min(squad.length, maxCols);
         const totalW = colsInRow * (iconSize + gap) - gap;
         const startX = -totalW / 2 + iconSize / 2;
@@ -125,12 +118,11 @@ export default class ShopModal {
         squad.forEach((member, index) => {
             const textureKey = this.roleToTexture[member.role] || 'leader_token';
             
-            // [Modified] 행(row)과 열(col) 계산 로직
             const col = index % maxCols; 
             const row = Math.floor(index / maxCols);
             
             const x = startX + col * (iconSize + gap); 
-            const y = row * (iconSize + gap); // 줄바꿈 적용
+            const y = row * (iconSize + gap); 
             
             const icon = this.scene.add.sprite(x, y, textureKey, 0);
             const isLeader = (member.role === 'Leader');
@@ -149,10 +141,8 @@ export default class ShopModal {
         if (this.unitDetailPopup) this.unitDetailPopup.destroy();
         const { width, height } = this.scene.scale;
         
-        // [Fixed] DB 설정값(roleDefinitions)이 레지스트리에 있다면 우선 적용
         const registryRoleDefs = this.scene.registry.get('roleDefinitions') || {};
         const defaultStats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
-        // 기본값 위에 DB 설정값 덮어쓰기
         const stats = { ...defaultStats, ...(registryRoleDefs[unitConfig.role] || {}) };
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
@@ -202,10 +192,8 @@ export default class ShopModal {
         const shopInfo = UNIT_COSTS.find(u => u.role === role) || { name: role };
         const roleText = (displayName !== shopInfo.name) ? `(${shopInfo.name})` : '';
 
-        // [Fixed] DB 설정값(roleDefinitions)이 레지스트리에 있다면 우선 적용
         const registryRoleDefs = this.scene.registry.get('roleDefinitions') || {};
         const defaultStats = ROLE_BASE_STATS[role] || ROLE_BASE_STATS['Normal'];
-        // 기본값 위에 DB 설정값 덮어쓰기
         const stats = { ...defaultStats, ...(registryRoleDefs[role] || {}) };
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
@@ -224,7 +212,6 @@ export default class ShopModal {
         const textureKey = this.roleToTexture[role] || 'leader_token';
         const unitImg = this.scene.add.sprite(0, -popupH / 2 + 100, textureKey, 0).setDisplaySize(60, 60);
 
-        // [New] 레지스트리에서 성장률 설정값 가져오기 (기본값: HP 10, ATK 1)
         const gameSettings = this.scene.registry.get('gameSettings') || {};
         const growthHp = gameSettings.growthHp ?? 10;
         const growthAtk = gameSettings.growthAtk ?? 1;
@@ -301,7 +288,11 @@ export default class ShopModal {
         if (currentCoins >= unitConfig.cost) {
             const newCoins = currentCoins - unitConfig.cost;
             this.scene.registry.set('playerCoins', newCoins);
-            this.scene.updateCoinText(newCoins); 
+            
+            // [Fixed] this.scene.updateCoinText -> this.scene.uiManager.updateCoinText 로 변경
+            if (this.scene.uiManager && this.scene.uiManager.updateCoinText) {
+                this.scene.uiManager.updateCoinText(newCoins);
+            }
             
             const squad = this.scene.registry.get('playerSquad');
             

@@ -8,9 +8,8 @@ export default class SystemModal {
         this.slotModal = null;
         this.isOpen = false;
         
-        // [New] 초기 설정 로드 (기본값: false - 컷씬 보기)
         this.isSkipCutscene = localStorage.getItem('setting_skip_cutscenes') === 'true';
-        this.cutsceneBtnText = null; // 텍스트 객체 참조용
+        this.cutsceneBtnText = null;
     }
 
     toggle() {
@@ -20,7 +19,6 @@ export default class SystemModal {
         this.isOpen = !this.isOpen;
         this.container.setVisible(this.isOpen);
         
-        // 메뉴가 열릴 때마다 컷씬 버튼 텍스트 최신화 (혹시 모를 동기화)
         if (this.isOpen && this.cutsceneBtnText) {
             this.updateCutsceneButtonText();
         }
@@ -30,7 +28,7 @@ export default class SystemModal {
         const { width, height } = this.scene.scale;
         this.container = this.scene.add.container(width / 2, height / 2).setDepth(3000).setVisible(false);
         const modalW = 280;
-        const modalH = 380; // 높이 약간 증가 (버튼 추가 공간)
+        const modalH = 380; 
 
         const bg = this.scene.add.rectangle(0, 0, modalW, modalH, 0x111111, 0.95).setStrokeStyle(3, 0xaaaaaa);
         const title = this.scene.add.text(0, -modalH / 2 + 30, "시스템 메뉴", { fontSize: '22px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
@@ -46,7 +44,6 @@ export default class SystemModal {
         const startY = -modalH / 2 + 80;
         const gap = 55;
 
-        // [New] 컷씬 토글 버튼 추가
         const buttons = [
             { text: "✨ 새 게임", color: 0xcc4444, callback: () => this.resetGame() },
             { text: "💾 저장", color: 0x4444cc, callback: () => this.createSlotSelectionModal('save') },
@@ -63,9 +60,7 @@ export default class SystemModal {
         buttons.forEach((btn, i) => {
             const btnObj = this.createButton(0, startY + i * gap, btn.text, btn.color, btn.callback);
             
-            // 컷씬 버튼의 텍스트 객체 참조 저장
             if (btn.id === 'cutscene') {
-                // createButton에서 반환된 컨테이너의 두 번째 자식이 텍스트임
                 this.cutsceneBtnText = btnObj.list[1]; 
             }
             
@@ -88,23 +83,19 @@ export default class SystemModal {
         return btn;
     }
 
-    // [New] 컷씬 라벨 텍스트 반환
     getCutsceneLabel() {
         return this.isSkipCutscene ? "🎬 컷씬 보기" : "🎬 컷씬 생략";
     }
 
-    // [New] 컷씬 설정 토글
     toggleCutsceneSetting() {
         this.isSkipCutscene = !this.isSkipCutscene;
         localStorage.setItem('setting_skip_cutscenes', this.isSkipCutscene);
         this.updateCutsceneButtonText();
     }
 
-    // [New] 버튼 텍스트 업데이트
     updateCutsceneButtonText() {
         if (this.cutsceneBtnText) {
             this.cutsceneBtnText.setText(this.getCutsceneLabel());
-            // 시각적 피드백 (색상 변경 등 필요시 추가)
         }
     }
 
@@ -172,7 +163,12 @@ export default class SystemModal {
                 SaveManager.saveToSlot(slotIndex, data);
                 SaveManager.saveGame(data);
                 this.closeSlotModal();
-                this.scene.statusText.setText("💾 저장 완료!");
+                
+                // [Fixed] this.scene.statusText.setText -> this.scene.uiManager.setStatusText 로 변경
+                if (this.scene.uiManager && this.scene.uiManager.setStatusText) {
+                    this.scene.uiManager.setStatusText("💾 저장 완료!");
+                }
+                
                 this.scene.cameras.main.flash(200, 0, 255, 0);
             }
         } else if (mode === 'load') {

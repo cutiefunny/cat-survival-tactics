@@ -20,9 +20,7 @@ import { db } from "../../firebaseConfig";
 import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData'; 
 
 import SaveManager from '../managers/SaveManager';
-
-import ShopModal from '../ui/ShopModal';
-import SystemModal from '../ui/SystemModal';
+import StrategyUIManager from '../managers/StrategyUIManager'; // [New] Manager Import
 import pathData from '../data/path.json'; 
 
 export default class StrategyScene extends BaseScene {
@@ -30,7 +28,6 @@ export default class StrategyScene extends BaseScene {
         super('StrategyScene'); 
     }
 
-    // ... (init, preload, create 등 기존 코드 유지) ...
     init(data) {
         this.isManualLoad = false;
 
@@ -108,6 +105,9 @@ export default class StrategyScene extends BaseScene {
 
     create() {
         super.create(); 
+
+        // [New] UI Manager 초기화
+        this.uiManager = new StrategyUIManager(this);
 
         this.scene.stop('UIScene');
         this.cameras.main.setBackgroundColor('#111');
@@ -261,18 +261,14 @@ export default class StrategyScene extends BaseScene {
         this.createEnemyTokens();
         this.createPlayerToken();
 
-        this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
-        this.uiCamera.ignore(this.children.list);
-        
-        this.createUI(); 
+        // [Modified] UI Manager 생성 호출
+        this.uiManager.createUI();
         
         if (battleResultMessage) {
-            this.statusText.setText(battleResultMessage);
+            this.uiManager.setStatusText(battleResultMessage);
         }
         
-        this.updateUIState();
-
-        this.cameras.main.ignore(this.uiContainer);
+        this.uiManager.updateState();
 
         this.mapWidth = map.widthInPixels;
         this.mapHeight = map.heightInPixels;
@@ -289,7 +285,7 @@ export default class StrategyScene extends BaseScene {
         if (!unlocked.includes(roleName)) {
             unlocked.push(roleName);
             this.registry.set('unlockedRoles', unlocked);
-            this.statusText.setText(`🎉 새로운 동료 해금: ${roleName}!`);
+            this.uiManager.setStatusText(`🎉 새로운 동료 해금: ${roleName}!`);
             this.cameras.main.flash(500, 255, 255, 0); 
             this.saveProgress();
         }
@@ -297,198 +293,26 @@ export default class StrategyScene extends BaseScene {
 
     handleResize(gameSize) {
         this.updateCameraLayout();
-        this.resizeUI();
+        // [Modified] UI 리사이즈 위임
+        this.uiManager.resize(gameSize);
     }
 
-    createStyledButton(x, y, text, color, onClick) {
-        const btnContainer = this.add.container(x, y);
-        const shadow = this.add.rectangle(4, 4, 160, 50, 0x000000, 0.5).setOrigin(0.5);
-        const bg = this.add.rectangle(0, 0, 160, 50, color).setOrigin(0.5);
-        bg.setStrokeStyle(2, 0xffffff, 0.8);
-        const btnText = this.add.text(0, 0, text, { fontSize: '18px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
-        const hitArea = this.add.rectangle(0, 0, 160, 50, 0x000000, 0).setOrigin(0.5).setInteractive({ useHandCursor: true });
-        
-        hitArea.on('pointerdown', () => {
-            this.tweens.add({ targets: btnContainer, scale: 0.95, duration: 50, yoyo: true, onComplete: onClick });
-        });
-        hitArea.on('pointerover', () => { bg.setStrokeStyle(3, 0xffff00, 1); });
-        hitArea.on('pointerout', () => { bg.setStrokeStyle(2, 0xffffff, 0.8); });
-
-        btnContainer.add([shadow, bg, btnText, hitArea]);
-        return { container: btnContainer, textObj: btnText, bgObj: bg };
-    }
-
-    updateCoinText(amount) {
-        if(this.coinText) {
-            this.coinText.setText(`💰 ${amount}냥`);
-        }
-    }
-
-    createUI() {
-        this.uiContainer = this.add.container(0, 0);
-        this.uiContainer.setScrollFactor(0); 
-
-        this.shopModal = new ShopModal(this, this.uiContainer);
-        this.systemModal = new SystemModal(this, this.uiContainer);
-        
-        // [New] 동적 위치 메뉴 버튼을 담을 컨테이너 생성
-        this.dynamicBtnContainer = this.add.container(0, 0);
-
-        this.drawUIElements();
-        
-        // UI 컨테이너에 동적 버튼 컨테이너 추가
-        this.uiContainer.add(this.dynamicBtnContainer);
-    }
-
-    drawUIElements() {
-        if (this.uiContainer.list.length > 0) {
-            // 완전히 지우지 않고 모달과 동적 컨테이너는 유지/재생성 관리
-            // 여기서는 편의상 uiContainer를 클리어하지 않고 필요한 요소만 다시 그림
-            // (기존 코드 구조상 removeAll을 하면 모달 참조가 끊길 수 있으므로 주의)
-            // 간단하게 기존 요소들을 모두 지우고 다시 생성하는 방식 유지
-            this.uiContainer.removeAll(true);
-            this.shopModal = new ShopModal(this, this.uiContainer);
-            this.systemModal = new SystemModal(this, this.uiContainer);
-            
-            // 재생성 후 다시 할당
-            this.dynamicBtnContainer = this.add.container(0, 0);
-        } else {
-            this.shopModal = new ShopModal(this, this.uiContainer);
-            this.systemModal = new SystemModal(this, this.uiContainer);
-            this.dynamicBtnContainer = this.add.container(0, 0);
-        }
-
-        const w = this.scale.width;
-        const h = this.scale.height;
-        const isMobile = w < 600; 
-
-        const safeAreaTop = isMobile ? 40 : 0; 
-        const barHeight = isMobile ? 60 : 50;
-        
-        const topBarH = barHeight + safeAreaTop;
-        const contentY = safeAreaTop + (barHeight / 2);
-
-        const fontSize = isMobile ? '13px' : '16px'; 
-
-        const topBarBg = this.add.rectangle(0, 0, w, topBarH, 0x000000, 0.6).setOrigin(0, 0);
-        const coins = this.registry.get('playerCoins');
-        this.coinText = this.add.text(isMobile ? 10 : 20, contentY, `💰 ${coins}냥`, { fontSize: isMobile ? '16px' : '18px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(0, 0.5);
-        
-        const rightMargin = isMobile ? 15 : 20;
-        const btnSpacing = isMobile ? 40 : 50;
-
-        this.sysBtn = this.add.text(w - rightMargin, contentY, "⚙️", { fontSize: isMobile ? '20px' : '24px' })
-            .setOrigin(1, 0.5)
-            .setInteractive();
-        
-        this.sysBtn.on('pointerdown', () => {
-            if (this.shopModal.isOpen) this.shopModal.toggle();
-            this.systemModal.toggle();
-        });
-
-        this.bgmBtn = this.add.text(w - rightMargin - btnSpacing, contentY, "🔊", { fontSize: isMobile ? '20px' : '24px' })
-            .setOrigin(1, 0.5)
-            .setInteractive();
-        
-        this.bgmBtn.on('pointerdown', () => {
-            const isMuted = this.toggleBgmMute();
-            this.bgmBtn.setText(isMuted ? "🔇" : "🔊");
-        });
-
-        const currentStatusMsg = (this.statusText && this.statusText.active) ? this.statusText.text : '이동할 영토를 선택하세요.';
-        const safeTextWidth = w - (isMobile ? 180 : 300); 
-        this.statusText = this.add.text(w / 2, contentY, currentStatusMsg, { fontSize: fontSize, color: '#ffffff', align: 'center', wordWrap: { width: safeTextWidth, useAdvancedWrap: true } }).setOrigin(0.5, 0.5);
-
-        const btnMargin = isMobile ? 50 : 60;
-        this.endTurnBtnObj = this.createStyledButton(w - (isMobile ? 85 : 100), h - btnMargin, '턴 종료', 0xcc0000, () => {
-            if (this.selectedTargetId !== null) this.startBattle();
-            else this.handleTurnEnd();
-        });
-        
-        this.shopBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
-            if (this.systemModal.isOpen) this.systemModal.toggle();
-            this.shopModal.toggle();
-        });
-
-        this.undoBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '이동 취소', 0x666666, () => this.undoMove());
-        this.undoBtnObj.container.setVisible(false);
-
-        if (isMobile) {
-            this.endTurnBtnObj.container.setScale(0.85);
-            this.shopBtnObj.container.setScale(0.85);
-            this.undoBtnObj.container.setScale(0.85);
-        }
-
-        this.uiContainer.add([topBarBg, this.coinText, this.bgmBtn, this.sysBtn, this.statusText]);
-        this.uiContainer.add([this.shopBtnObj.container, this.endTurnBtnObj.container, this.undoBtnObj.container]);
-        this.uiContainer.add(this.dynamicBtnContainer); // 동적 버튼 컨테이너 다시 추가
-        
-        this.updateUIState();
-    }
-
-    // [New] 다이소 오픈 함수 (플레이스홀더)
+    // [Moved] openDaiso -> UI Manager가 호출하지만 로직은 Scene에 남겨둘 수도 있고 Manager로 완전히 넘길 수도 있음. 
+    // 여기서는 Scene의 메서드로 유지하고 Manager가 호출하도록 함 (StrategyUIManager.js 참조)
     openDaiso() {
         console.log("Open Daiso Shop");
-        // 현재는 상점 기능이 구현되지 않았으므로 안내 메시지 표시
-        this.statusText.setText("🛍️ 다이소에 오신 것을 환영합니다! (준비중)");
-        this.cameras.main.flash(200, 255, 255, 255); // 화면 깜빡임 효과
+        this.uiManager.setStatusText("🛍️ 다이소에 오신 것을 환영합니다! (준비중)");
+        this.cameras.main.flash(200, 255, 255, 255);
     }
 
-    // [New] 위치 기반 메뉴 업데이트
-    updateLocationMenus() {
-        if (!this.dynamicBtnContainer) return;
-        this.dynamicBtnContainer.removeAll(true);
-        
-        const currentLeaderId = this.registry.get('leaderPosition');
-        const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
-        
-        if (currentNode && currentNode.add_menu && Array.isArray(currentNode.add_menu)) {
-            // 부대편성 버튼(왼쪽)과 턴 종료 버튼(오른쪽) 사이 공간 활용
-            // 부대편성 버튼의 기본 위치가 x=100 정도이므로, 그 오른쪽부터 배치
-            let xPos = 280; 
-            const yPos = this.scale.height - (this.scale.width < 600 ? 50 : 60);
-            const isMobile = this.scale.width < 600;
-            
-            if (isMobile) {
-                xPos = 190; // 모바일에서는 좀 더 좁게 배치
-            }
-
-            currentNode.add_menu.forEach((menuName, index) => {
-                if (menuName === "다이소") {
-                    const btn = this.createStyledButton(xPos + (index * 120), yPos, "🛍️ 다이소", 0xff66cc, () => {
-                        this.openDaiso();
-                    });
-                    
-                    if (isMobile) btn.container.setScale(0.85);
-                    this.dynamicBtnContainer.add(btn.container);
-                }
-                // 추후 다른 메뉴가 추가되면 여기에 분기 처리 (else if ...)
-            });
+    // toggleBgmMute 헬퍼 (UI에서 호출)
+    toggleBgmMute() {
+        if (this.bgm) {
+            this.bgm.setMute(!this.bgm.mute);
+            return this.bgm.mute;
         }
+        return false;
     }
-
-    updateUIState() {
-        if (!this.undoBtnObj || !this.endTurnBtnObj || !this.shopBtnObj) return;
-        
-        if (this.hasMoved && this.previousLeaderId !== null) {
-            this.undoBtnObj.container.setVisible(true); this.shopBtnObj.container.setVisible(false); 
-        } else {
-            this.undoBtnObj.container.setVisible(false); this.shopBtnObj.container.setVisible(true);
-        }
-        
-        if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
-            this.endTurnBtnObj.textObj.setText("전투 시작"); this.endTurnBtnObj.bgObj.setFillStyle(0xff0000); 
-        } else {
-            this.endTurnBtnObj.textObj.setText("턴 종료"); this.endTurnBtnObj.bgObj.setFillStyle(0xcc0000); 
-        }
-
-        // [New] 위치별 추가 메뉴 업데이트 호출
-        this.updateLocationMenus();
-    }
-
-    resizeUI() { this.uiCamera.setViewport(0, 0, this.scale.width, this.scale.height); this.drawUIElements(); }
-
-    // ... (이후 메서드들은 기존 코드 유지: moveLeaderToken, undoMove, selectTerritory, handleNodeArrival, handleNeutralEvent, handleEventResult 등) ...
 
     moveLeaderToken(targetNode, onCompleteCallback) {
         this.input.enabled = false; 
@@ -510,11 +334,11 @@ export default class StrategyScene extends BaseScene {
         if (!this.hasMoved || this.previousLeaderId === null) return;
         const prevNode = this.mapNodes.find(n => n.id === this.previousLeaderId);
         if (!prevNode) return;
-        this.statusText.setText("↩️ 원래 위치로 복귀 중...");
+        this.uiManager.setStatusText("↩️ 원래 위치로 복귀 중...");
         this.moveLeaderToken(prevNode, () => {
             this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
-            this.statusText.setText(`📍 복귀 완료: ${prevNode.name}`);
-            this.updateUIState();
+            this.uiManager.setStatusText(`📍 복귀 완료: ${prevNode.name}`);
+            this.uiManager.updateState();
             if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
             this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
         });
@@ -527,11 +351,11 @@ export default class StrategyScene extends BaseScene {
 
         if (this.hasMoved) {
             if (this.previousLeaderId !== null && node.id === this.previousLeaderId) { this.undoMove(); return; }
-            this.statusText.setText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요."); this.shakeStatusText(); return;
+            this.uiManager.setStatusText("🚫 이미 이동했습니다. [취소]하거나 [턴 종료] 하세요."); this.uiManager.shakeStatusText(); return;
         }
-        if (node.id === currentLeaderId) { this.statusText.setText(`📍 현재 위치: ${node.name}`); return; }
+        if (node.id === currentLeaderId) { this.uiManager.setStatusText(`📍 현재 위치: ${node.name}`); return; }
         const isConnected = currentNode.connectedTo.includes(node.id);
-        if (!isConnected) { this.statusText.setText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다."); this.shakeNode(circleObj); return; }
+        if (!isConnected) { this.uiManager.setStatusText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다."); this.shakeNode(circleObj); return; }
         
         if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; }); }
         this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); });
@@ -543,15 +367,14 @@ export default class StrategyScene extends BaseScene {
         
         if (node.owner !== 'player' && node.owner !== 'neutral') { this.selectedTargetId = node.id; } else { this.selectedTargetId = null; }
         
-        this.statusText.setText(`🚶 ${node.name}(으)로 이동 중...`);
+        this.uiManager.setStatusText(`🚶 ${node.name}(으)로 이동 중...`);
         
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
             
-            // 스크립트가 있다면 EventScene 실행, 아니면 바로 도착 처리
             if (node.script) {
-                this.pendingNode = node; // Resume 후 처리를 위해 저장
-                this.scene.pause(); // 현재 씬 일시 정지
+                this.pendingNode = node; 
+                this.scene.pause(); 
                 this.scene.launch('EventScene', { 
                     mode: 'overlay', 
                     script: node.script, 
@@ -564,13 +387,11 @@ export default class StrategyScene extends BaseScene {
     }
 
     handleNodeArrival(node) {
-        // 1. 중립 지역 이벤트 처리 (기존 로직 유지)
         if (node.owner === 'neutral') {
             this.handleNeutralEvent(node);
             return; 
         }
 
-        // 2. 현재 노드의 적군 수 계산
         let enemyCount = 0;
         if (node.army) {
             if (Array.isArray(node.army)) {
@@ -580,11 +401,9 @@ export default class StrategyScene extends BaseScene {
             }
         }
 
-        // 3. 적 땅이지만 군대가 없는 경우 -> 자동 점령 처리
         if (node.owner !== 'player' && enemyCount <= 0) {
             console.log(`🚩 [StrategyScene] 빈 영토 자동 점령: ${node.name}`);
 
-            // 소유권 변경 및 군대 정보 초기화
             node.owner = 'player';
             node.army = null;
             
@@ -596,13 +415,11 @@ export default class StrategyScene extends BaseScene {
             const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
             if (circle) circle.setFillStyle(0x4488ff);
 
-            this.statusText.setText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
-            
-            this.updateUIState();
+            this.uiManager.setStatusText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
+            this.uiManager.updateState();
             return;
         }
 
-        // 4. 적군이 있는 경우 (기존 전투 대기 로직)
         if (this.selectedTargetId) {
             let infoText = ""; 
             if (enemyCount > 0) {
@@ -610,15 +427,14 @@ export default class StrategyScene extends BaseScene {
             }
             const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
             const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
-            this.statusText.setText(finalMsg);
+            this.uiManager.setStatusText(finalMsg);
         } else { 
-            this.statusText.setText(`✅ ${node.name} 도착. (취소 가능)`); 
+            this.uiManager.setStatusText(`✅ ${node.name} 도착. (취소 가능)`); 
         }
         
-        this.updateUIState();
+        this.uiManager.updateState();
     }
 
-    // ... (handleNeutralEvent, handleEventResult, getCameraTarget, shakeNode, shakeStatusText, handleTurnEnd 등 기존 로직 유지) ...
     handleNeutralEvent(node) {
         let unlockedUnits = [];
 
@@ -653,7 +469,7 @@ export default class StrategyScene extends BaseScene {
         if (circle) circle.setFillStyle(0x4488ff);
 
         this.saveProgress();
-        this.updateUIState();
+        this.uiManager.updateState();
         this.input.enabled = true;
     }
 
@@ -664,7 +480,7 @@ export default class StrategyScene extends BaseScene {
                 if (firstUnit && firstUnit.type) {
                     const roleName = firstUnit.type.charAt(0).toUpperCase() + firstUnit.type.slice(1);
                     this.unlockUnit(roleName);
-                    this.statusText.setText(`🤝 ${roleName} 영입 성공!`);
+                    this.uiManager.setStatusText(`🤝 ${roleName} 영입 성공!`);
                     node.owner = 'player';
                     node.script = null; 
                     
@@ -681,10 +497,10 @@ export default class StrategyScene extends BaseScene {
                 }
             }
         } else {
-            this.statusText.setText(`✅ ${node.name}에서 잠시 휴식을 취했습니다.`);
+            this.uiManager.setStatusText(`✅ ${node.name}에서 잠시 휴식을 취했습니다.`);
         }
         
-        this.updateUIState();
+        this.uiManager.updateState();
         this.input.enabled = true;
     }
 
@@ -696,7 +512,6 @@ export default class StrategyScene extends BaseScene {
     }
 
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
-    shakeStatusText() { this.tweens.add({ targets: this.statusText, alpha: 0.5, duration: 100, yoyo: true, repeat: 1 }); }
 
     handleTurnEnd() {
         const squad = this.registry.get('playerSquad') || [];
@@ -749,7 +564,7 @@ export default class StrategyScene extends BaseScene {
         }
 
         this.registry.set('playerCoins', currentCoins);
-        this.updateCoinText(currentCoins);
+        this.uiManager.updateCoinText(currentCoins);
 
         this.hasMoved = false; 
         this.previousLeaderId = null; 
@@ -773,38 +588,31 @@ export default class StrategyScene extends BaseScene {
 
         let warningMsg = "";
         
-        // [수정] 적군 증원 로직 (플레이어 위치 회피 추가)
         if (turnCount % reinforceInterval === 0) {
             const playerNodes = this.mapNodes.filter(n => n.owner === 'player');
             
             if (playerNodes.length > 0) {
-                // ID 내림차순 정렬 (큰 숫자 우선)
                 playerNodes.sort((a, b) => b.id - a.id);
                 
                 let targetNode = playerNodes[0];
                 const leaderPos = this.registry.get('leaderPosition');
 
-                // [New] 가장 큰 숫자의 땅에 아군(리더)이 있는 경우
                 if (targetNode.id === leaderPos) {
                     if (playerNodes.length > 1) {
-                        // 바로 다음 숫자의 땅을 타겟으로 변경
                         targetNode = playerNodes[1];
                         console.log(`⚠️ [Invasion] Leader detected at Node ${leaderPos}. Targeting next node: ${targetNode.id}`);
                     } else {
-                        // 땅이 하나뿐인데 거기 플레이어가 있다면 침공 스킵 (안전지대)
                         targetNode = null;
                         console.log("⚠️ [Invasion] Skipped: Player is defending the only territory.");
                     }
                 }
 
-                // 타겟이 유효할 경우에만 침공 진행
                 if (targetNode) {
                     const spawnCount = 5 + Math.floor(turnCount / 10);
                     console.log(`⚠️ [Invasion] Node ${targetNode.id} (${targetNode.name}) taken by Enemy! Spawn: ${spawnCount}`);
 
                     targetNode.owner = 'enemy';
                     
-                    // unit type: 'normalDog' (BattleScene 클래스 매핑용)
                     targetNode.army = { type: 'normalDog', count: spawnCount };
 
                     this.registry.set('worldMapData', this.mapNodes);
@@ -855,36 +663,25 @@ export default class StrategyScene extends BaseScene {
         }
         
         if (isBankrupt) {
-            this.statusText.setText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`);
-            this.statusText.setColor('#ff4444');
+            this.uiManager.setStatusText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`, '#ff4444');
         } else {
             const incomeMsg = totalIncome > 0 ? ` (+${totalIncome})` : "";
             const maintenanceMsg = totalMaintenanceCost > 0 ? ` (-${totalMaintenanceCost})` : "";
+            const finalText = `🌙 턴 종료${incomeMsg}${maintenanceMsg}${warningMsg}`;
+            const color = warningMsg ? '#ffaaaa' : '#ffffff';
             
-            this.statusText.setText(`🌙 턴 종료${incomeMsg}${maintenanceMsg}${warningMsg}`);
-            this.statusText.setColor(warningMsg ? '#ffaaaa' : '#ffffff');
+            this.uiManager.setStatusText(finalText, color);
             
             if (totalIncome > 0) {
-                this.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
+                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
             }
             if (totalMaintenanceCost > 0) {
-                this.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
+                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
             }
         }
         
-        this.updateUIState();
+        this.uiManager.updateState();
         this.saveProgress();
-    }
-
-    showFloatingText(x, y, message, color) {
-        const text = this.add.text(x, y, message, {
-            fontSize: '32px', color: color, stroke: '#000000', strokeThickness: 4, fontStyle: 'bold'
-        }).setOrigin(0.5).setDepth(3000);
-        
-        this.tweens.add({
-            targets: text, y: y - 100, alpha: 0, duration: 2000, ease: 'Power2',
-            onComplete: () => text.destroy()
-        });
     }
 
     startBattle() {
@@ -1028,7 +825,6 @@ export default class StrategyScene extends BaseScene {
                     army: armyData, 
                     bgm: config.bgm || "stage1_bgm",
                     script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null),
-                    // [New] 설정에서 add_menu 파싱
                     add_menu: config.add_menu || [] 
                 };
             });
@@ -1053,7 +849,6 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
     
-    // ... (createEnemyTokens, createPlayerToken, createTerritoryNodes, drawConnections, handleBattleResult 등 기존 로직 유지) ...
     createEnemyTokens() {
         if (!this.mapNodes) return;
         if (this.enemyTokens && this.enemyTokens.length > 0) {
@@ -1091,7 +886,8 @@ export default class StrategyScene extends BaseScene {
                 else if (topUnitType === 'boss') textureKey = 'boss_token';
                 
                 const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                if (this.uiCamera) this.uiCamera.ignore(enemyObj);
+                // [Modified] UI Manager 통해 무시 설정
+                this.uiManager.ignoreObject(enemyObj);
 
                 let finalSize = 60; 
                 if (node.owner === 'neutral') finalSize = 60;
@@ -1146,8 +942,9 @@ export default class StrategyScene extends BaseScene {
             const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
             circle.setAlpha(0.5); circle.nodeData = node; circle.setDepth(100); 
             circle.on('pointerdown', () => {
-                if(this.shopModal.isOpen) this.shopModal.toggle();
-                if(this.systemModal.isOpen) this.systemModal.toggle();
+                // UI Manager의 모달 제어
+                if(this.uiManager.shopModal.isOpen) this.uiManager.shopModal.toggle();
+                if(this.uiManager.systemModal.isOpen) this.uiManager.systemModal.toggle();
                 this.selectTerritory(circle);
             });
             this.nodeContainer.add(shadow); this.nodeContainer.add(circle);
