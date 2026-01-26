@@ -56,6 +56,7 @@
       "neutral": true,
       "unit": "Runner",
       "text": "이제 러너와 슈터를 동료로 영입할 수 있다!",
+      "add_menu": ["다이소"],
       "script": [
         {
           "type": "dialog",

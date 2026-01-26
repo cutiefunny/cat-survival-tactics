@@ -30,6 +30,7 @@ export default class StrategyScene extends BaseScene {
         super('StrategyScene'); 
     }
 
+    // ... (init, preload, create 등 기존 코드 유지) ...
     init(data) {
         this.isManualLoad = false;
 
@@ -330,17 +331,31 @@ export default class StrategyScene extends BaseScene {
         this.shopModal = new ShopModal(this, this.uiContainer);
         this.systemModal = new SystemModal(this, this.uiContainer);
         
+        // [New] 동적 위치 메뉴 버튼을 담을 컨테이너 생성
+        this.dynamicBtnContainer = this.add.container(0, 0);
+
         this.drawUIElements();
+        
+        // UI 컨테이너에 동적 버튼 컨테이너 추가
+        this.uiContainer.add(this.dynamicBtnContainer);
     }
 
     drawUIElements() {
         if (this.uiContainer.list.length > 0) {
+            // 완전히 지우지 않고 모달과 동적 컨테이너는 유지/재생성 관리
+            // 여기서는 편의상 uiContainer를 클리어하지 않고 필요한 요소만 다시 그림
+            // (기존 코드 구조상 removeAll을 하면 모달 참조가 끊길 수 있으므로 주의)
+            // 간단하게 기존 요소들을 모두 지우고 다시 생성하는 방식 유지
             this.uiContainer.removeAll(true);
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
+            
+            // 재생성 후 다시 할당
+            this.dynamicBtnContainer = this.add.container(0, 0);
         } else {
             this.shopModal = new ShopModal(this, this.uiContainer);
             this.systemModal = new SystemModal(this, this.uiContainer);
+            this.dynamicBtnContainer = this.add.container(0, 0);
         }
 
         const w = this.scale.width;
@@ -406,25 +421,74 @@ export default class StrategyScene extends BaseScene {
 
         this.uiContainer.add([topBarBg, this.coinText, this.bgmBtn, this.sysBtn, this.statusText]);
         this.uiContainer.add([this.shopBtnObj.container, this.endTurnBtnObj.container, this.undoBtnObj.container]);
+        this.uiContainer.add(this.dynamicBtnContainer); // 동적 버튼 컨테이너 다시 추가
         
         this.updateUIState();
     }
 
+    // [New] 다이소 오픈 함수 (플레이스홀더)
+    openDaiso() {
+        console.log("Open Daiso Shop");
+        // 현재는 상점 기능이 구현되지 않았으므로 안내 메시지 표시
+        this.statusText.setText("🛍️ 다이소에 오신 것을 환영합니다! (준비중)");
+        this.cameras.main.flash(200, 255, 255, 255); // 화면 깜빡임 효과
+    }
+
+    // [New] 위치 기반 메뉴 업데이트
+    updateLocationMenus() {
+        if (!this.dynamicBtnContainer) return;
+        this.dynamicBtnContainer.removeAll(true);
+        
+        const currentLeaderId = this.registry.get('leaderPosition');
+        const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
+        
+        if (currentNode && currentNode.add_menu && Array.isArray(currentNode.add_menu)) {
+            // 부대편성 버튼(왼쪽)과 턴 종료 버튼(오른쪽) 사이 공간 활용
+            // 부대편성 버튼의 기본 위치가 x=100 정도이므로, 그 오른쪽부터 배치
+            let xPos = 280; 
+            const yPos = this.scale.height - (this.scale.width < 600 ? 50 : 60);
+            const isMobile = this.scale.width < 600;
+            
+            if (isMobile) {
+                xPos = 190; // 모바일에서는 좀 더 좁게 배치
+            }
+
+            currentNode.add_menu.forEach((menuName, index) => {
+                if (menuName === "다이소") {
+                    const btn = this.createStyledButton(xPos + (index * 120), yPos, "🛍️ 다이소", 0xff66cc, () => {
+                        this.openDaiso();
+                    });
+                    
+                    if (isMobile) btn.container.setScale(0.85);
+                    this.dynamicBtnContainer.add(btn.container);
+                }
+                // 추후 다른 메뉴가 추가되면 여기에 분기 처리 (else if ...)
+            });
+        }
+    }
+
     updateUIState() {
         if (!this.undoBtnObj || !this.endTurnBtnObj || !this.shopBtnObj) return;
+        
         if (this.hasMoved && this.previousLeaderId !== null) {
             this.undoBtnObj.container.setVisible(true); this.shopBtnObj.container.setVisible(false); 
         } else {
             this.undoBtnObj.container.setVisible(false); this.shopBtnObj.container.setVisible(true);
         }
+        
         if (this.selectedTargetId !== null && this.selectedTargetId !== undefined) {
             this.endTurnBtnObj.textObj.setText("전투 시작"); this.endTurnBtnObj.bgObj.setFillStyle(0xff0000); 
         } else {
             this.endTurnBtnObj.textObj.setText("턴 종료"); this.endTurnBtnObj.bgObj.setFillStyle(0xcc0000); 
         }
+
+        // [New] 위치별 추가 메뉴 업데이트 호출
+        this.updateLocationMenus();
     }
 
     resizeUI() { this.uiCamera.setViewport(0, 0, this.scale.width, this.scale.height); this.drawUIElements(); }
+
+    // ... (이후 메서드들은 기존 코드 유지: moveLeaderToken, undoMove, selectTerritory, handleNodeArrival, handleNeutralEvent, handleEventResult 등) ...
 
     moveLeaderToken(targetNode, onCompleteCallback) {
         this.input.enabled = false; 
@@ -554,6 +618,7 @@ export default class StrategyScene extends BaseScene {
         this.updateUIState();
     }
 
+    // ... (handleNeutralEvent, handleEventResult, getCameraTarget, shakeNode, shakeStatusText, handleTurnEnd 등 기존 로직 유지) ...
     handleNeutralEvent(node) {
         let unlockedUnits = [];
 
@@ -962,7 +1027,9 @@ export default class StrategyScene extends BaseScene {
                     text: text,
                     army: armyData, 
                     bgm: config.bgm || "stage1_bgm",
-                    script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null)
+                    script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null),
+                    // [New] 설정에서 add_menu 파싱
+                    add_menu: config.add_menu || [] 
                 };
             });
         }
@@ -986,6 +1053,7 @@ export default class StrategyScene extends BaseScene {
         this.registry.set('worldMapData', nodes);
     }
     
+    // ... (createEnemyTokens, createPlayerToken, createTerritoryNodes, drawConnections, handleBattleResult 등 기존 로직 유지) ...
     createEnemyTokens() {
         if (!this.mapNodes) return;
         if (this.enemyTokens && this.enemyTokens.length > 0) {
