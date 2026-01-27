@@ -362,6 +362,7 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.scale = 1;
         this.setDisplaySize(this.baseSize, this.baseSize);
         this.setAlpha(1);
+        
         if (this.body) {
             const targetDiameter = this.baseSize;
             const scale = this.scaleX; 
@@ -369,7 +370,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
             const offset = (this.width - (bodyRadius * 2)) / 2;
             this.body.setCircle(bodyRadius, offset, offset); 
         }
-        if (this.team === 'blue') {
+
+        // [Modified] 버프 상태에 따른 틴트 우선 적용
+        if (this.hasSpeedBuff) {
+            this.setTint(0xff6666); // 약간 빨간색 (공격 속도 버프)
+        } else if (this.team === 'blue') {
             if (this.isLeader) this.setTint(0xffffaa);
             else this.clearTint(); 
         } else {

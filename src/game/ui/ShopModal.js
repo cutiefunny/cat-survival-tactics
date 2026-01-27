@@ -1,12 +1,15 @@
 import { UNIT_COSTS, ROLE_BASE_STATS, getRandomUnitName } from '../data/UnitData'; 
+import daisoItems from '../data/Daiso.json'; 
 
 export default class ShopModal {
     constructor(scene, parentContainer) {
         this.scene = scene;
         this.parentContainer = parentContainer;
         this.container = null;
-        this.unitDetailPopup = null;
+        this.unitDetailPopup = null; // 유닛/아이템 상세 팝업 공용 참조
         this.isOpen = false;
+        
+        this.invContainer = null; 
 
         this.roleToTexture = {
             'Tanker': 'tanker_token', 
@@ -28,6 +31,7 @@ export default class ShopModal {
 
         if (this.isOpen) {
             this.refreshSquadDisplay();
+            this.refreshInventory(); 
         } else {
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
@@ -44,13 +48,14 @@ export default class ShopModal {
         const popupH = Math.min(600, height * 0.9);
         
         const bg = this.scene.add.rectangle(0, 0, popupW, popupH, 0x222222).setStrokeStyle(4, 0xffcc00);
-        const title = this.scene.add.text(0, -popupH / 2 + 30, "용병 고용", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
+        const title = this.scene.add.text(0, -popupH / 2 + 30, "용병 고용 및 관리", { fontSize: '24px', fontStyle: 'bold', fill: '#ffcc00' }).setOrigin(0.5);
         const closeBtn = this.scene.add.text(popupW / 2 - 30, -popupH / 2 + 30, "X", { fontSize: '24px', fill: '#ffffff' }).setOrigin(0.5).setInteractive();
         closeBtn.on('pointerdown', () => this.toggle());
 
         this.container.add([bg, title, closeBtn]);
 
         this.createUnitButtons(popupW, popupH);
+        this.createInventoryInfo(popupW, popupH); 
         this.createSquadInfo(popupW, popupH);
 
         this.parentContainer.add(this.container);
@@ -89,6 +94,93 @@ export default class ShopModal {
             }
             this.container.add(btn);
         });
+    }
+
+    createInventoryInfo(popupW, popupH) {
+        const invY = popupH / 2 - 240; 
+        
+        this.invText = this.scene.add.text(0, invY, "보유 아이템 (클릭하여 상세 보기)", { fontSize: '16px', color: '#aaaaaa' }).setOrigin(0.5);
+        this.container.add(this.invText);
+
+        this.invContainer = this.scene.add.container(0, invY + 30);
+        this.container.add(this.invContainer);
+    }
+
+    refreshInventory() {
+        if (!this.invContainer) return;
+        this.invContainer.removeAll(true);
+        
+        const inventory = this.scene.registry.get('playerInventory') || {};
+        const ownedItems = Object.keys(inventory).filter(id => inventory[id] > 0);
+        
+        if (ownedItems.length === 0) {
+            const emptyText = this.scene.add.text(0, 0, "(없음)", { fontSize: '14px', color: '#666' }).setOrigin(0.5);
+            this.invContainer.add(emptyText);
+            return;
+        }
+
+        const gap = 70;
+        const startX = -((ownedItems.length - 1) * gap) / 2;
+
+        ownedItems.forEach((itemId, index) => {
+            const itemData = daisoItems.find(d => d.id === itemId);
+            if (!itemData) return;
+            
+            const count = inventory[itemId];
+            const x = startX + index * gap;
+            
+            // [Modified] 아이템 아이콘 컨테이너 생성 및 클릭 이벤트 추가
+            const itemIconContainer = this.scene.add.container(x, 0);
+            
+            // 터치 영역 (투명 사각형)
+            const hitArea = this.scene.add.rectangle(0, 0, 50, 50, 0x000000, 0).setInteractive({ useHandCursor: true });
+            
+            const icon = this.scene.add.text(0, 0, itemData.icon, { fontSize: '24px' }).setOrigin(0.5);
+            const countText = this.scene.add.text(20, 10, `x${count}`, { fontSize: '12px', color: '#ffff00', stroke: '#000', strokeThickness: 2 }).setOrigin(0, 0.5);
+            
+            hitArea.on('pointerdown', () => this.openItemDetailPopup(itemData));
+            
+            itemIconContainer.add([hitArea, icon, countText]);
+            this.invContainer.add(itemIconContainer);
+        });
+    }
+
+    // [New] 아이템 상세 설명 팝업
+    openItemDetailPopup(itemData) {
+        if (this.unitDetailPopup) this.unitDetailPopup.destroy();
+        
+        const { width, height } = this.scene.scale;
+        
+        this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
+        const popupW = 300;
+        const popupH = 250;
+
+        const bg = this.scene.add.rectangle(0, 0, popupW, popupH, 0x111111, 0.95).setStrokeStyle(2, 0xffcc00);
+        
+        const titleText = this.scene.add.text(0, -popupH / 2 + 30, itemData.name, { 
+            fontSize: '20px', 
+            fontStyle: 'bold', 
+            color: '#ffffff' 
+        }).setOrigin(0.5);
+        
+        const iconText = this.scene.add.text(0, -popupH / 2 + 80, itemData.icon, { fontSize: '50px' }).setOrigin(0.5);
+        
+        const descText = this.scene.add.text(0, -popupH / 2 + 140, itemData.desc, { 
+            fontSize: '16px', 
+            color: '#cccccc', 
+            align: 'center', 
+            wordWrap: { width: popupW - 40 } 
+        }).setOrigin(0.5);
+
+        const closeBtn = this.createCloseButton(popupW, popupH, () => {
+            if (this.unitDetailPopup) {
+                this.unitDetailPopup.destroy();
+                this.unitDetailPopup = null;
+            }
+        });
+
+        this.unitDetailPopup.add([bg, titleText, iconText, descText, closeBtn]);
+        this.parentContainer.add(this.unitDetailPopup);
     }
 
     createSquadInfo(popupW, popupH) {
@@ -289,7 +381,6 @@ export default class ShopModal {
             const newCoins = currentCoins - unitConfig.cost;
             this.scene.registry.set('playerCoins', newCoins);
             
-            // [Fixed] this.scene.updateCoinText -> this.scene.uiManager.updateCoinText 로 변경
             if (this.scene.uiManager && this.scene.uiManager.updateCoinText) {
                 this.scene.uiManager.updateCoinText(newCoins);
             }

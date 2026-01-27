@@ -1,20 +1,61 @@
 import Phaser from 'phaser';
+import BattleItemModal from '../ui/BattleItemModal'; 
 
 export default class BattleUIManager {
     constructor(scene) {
-        this.scene = scene;
+        this.scene = scene; // BattleScene
         console.log("🔧 [BattleUIManager] Initialized");
         
         this.isDebugEnabled = false; 
+        this.itemModal = null; 
 
+        // UIScene 실행 확인 및 실행
         if (this.scene.scene.isActive('UIScene')) {
-            this.scene.scene.stop('UIScene');
+            // 이미 실행 중이면 유지
+        } else {
+            this.scene.scene.launch('UIScene');
         }
-        this.scene.scene.launch('UIScene');
     }
 
-    // --- Bridge Methods ---
+    create() {
+        // UIScene이 확실히 로드된 후 실행하기 위해 약간의 딜레이
+        this.scene.time.delayedCall(100, () => {
+            const uiScene = this.scene.scene.get('UIScene');
+            if (uiScene) {
+                // UI Scene에 모달과 버튼 생성
+                this.itemModal = new BattleItemModal(uiScene, this.scene);
+                this.createInventoryButton(uiScene);
+            } else {
+                console.error("❌ UIScene not found!");
+            }
+        });
+    }
 
+    createInventoryButton(uiScene) {
+        const { width, height } = uiScene.scale;
+        // 위치: 우측 상단
+        const x = width - 60;
+        const y = 140; 
+
+        const btn = uiScene.add.container(x, y);
+        
+        const bg = uiScene.add.circle(0, 0, 30, 0x444444)
+            .setStrokeStyle(2, 0xffffff)
+            .setInteractive({ useHandCursor: true });
+            
+        const icon = uiScene.add.text(0, 0, "🎒", { fontSize: '30px' }).setOrigin(0.5);
+
+        bg.on('pointerdown', () => {
+            if (this.itemModal) {
+                uiScene.tweens.add({ targets: btn, scale: 0.9, duration: 50, yoyo: true });
+                this.itemModal.toggle();
+            }
+        });
+
+        btn.add([bg, icon]);
+    }
+
+    // --- Bridge Methods (기존과 동일) ---
     createFooter() { }
     createAutoBattleButton() { }
     createSquadButton() { }
@@ -53,8 +94,6 @@ export default class BattleUIManager {
         });
     }
     
-    // [Removed] createShopUI, hideShopUI 제거됨
-
     updateCoins(amount) {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.updateCoins) ui.updateCoins(amount);
@@ -94,14 +133,9 @@ export default class BattleUIManager {
 
     updateDebugStats(loop) {
         if (!this.isDebugEnabled) return;
-        
         const ui = this.scene.scene.get('UIScene');
-        
         if (ui && ui.debugStats) {
-            if (!ui.debugStats.visible) {
-                ui.showDebugStats();
-            }
-            
+            if (!ui.debugStats.visible) ui.showDebugStats();
             if (ui.updateDebugStats) {
                 let memInfo = null;
                 if (window.performance && window.performance.memory) {

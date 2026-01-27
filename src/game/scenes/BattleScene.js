@@ -167,7 +167,19 @@ export default class BattleScene extends BaseScene {
             console.log("▶️ [BattleScene] Resumed from Cutscene");
         });
 
+        this.uiManager.create();
+
         this.fetchConfigAndStart();
+    }
+
+    pauseBattle(isPaused) {
+        if (isPaused) {
+            this.physics.world.pause();
+            this.time.paused = true;
+        } else {
+            this.physics.world.resume();
+            this.time.paused = false;
+        }
     }
 
     playHitSound() {
@@ -740,6 +752,17 @@ export default class BattleScene extends BaseScene {
         this.physics.world.timeScale = 1 / this.gameSpeed; 
         this.time.timeScale = this.gameSpeed;
         this.uiManager.updateSpeedButton(this.gameSpeed);
+    }
+    slowMotionForModal(isActive) {
+        if (isActive) {
+            // 0.2배속 (Phaser physics timeScale은 값이 클수록 느려짐: 1/0.2 = 5)
+            this.physics.world.timeScale = 5; 
+            this.time.timeScale = 0.2;
+        } else {
+            // 원래 게임 속도로 복구
+            this.physics.world.timeScale = 1 / this.gameSpeed; 
+            this.time.timeScale = this.gameSpeed;
+        }
     }
     startBattle() {
         if (this.battleStarted) return;

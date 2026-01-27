@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import ShopModal from '../ui/ShopModal';
 import SystemModal from '../ui/SystemModal';
+import DaisoModal from '../ui/DaisoModal'; // [New] Import
 
 export default class StrategyUIManager {
     constructor(scene) {
@@ -10,6 +11,7 @@ export default class StrategyUIManager {
         this.uiContainer = null;
         this.shopModal = null;
         this.systemModal = null;
+        this.daisoModal = null; // [New]
         this.dynamicBtnContainer = null;
         
         // 텍스트 및 버튼 객체
@@ -30,7 +32,7 @@ export default class StrategyUIManager {
     createUI() {
         // UI 카메라 설정
         this.uiCamera = this.scene.cameras.add(0, 0, this.scene.scale.width, this.scene.scale.height);
-        this.uiCamera.ignore(this.scene.children.list); // 게임 월드 객체 무시
+        this.uiCamera.ignore(this.scene.children.list); 
 
         this.uiContainer = this.scene.add.container(0, 0);
         this.uiContainer.setScrollFactor(0); 
@@ -38,14 +40,12 @@ export default class StrategyUIManager {
         // 모달 및 컨테이너 초기화
         this.shopModal = new ShopModal(this.scene, this.uiContainer);
         this.systemModal = new SystemModal(this.scene, this.uiContainer);
+        this.daisoModal = new DaisoModal(this.scene, this.uiContainer); // [New]
         this.dynamicBtnContainer = this.scene.add.container(0, 0);
 
         this.drawUIElements();
         
-        // UI 컨테이너에 동적 버튼 컨테이너 추가
         this.uiContainer.add(this.dynamicBtnContainer);
-
-        // 메인 카메라가 UI를 무시하도록 설정
         this.scene.cameras.main.ignore(this.uiContainer);
     }
 
@@ -54,10 +54,12 @@ export default class StrategyUIManager {
             this.uiContainer.removeAll(true);
             this.shopModal = new ShopModal(this.scene, this.uiContainer);
             this.systemModal = new SystemModal(this.scene, this.uiContainer);
+            this.daisoModal = new DaisoModal(this.scene, this.uiContainer); // [New]
             this.dynamicBtnContainer = this.scene.add.container(0, 0);
         } else {
             this.shopModal = new ShopModal(this.scene, this.uiContainer);
             this.systemModal = new SystemModal(this.scene, this.uiContainer);
+            this.daisoModal = new DaisoModal(this.scene, this.uiContainer); // [New]
             this.dynamicBtnContainer = this.scene.add.container(0, 0);
         }
 
@@ -90,6 +92,7 @@ export default class StrategyUIManager {
         
         this.sysBtn.on('pointerdown', () => {
             if (this.shopModal.isOpen) this.shopModal.toggle();
+            if (this.daisoModal.isOpen) this.daisoModal.toggle();
             this.systemModal.toggle();
         });
 
@@ -120,6 +123,7 @@ export default class StrategyUIManager {
         // 부대 편성 (상점) 버튼
         this.shopBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
             if (this.systemModal.isOpen) this.systemModal.toggle();
+            if (this.daisoModal.isOpen) this.daisoModal.toggle();
             this.shopModal.toggle();
         });
 
@@ -177,16 +181,25 @@ export default class StrategyUIManager {
         }
     }
 
+    // [New] 다이소 모달 토글 메서드
+    toggleDaisoModal() {
+        if (this.shopModal.isOpen) this.shopModal.toggle();
+        if (this.systemModal.isOpen) this.systemModal.toggle();
+        
+        if (this.daisoModal) {
+            this.daisoModal.toggle();
+        }
+    }
+
     updateState() {
         if (!this.undoBtnObj || !this.endTurnBtnObj || !this.shopBtnObj) return;
         
-        // [Fixed] leaderPosition을 registry에서 명시적으로 가져옴
         const hasMoved = this.scene.hasMoved;
         const previousLeaderId = this.scene.previousLeaderId;
         const selectedTargetId = this.scene.selectedTargetId;
         
         const leaderPosition = this.scene.registry.get('leaderPosition');
-        const mapNodes = this.scene.mapNodes || this.scene.registry.get('worldMapData');
+        const mapNodes = this.scene.mapManager ? this.scene.mapManager.mapNodes : [];
 
         // 이동 취소 / 상점 버튼 토글
         if (hasMoved && previousLeaderId !== null) {
@@ -206,11 +219,9 @@ export default class StrategyUIManager {
             this.endTurnBtnObj.bgObj.setFillStyle(0xcc0000); 
         }
 
-        // 올바른 leaderPosition 값을 전달
         this.updateLocationMenus(leaderPosition, mapNodes);
     }
 
-    // 위치 기반 메뉴 업데이트
     updateLocationMenus(currentLeaderId, mapNodes) {
         if (!this.dynamicBtnContainer) return;
         this.dynamicBtnContainer.removeAll(true);

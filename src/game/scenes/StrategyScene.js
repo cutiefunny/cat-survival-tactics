@@ -1,8 +1,8 @@
 import BaseScene from './BaseScene'; 
 import Phaser from 'phaser';
 import sangsuMap from '../../assets/maps/sangsu_map.json'; 
-import territoryConfig from '../data/TerritoryConfig.json'; 
-import { LEVEL_KEYS } from '../managers/LevelManager'; 
+
+// [Restored] 이미지 Import 복구 (Vite 빌드 호환성을 위해 필수)
 import leaderImg from '../../assets/units/leader.png';
 import dogImg from '../../assets/units/dog.png';
 import runnerImg from '../../assets/units/runner.png'; 
@@ -21,7 +21,8 @@ import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData';
 
 import SaveManager from '../managers/SaveManager';
 import StrategyUIManager from '../managers/StrategyUIManager'; 
-import pathData from '../data/path.json'; 
+import StrategyMapManager from '../managers/StrategyMapManager'; 
+import StrategyTokenManager from '../managers/StrategyTokenManager'; 
 
 export default class StrategyScene extends BaseScene {
     constructor() {
@@ -30,7 +31,6 @@ export default class StrategyScene extends BaseScene {
 
     init(data) {
         this.isManualLoad = false;
-        // 턴 처리 중 입력 방지 플래그
         this.isProcessingTurn = false;
 
         if (data && data.battleResult) {
@@ -40,6 +40,8 @@ export default class StrategyScene extends BaseScene {
         if (data && data.manualLoadData) {
             console.log("📂 [StrategyScene] Manual Load Data Applied", data.manualLoadData);
             const loadData = data.manualLoadData;
+
+            this.registry.set('playerInventory', loadData.playerInventory || {});
             
             this.isManualLoad = true;
 
@@ -79,7 +81,14 @@ export default class StrategyScene extends BaseScene {
                 if (this.registry.get('turnCount') === undefined) {
                     this.registry.set('turnCount', savedData.turnCount ?? 1);
                 }
+                if (!this.registry.get('playerInventory')) {
+                    this.registry.set('playerInventory', savedData.playerInventory || {});
+                }
             }
+        }
+
+        if (this.registry.get('playerInventory') === undefined) {
+            this.registry.set('playerInventory', {});
         }
 
         const hasRegistryData = this.registry.get('playerCoins') !== undefined;
@@ -90,6 +99,7 @@ export default class StrategyScene extends BaseScene {
         this.load.tilemapTiledJSON('strategy_map', sangsuMap);
         this.load.image('sangsu_tiles', sangsuTilesImg);
         
+        // [Fixed] Import된 변수를 사용하여 로드 (문자열 경로 X)
         this.load.spritesheet('leader_token', leaderImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('dog_token', dogImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('runner_token', runnerImg, { frameWidth: 100, frameHeight: 100 });
@@ -107,12 +117,15 @@ export default class StrategyScene extends BaseScene {
         super.create(); 
 
         this.uiManager = new StrategyUIManager(this);
+        this.mapManager = new StrategyMapManager(this); 
+        this.tokenManager = new StrategyTokenManager(this);
 
         this.scene.stop('UIScene');
         this.cameras.main.setBackgroundColor('#111');
 
         this.input.addPointer(1);
-        this.createAnimations();
+        
+        this.tokenManager.createAnimations();
 
         const map = this.make.tilemap({ key: 'strategy_map' });
         const tilesetName = map.tilesets[0].name;
@@ -139,6 +152,7 @@ export default class StrategyScene extends BaseScene {
         return {
             playerCoins: this.registry.get('playerCoins'),
             playerSquad: this.registry.get('playerSquad'),
+            playerInventory: this.registry.get('playerInventory'),
             unlockedRoles: this.registry.get('unlockedRoles'),
             worldMapData: this.registry.get('worldMapData'),
             leaderPosition: this.registry.get('leaderPosition'),
@@ -199,6 +213,10 @@ export default class StrategyScene extends BaseScene {
             if (this.registry.get('turnCount') === undefined) {
                  this.registry.set('turnCount', 1);
             }
+
+            if (!this.registry.get('playerInventory')) {
+                this.registry.set('playerInventory', {});
+            }
         }
 
         this.initializeGameWorld(map, armyData);
@@ -209,12 +227,10 @@ export default class StrategyScene extends BaseScene {
         this.previousLeaderId = null;
         this.selectedTargetId = null; 
         
-        this.enemyTokens = [];
-
         this.playBgm('opening_bgm', 0.5);
 
-        this.parseMapData(map, dbArmyData);
-        this.mapNodes = this.registry.get('worldMapData');
+        this.mapManager.initialize(map, dbArmyData);
+        const mapNodes = this.mapManager.mapNodes;
 
         let battleResultMessage = null;
         if (this.battleResultData) {
@@ -223,13 +239,15 @@ export default class StrategyScene extends BaseScene {
             this.registry.set('playerCoins', remainingCoins);
 
             if (isWin) {
-                const node = this.mapNodes.find(n => n.id === targetNodeId);
+                const node = mapNodes.find(n => n.id === targetNodeId);
                 if (node) {
                     node.owner = 'player';
                     node.army = null; 
                     node.script = null; 
-                    this.registry.set('worldMapData', this.mapNodes);
+                    this.registry.set('worldMapData', mapNodes);
                     this.registry.set('leaderPosition', targetNodeId);
+                    
+                    this.mapManager.setNodeColor(targetNodeId, 0x4488ff);
                 }
                 battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
                 this.handleStoryUnlocks(targetNodeId);
@@ -237,11 +255,11 @@ export default class StrategyScene extends BaseScene {
                 const lastSafeId = this.registry.get('lastSafeNodeId');
                 if (lastSafeId) {
                     this.registry.set('leaderPosition', lastSafeId);
-                    const safeNode = this.mapNodes.find(n => n.id === lastSafeId);
+                    const safeNode = mapNodes.find(n => n.id === lastSafeId);
                     const retreatName = safeNode ? safeNode.name : "본부";
                     battleResultMessage = `🏳️ 패배... ${retreatName}(으)로 후퇴합니다.`;
                 } else {
-                    const base = this.mapNodes.find(n => n.owner === 'player') || this.mapNodes[0];
+                    const base = mapNodes.find(n => n.owner === 'player') || mapNodes[0];
                     if (base) this.registry.set('leaderPosition', base.id);
                     battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
                 }
@@ -251,13 +269,8 @@ export default class StrategyScene extends BaseScene {
             this.battleResultData = null;
         }
 
-        this.graphicsLayer = this.add.graphics();
-        this.graphicsLayer.setDepth(100); 
-
-        this.drawConnections();
-        this.createTerritoryNodes();
-        this.createEnemyTokens();
-        this.createPlayerToken();
+        this.tokenManager.createEnemyTokens(mapNodes);
+        this.createPlayerToken(); 
 
         this.uiManager.createUI();
         
@@ -267,10 +280,7 @@ export default class StrategyScene extends BaseScene {
         
         this.uiManager.updateState();
 
-        this.mapWidth = map.widthInPixels;
-        this.mapHeight = map.heightInPixels;
         this.updateCameraLayout();
-
         this.setupCameraControls();
         this.prevPinchDistance = 0;
     }
@@ -295,8 +305,8 @@ export default class StrategyScene extends BaseScene {
 
     openDaiso() {
         console.log("Open Daiso Shop");
-        this.uiManager.setStatusText("🛍️ 다이소에 오신 것을 환영합니다! (준비중)");
-        this.cameras.main.flash(200, 255, 255, 255);
+        // [Modified] 모달 토글 호출
+        this.uiManager.toggleDaisoModal();
     }
 
     toggleBgmMute() {
@@ -309,23 +319,18 @@ export default class StrategyScene extends BaseScene {
 
     moveLeaderToken(targetNode, onCompleteCallback) {
         this.input.enabled = false; 
-        if (targetNode.x < this.leaderObj.x) { this.leaderObj.setFlipX(false); } else { this.leaderObj.setFlipX(true); }
-        this.leaderObj.play('leader_walk');
-        this.tweens.add({
-            targets: this.leaderObj, x: targetNode.x, y: targetNode.y, duration: 1000, ease: 'Power2',
-            onComplete: () => {
-                this.leaderObj.play('leader_idle');
-                this.registry.set('leaderPosition', targetNode.id);
-                this.input.enabled = true;
-                this.saveProgress();
-                if (onCompleteCallback) onCompleteCallback();
-            }
+        
+        this.tokenManager.moveLeaderToken(targetNode, () => {
+            this.registry.set('leaderPosition', targetNode.id);
+            this.input.enabled = true;
+            this.saveProgress();
+            if (onCompleteCallback) onCompleteCallback();
         });
     }
 
     undoMove() {
         if (!this.hasMoved || this.previousLeaderId === null) return;
-        const prevNode = this.mapNodes.find(n => n.id === this.previousLeaderId);
+        const prevNode = this.mapManager.getNodeById(this.previousLeaderId);
         if (!prevNode) return;
         this.uiManager.setStatusText("↩️ 원래 위치로 복귀 중...");
         this.moveLeaderToken(prevNode, () => {
@@ -333,7 +338,7 @@ export default class StrategyScene extends BaseScene {
             this.uiManager.setStatusText(`📍 복귀 완료: ${prevNode.name}`);
             this.uiManager.updateState();
             if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
-            this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; });
+            this.mapManager.resetNodesVisual(); 
         });
     }
 
@@ -342,7 +347,7 @@ export default class StrategyScene extends BaseScene {
 
         const node = circleObj.nodeData;
         const currentLeaderId = this.registry.get('leaderPosition');
-        const currentNode = this.mapNodes.find(n => n.id === currentLeaderId);
+        const currentNode = this.mapManager.getNodeById(currentLeaderId);
 
         if (this.hasMoved) {
             if (this.previousLeaderId !== null && node.id === this.previousLeaderId) { this.undoMove(); return; }
@@ -352,8 +357,9 @@ export default class StrategyScene extends BaseScene {
         const isConnected = currentNode.connectedTo.includes(node.id);
         if (!isConnected) { this.uiManager.setStatusText("🚫 너무 멉니다! 연결된 지역(1칸)으로만 이동 가능합니다."); this.shakeNode(circleObj); return; }
         
-        if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); c.scale = 1; }); }
-        this.nodeContainer.getChildren().forEach(c => { if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); });
+        if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
+        this.mapManager.resetNodesVisual();
+        
         circleObj.setAlpha(1.0);
         this.selectionTween = this.tweens.add({ targets: circleObj, scale: { from: 1, to: 1.3 }, yoyo: true, repeat: -1, duration: 600 });
         
@@ -404,11 +410,10 @@ export default class StrategyScene extends BaseScene {
             
             this.selectedTargetId = null;
 
-            this.registry.set('worldMapData', this.mapNodes);
+            this.registry.set('worldMapData', this.mapManager.mapNodes);
             this.saveProgress();
 
-            const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
-            if (circle) circle.setFillStyle(0x4488ff);
+            this.mapManager.setNodeColor(node.id, 0x4488ff);
 
             this.uiManager.setStatusText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
             this.uiManager.updateState();
@@ -450,18 +455,15 @@ export default class StrategyScene extends BaseScene {
         node.script = null; 
         node.army = null;   
 
-        this.registry.set('worldMapData', this.mapNodes);
+        this.registry.set('worldMapData', this.mapManager.mapNodes);
         
-        const token = this.enemyTokens.find(t => 
-            Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
-        );
+        const token = this.tokenManager.getTokenAt(node.x, node.y);
         if (token) {
             token.destroy();
-            this.enemyTokens = this.enemyTokens.filter(t => t !== token);
+            this.tokenManager.enemyTokens = this.tokenManager.enemyTokens.filter(t => t !== token);
         }
 
-        const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
-        if (circle) circle.setFillStyle(0x4488ff);
+        this.mapManager.setNodeColor(node.id, 0x4488ff);
 
         this.saveProgress();
         this.uiManager.updateState();
@@ -479,16 +481,13 @@ export default class StrategyScene extends BaseScene {
                     node.owner = 'player';
                     node.script = null; 
                     
-                    const token = this.enemyTokens.find(t => 
-                        Math.abs(t.x - node.x) < 5 && Math.abs(t.y - node.y) < 5
-                    );
+                    const token = this.tokenManager.getTokenAt(node.x, node.y);
                     if (token) token.destroy();
                     
-                    this.registry.set('worldMapData', this.mapNodes);
+                    this.registry.set('worldMapData', this.mapManager.mapNodes);
                     this.saveProgress();
                     
-                    const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === node.id);
-                    if (circle) circle.setFillStyle(0x4488ff);
+                    this.mapManager.setNodeColor(node.id, 0x4488ff);
                 }
             }
         } else {
@@ -500,45 +499,18 @@ export default class StrategyScene extends BaseScene {
     }
 
     getCameraTarget(speaker) {
-        if (this.leaderObj) {
-            return { x: this.leaderObj.x, y: this.leaderObj.y };
+        if (this.tokenManager.leaderObj) {
+            return { x: this.tokenManager.leaderObj.x, y: this.tokenManager.leaderObj.y };
         }
         return null;
     }
 
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
 
-    findPath(startId, endId) {
-        if (startId === endId) return [startId];
-        
-        const queue = [[startId]];
-        const visited = new Set([startId]);
-        
-        while (queue.length > 0) {
-            const path = queue.shift();
-            const lastNodeId = path[path.length - 1];
-            
-            const node = this.mapNodes.find(n => n.id === lastNodeId);
-            if (!node) continue;
-
-            for (const neighborId of node.connectedTo) {
-                if (!visited.has(neighborId)) {
-                    visited.add(neighborId);
-                    const newPath = [...path, neighborId];
-                    
-                    if (neighborId === endId) {
-                        return newPath; 
-                    }
-                    queue.push(newPath);
-                }
-            }
-        }
-        return null; 
-    }
-
     moveEnemies(onComplete) {
         const playerPosId = this.registry.get('leaderPosition');
-        const enemyNodes = this.mapNodes.filter(n => n.owner === 'enemy' && n.army && n.army.isReinforcement);
+        const enemyNodes = this.mapManager.getNodesByOwner('enemy')
+            .filter(n => n.army && n.army.isReinforcement);
 
         if (enemyNodes.length === 0) {
             if (onComplete) onComplete(0);
@@ -548,10 +520,10 @@ export default class StrategyScene extends BaseScene {
         const moves = [];
 
         enemyNodes.forEach(node => {
-            const path = this.findPath(node.id, playerPosId);
+            const path = this.mapManager.findPath(node.id, playerPosId);
             if (path && path.length > 1) {
                 const nextNodeId = path[1];
-                const targetNode = this.mapNodes.find(n => n.id === nextNodeId);
+                const targetNode = this.mapManager.getNodeById(nextNodeId);
                 const isBlocked = targetNode.army !== null && targetNode.army !== undefined;
                 
                 if (!isBlocked) {
@@ -565,44 +537,19 @@ export default class StrategyScene extends BaseScene {
             return 0;
         }
 
-        let completedCount = 0;
-
-        moves.forEach(move => {
-            const token = this.enemyTokens.find(t => 
-                Math.abs(t.x - move.fromNode.x) < 5 && Math.abs(t.y - move.fromNode.y) < 5
-            );
-
-            if (token) {
-                this.tweens.add({
-                    targets: token,
-                    x: move.toNode.x,
-                    y: move.toNode.y,
-                    duration: 800,
-                    ease: 'Power2',
-                    onComplete: () => {
-                        move.toNode.army = move.fromNode.army;
-                        move.toNode.owner = 'enemy';
-                        move.fromNode.army = null;
-                        
-                        const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === move.toNode.id);
-                        if (circle) circle.setFillStyle(0xff4444);
-
-                        completedCount++;
-                        if (completedCount === moves.length) {
-                            if (onComplete) onComplete(moves.length);
-                        }
-                    }
-                });
-            } else {
-                 move.toNode.army = move.fromNode.army;
-                 move.toNode.owner = 'enemy';
-                 move.fromNode.army = null;
-                 completedCount++;
-                 if (completedCount === moves.length) {
-                     if (onComplete) onComplete(moves.length);
-                 }
+        this.tokenManager.moveEnemies(
+            moves, 
+            (move) => {
+                move.toNode.army = move.fromNode.army;
+                move.toNode.owner = 'enemy';
+                move.fromNode.army = null;
+                
+                this.mapManager.setNodeColor(move.toNode.id, 0xff4444);
+            },
+            () => {
+                if (onComplete) onComplete(moves.length);
             }
-        });
+        );
         
         return moves.length;
     }
@@ -639,7 +586,8 @@ export default class StrategyScene extends BaseScene {
             totalMaintenanceCost += maintenance;
         });
         
-        const ownedTerritories = this.mapNodes ? this.mapNodes.filter(n => n.owner === 'player').length : 0;
+        const mapNodes = this.mapManager.mapNodes;
+        const ownedTerritories = mapNodes ? mapNodes.filter(n => n.owner === 'player').length : 0;
         const incomePerTerritory = this.strategySettings?.gameSettings?.territoryIncome ?? 2;
         const totalIncome = ownedTerritories * incomePerTerritory;
 
@@ -672,10 +620,7 @@ export default class StrategyScene extends BaseScene {
             this.selectionTween = null; 
         }
         
-        this.nodeContainer.getChildren().forEach(c => { 
-            if (c instanceof Phaser.GameObjects.Arc) c.setAlpha(0.5); 
-            c.scale = 1; 
-        });
+        this.mapManager.resetNodesVisual();
 
         let turnCount = this.registry.get('turnCount') || 0;
         turnCount++;
@@ -699,14 +644,14 @@ export default class StrategyScene extends BaseScene {
 
         this.moveEnemies((movedCount) => {
              if (movedCount > 0) {
-                 this.registry.set('worldMapData', this.mapNodes);
-                 this.createEnemyTokens(); 
+                 this.registry.set('worldMapData', this.mapManager.mapNodes);
+                 this.tokenManager.createEnemyTokens(this.mapManager.mapNodes); 
                  
                  const currentText = (this.uiManager.statusText && this.uiManager.statusText.text) ? this.uiManager.statusText.text : "";
                  this.uiManager.setStatusText(currentText + `\n⚔️ 적군 ${movedCount}부대가 이동했습니다!`, '#ffaaaa');
 
                  const leaderPos = this.registry.get('leaderPosition');
-                 const playerNode = this.mapNodes.find(n => n.id === leaderPos);
+                 const playerNode = this.mapManager.getNodeById(leaderPos);
                  
                  if (playerNode && playerNode.owner === 'enemy') {
                      console.log("⚔️ Enemy caught the player! Starting Battle...");
@@ -734,7 +679,7 @@ export default class StrategyScene extends BaseScene {
         let warningMsg = "";
 
         if (turnCount % reinforceInterval === 0) {
-            const playerNodes = this.mapNodes.filter(n => n.owner === 'player');
+            const playerNodes = this.mapManager.getNodesByOwner('player');
             
             if (playerNodes.length > 0) {
                 playerNodes.sort((a, b) => b.id - a.id);
@@ -759,25 +704,13 @@ export default class StrategyScene extends BaseScene {
                     targetNode.owner = 'enemy';
                     targetNode.army = { type: 'normalDog', count: spawnCount, isReinforcement: true };
 
-                    this.registry.set('worldMapData', this.mapNodes);
+                    this.registry.set('worldMapData', this.mapManager.mapNodes);
 
-                    const circle = this.nodeContainer.getChildren().find(c => c.nodeData && c.nodeData.id === targetNode.id);
-                    if (circle) circle.setFillStyle(0xff4444);
+                    this.mapManager.setNodeColor(targetNode.id, 0xff4444);
 
-                    this.createEnemyTokens();
-
-                    const token = this.enemyTokens.find(t => Math.abs(t.x - targetNode.x) < 5 && Math.abs(t.y - targetNode.y) < 5);
+                    const token = this.tokenManager.createSingleEnemyToken(targetNode);
                     if (token) {
-                        const originalScale = token.scaleX; 
-                        token.setScale(0); 
-                        
-                        this.tweens.add({
-                            targets: token,
-                            scaleX: originalScale,
-                            scaleY: originalScale,
-                            duration: 1000,
-                            ease: 'Back.out'
-                        });
+                        this.tokenManager.animateSpawn(token);
                     }
 
                     warningMsg = `\n⚠️ [경고] 영토 침공! ${targetNode.name}을(를) 뺏겼습니다!`;
@@ -798,22 +731,8 @@ export default class StrategyScene extends BaseScene {
         this.saveProgress();
     }
 
-    createAnimations() {
-        if (!this.anims.exists('leader_idle')) { this.anims.create({ key: 'leader_idle', frames: this.anims.generateFrameNumbers('leader_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('leader_walk')) { this.anims.create({ key: 'leader_walk', frames: this.anims.generateFrameNumbers('leader_token', { frames: [1, 2] }), frameRate: 6, repeat: -1 }); }
-        if (!this.anims.exists('dog_idle')) { this.anims.create({ key: 'dog_idle', frames: this.anims.generateFrameNumbers('dog_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('runner_idle')) { this.anims.create({ key: 'runner_idle', frames: this.anims.generateFrameNumbers('runner_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('boss_idle')) { this.anims.create({ key: 'boss_idle', frames: this.anims.generateFrameNumbers('boss_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('tanker_idle')) { this.anims.create({ key: 'tanker_idle', frames: this.anims.generateFrameNumbers('tanker_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('shooter_idle')) { this.anims.create({ key: 'shooter_idle', frames: this.anims.generateFrameNumbers('shooter_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('healer_idle')) { this.anims.create({ key: 'healer_idle', frames: this.anims.generateFrameNumbers('healer_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('raccoon_idle')) { this.anims.create({ key: 'raccoon_idle', frames: this.anims.generateFrameNumbers('raccoon_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-        if (!this.anims.exists('normal_idle')) { this.anims.create({ key: 'normal_idle', frames: this.anims.generateFrameNumbers('normal_token', { frames: [0] }), frameRate: 1, repeat: -1 }); }
-    }
-
-    // [Restored] startBattle 메서드 복구
     startBattle() {
-        const targetNode = this.mapNodes.find(n => n.id === this.selectedTargetId);
+        const targetNode = this.mapManager.getNodeById(this.selectedTargetId);
         if (!targetNode) return;
         const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
         
@@ -834,6 +753,17 @@ export default class StrategyScene extends BaseScene {
         });
     }
 
+    createPlayerToken() {
+        let leaderNodeId = this.registry.get('leaderPosition');
+        if (leaderNodeId === undefined) {
+            const base = this.mapManager.mapNodes.find(n => n.name === "Main Base") || this.mapManager.mapNodes.find(n => n.owner === 'player');
+            leaderNodeId = base ? base.id : this.mapManager.mapNodes[0].id;
+            this.registry.set('leaderPosition', leaderNodeId);
+        }
+        const currentNode = this.mapManager.getNodeById(leaderNodeId);
+        this.tokenManager.createPlayerToken(currentNode);
+    }
+
     update(time, delta) {
         if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
             const distance = Phaser.Math.Distance.Between(this.input.pointer1.x, this.input.pointer1.y, this.input.pointer2.x, this.input.pointer2.y);
@@ -851,14 +781,17 @@ export default class StrategyScene extends BaseScene {
     updateCameraLayout() {
         const screenWidth = this.scale.width; const screenHeight = this.scale.height;
         const isPC = this.sys.game.device.os.desktop;
-        const zoomFitWidth = screenWidth / this.mapWidth; const zoomFitHeight = screenHeight / this.mapHeight;
+        const mapWidth = this.mapManager.mapWidth || 1024;
+        const mapHeight = this.mapManager.mapHeight || 1024;
+
+        const zoomFitWidth = screenWidth / mapWidth; const zoomFitHeight = screenHeight / mapHeight;
         this.minZoom = isPC ? zoomFitHeight : zoomFitWidth;
         if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) { this.cameras.main.setZoom(this.minZoom); }
         const currentZoom = this.cameras.main.zoom;
         const displayWidth = screenWidth / currentZoom; const displayHeight = screenHeight / currentZoom;
-        const offsetX = Math.max(0, (displayWidth - this.mapWidth) / 2);
-        const offsetY = Math.max(0, (displayHeight - this.mapHeight) / 2);
-        this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(this.mapWidth, displayWidth), Math.max(this.mapHeight, displayHeight));
+        const offsetX = Math.max(0, (displayWidth - mapWidth) / 2);
+        const offsetY = Math.max(0, (displayHeight - mapHeight) / 2);
+        this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(mapWidth, displayWidth), Math.max(mapHeight, displayHeight));
     }
 
     setupCameraControls() {
@@ -876,205 +809,4 @@ export default class StrategyScene extends BaseScene {
             }
         });
     }
-
-    parseMapData(map, dbArmyData = {}) {
-        const existingData = this.registry.get('worldMapData');
-        let objectLayer = map.getObjectLayer('territory');
-        if (!objectLayer) {
-            const layers = map.objects;
-            if (layers && Object.keys(layers).length > 0) { objectLayer = layers[Object.keys(layers)[0]]; }
-        }
-
-        let nodes = [];
-        if (objectLayer && objectLayer.objects) {
-            nodes = objectLayer.objects.map(obj => {
-                const config = territoryConfig.territories[obj.id.toString()] || territoryConfig.default;
-                const levelIdx = LEVEL_KEYS.indexOf(config.mapId);
-                const finalLevelIndex = levelIdx >= 0 ? levelIdx : 0;
-                
-                let initialOwner = config.neutral ? 'neutral' : 'enemy';
-                
-                if (obj.id === 1) {
-                    initialOwner = 'player';
-                }
-
-                let text = config.text || "";
-                
-                const savedNode = existingData ? existingData.find(n => n.id === obj.id) : null;
-                const owner = savedNode ? savedNode.owner : initialOwner;
-                
-                let configArmy = null;
-                if (config.unit) {
-                    configArmy = { type: config.unit.toLowerCase(), count: config.count || 1 };
-                }
-
-                let armyData = null;
-                if (savedNode) {
-                    if (savedNode.owner === 'player') armyData = null;
-                    else if (savedNode.army !== undefined) { 
-                        armyData = savedNode.army; 
-                    }
-                    else {
-                         if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
-                         else armyData = configArmy;
-                    }
-                } else {
-                    if (owner === 'player') {
-                        armyData = null;
-                    } else {
-                        if (dbArmyData && dbArmyData[obj.id.toString()]) armyData = dbArmyData[obj.id.toString()];
-                        else armyData = configArmy;
-                    }
-                }
-
-                return {
-                    id: obj.id, 
-                    x: obj.x, 
-                    y: obj.y, 
-                    name: config.name || obj.name || `Territory ${obj.id}`,
-                    owner: owner, 
-                    connectedTo: [], 
-                    levelIndex: finalLevelIndex, 
-                    desc: config.description || "",
-                    text: text,
-                    army: armyData, 
-                    bgm: config.bgm || "stage1_bgm",
-                    script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null),
-                    add_menu: config.add_menu || [] 
-                };
-            });
-        }
-
-        nodes.forEach(node => {
-            const nodeIdStr = node.id.toString();
-            if (pathData[nodeIdStr]) {
-                pathData[nodeIdStr].forEach(targetId => {
-                    if (targetId === node.id) return;
-                    if (!node.connectedTo.includes(targetId)) {
-                        node.connectedTo.push(targetId);
-                    }
-                    const targetNode = nodes.find(n => n.id === targetId);
-                    if (targetNode && !targetNode.connectedTo.includes(node.id)) {
-                        targetNode.connectedTo.push(node.id);
-                    }
-                });
-            }
-        });
-
-        this.registry.set('worldMapData', nodes);
-    }
-    
-    createEnemyTokens() {
-        if (!this.mapNodes) return;
-        if (this.enemyTokens && this.enemyTokens.length > 0) {
-            this.enemyTokens.forEach(token => { if (token && token.active) token.destroy(); });
-        }
-        this.enemyTokens = [];
-        
-        this.mapNodes.forEach(node => {
-            if (node.owner !== 'player' && node.army) {
-                let topUnitType = 'dog';
-                let totalCount = 0;
-
-                if (Array.isArray(node.army)) {
-                    const bossUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'boss');
-                    const tankerUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'tanker');
-                    
-                    if (bossUnit) topUnitType = 'boss';
-                    else if (tankerUnit) topUnitType = 'tanker';
-                    else if (node.army.length > 0 && node.army[0].type) topUnitType = node.army[0].type.toLowerCase();
-
-                    totalCount = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
-                } else {
-                    topUnitType = node.army.type ? node.army.type.toLowerCase() : 'dog';
-                    totalCount = node.army.count || 1;
-                }
-
-                let textureKey = 'dog_token';
-                if (topUnitType === 'runner') textureKey = 'runner_token';
-                else if (topUnitType === 'dog') textureKey = 'dog_token';
-                else if (topUnitType === 'tanker') textureKey = 'tanker_token';
-                else if (topUnitType === 'shooter') textureKey = 'shooter_token';
-                else if (topUnitType === 'healer') textureKey = 'healer_token';
-                else if (topUnitType === 'raccoon') textureKey = 'raccoon_token';
-                else if (topUnitType === 'normal') textureKey = 'normal_token';
-                else if (topUnitType === 'boss') textureKey = 'boss_token';
-                
-                const enemyObj = this.add.sprite(node.x, node.y, textureKey);
-                this.uiManager.ignoreObject(enemyObj);
-
-                let finalSize = 60; 
-                if (node.owner === 'neutral') finalSize = 60;
-                else { 
-                    if (topUnitType === 'tanker') finalSize = 70; 
-                    else if (topUnitType === 'boss') finalSize = 100; 
-                    else { 
-                        finalSize = 40 + (totalCount - 1) * 3; 
-                        finalSize = Phaser.Math.Clamp(finalSize, 35, 75); 
-                    }
-                }
-                enemyObj.setDisplaySize(finalSize, finalSize); 
-                enemyObj.setOrigin(0.5, 0.8); 
-                enemyObj.setFlipX(false); 
-                enemyObj.setDepth(10); 
-                
-                const animKey = `${topUnitType}_idle`;
-                if (this.anims.exists(animKey)) {
-                    enemyObj.play(animKey);
-                } else {
-                    enemyObj.play('dog_idle');
-                }
-                
-                this.tweens.add({ targets: enemyObj, scaleY: { from: enemyObj.scaleY, to: enemyObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
-                this.enemyTokens.push(enemyObj);
-            }
-        });
-    }
-
-    createPlayerToken() {
-        let leaderNodeId = this.registry.get('leaderPosition');
-        if (leaderNodeId === undefined) {
-            const base = this.mapNodes.find(n => n.name === "Main Base") || this.mapNodes.find(n => n.owner === 'player');
-            leaderNodeId = base ? base.id : this.mapNodes[0].id;
-            this.registry.set('leaderPosition', leaderNodeId);
-        }
-        const currentNode = this.mapNodes.find(n => n.id === leaderNodeId);
-        if (currentNode) {
-            this.leaderObj = this.add.sprite(currentNode.x, currentNode.y, 'leader_token');
-            this.leaderObj.setFlipX(true); this.leaderObj.setDisplaySize(60, 60); this.leaderObj.setOrigin(0.5, 0.8); this.leaderObj.setDepth(50); 
-            this.leaderObj.play('leader_idle');
-            this.tweens.add({ targets: this.leaderObj, scaleY: { from: this.leaderObj.scaleY, to: this.leaderObj.scaleY * 0.95 }, yoyo: true, repeat: -1, duration: 900, ease: 'Sine.easeInOut' });
-        }
-    }
-
-    createTerritoryNodes() {
-        if (!this.mapNodes) return;
-        this.nodeContainer = this.add.group();
-        this.mapNodes.forEach(node => {
-            let color = 0xff4444; if (node.owner === 'player') color = 0x4488ff; else if (node.owner === 'neutral') color = 0x888888; 
-            const shadow = this.add.ellipse(node.x, node.y + 8, 20, 6, 0x000000, 0.3); shadow.setDepth(100); 
-            const circle = this.add.circle(node.x, node.y, 13, color).setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff);
-            circle.setAlpha(0.5); circle.nodeData = node; circle.setDepth(100); 
-            circle.on('pointerdown', () => {
-                // UI Manager의 모달 제어
-                if(this.uiManager.shopModal.isOpen) this.uiManager.shopModal.toggle();
-                if(this.uiManager.systemModal.isOpen) this.uiManager.systemModal.toggle();
-                this.selectTerritory(circle);
-            });
-            this.nodeContainer.add(shadow); this.nodeContainer.add(circle);
-        });
-    }
-
-    drawConnections() {
-        if (!this.mapNodes) return;
-        this.graphicsLayer.clear(); this.graphicsLayer.lineStyle(2, 0x888888, 0.5); 
-        this.mapNodes.forEach(node => {
-            node.connectedTo.forEach(targetId => {
-                const target = this.mapNodes.find(n => n.id === targetId);
-                if (target) { this.graphicsLayer.lineBetween(node.x, node.y, target.x, target.y); }
-            });
-        });
-    }
-
-    handleBattleResult(data) { }
 }
