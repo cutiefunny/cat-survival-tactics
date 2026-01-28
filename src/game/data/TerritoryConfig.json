@@ -77,15 +77,9 @@
           "text": "물론이지! 우리 합정파는 항상 너의 편이다냥!"
         },
         {
-          "type": "dialog",
-          "speaker": "턱시도",
-          "avatar": "shooter",
-          "text": "나도 돕겠다냥! 도움이 될거다냐!"
-        },
-        {
           "type": "unlock_unit",
-          "unit": ["Runner", "Shooter"],
-          "text": "이제 러너와 슈터를 동료로 영입할 수 있다!"
+          "unit": ["Runner"],
+          "text": "이제 러너를 동료로 영입할 수 있다!"
         },
         {
           "type": "notice",

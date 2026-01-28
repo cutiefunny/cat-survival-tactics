@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { getRandomUnitName } from '../data/UnitData'; // [New] 이름 생성을 위해 필요
 
 export default class EventScene extends Phaser.Scene {
     constructor() {
@@ -216,7 +217,7 @@ export default class EventScene extends Phaser.Scene {
             const type = data.type || 'dialog';
             
             // Notice 처리 시 텍스트 위치 리셋
-            if (type === 'notice') {
+            if (type === 'notice' || type === 'recruit_unit' || type === 'unlock_unit') {
                 this.speakerText.setX(this.baseTextX);
                 this.storyText.setX(this.baseTextX);
             } else if (type !== 'mov') {
@@ -305,8 +306,15 @@ export default class EventScene extends Phaser.Scene {
             this.videoContainer.setVisible(false);
             this.uiContainer.setVisible(true);
 
-            // [New] Notice 타입 여부 확인
-            const isNotice = (type === 'notice');
+            // [Modified] 시스템 메시지 타입 판별
+            const isNotice = (type === 'notice' || type === 'recruit_unit' || type === 'unlock_unit');
+
+            // [New] 특수 이벤트 처리 (즉시 적용)
+            if (type === 'recruit_unit') {
+                this.recruitUnit(data);
+            } else if (type === 'unlock_unit') {
+                this.unlockUnit(data);
+            }
 
             if (type === 'image') {
                 if (this.bgImage && data.image) {
@@ -322,7 +330,7 @@ export default class EventScene extends Phaser.Scene {
                 if (this.bgImage) this.bgImage.setVisible(false);
             }
             
-            // 아바타 및 화자 텍스트 처리 (Notice일 경우 숨김)
+            // 아바타 및 화자 텍스트 처리
             if (!isNotice && data.avatar) {
                 this.avatarImage.setVisible(true);
                 if (this.textures.exists(data.avatar)) {
@@ -338,11 +346,7 @@ export default class EventScene extends Phaser.Scene {
                 this.storyText.setX(this.baseTextX);
                 
                 // Notice면 화자 이름 비우기
-                if (isNotice) {
-                    this.speakerText.setText('');
-                } else {
-                    this.speakerText.setText(data.speaker || '');
-                }
+                this.speakerText.setText('');
             }
             
             this.fullText = data.text || '';
@@ -365,7 +369,7 @@ export default class EventScene extends Phaser.Scene {
             if (this.viewMode === 'overlay' && this.parentSceneKey) {
                 const parent = this.scene.get(this.parentSceneKey);
                 if (parent && typeof parent.getCameraTarget === 'function') {
-                    // Notice일 때는 화자 이동 안함 (또는 옵션)
+                    // Notice일 때는 화자 이동 안함
                     const target = parent.getCameraTarget(data.speaker);
                     if (target) {
                         const cam = parent.cameras.main;
@@ -376,6 +380,42 @@ export default class EventScene extends Phaser.Scene {
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // [New] 동료 영입 로직
+    recruitUnit(data) {
+        // data.role이 지정되어 있으면 해당 유닛을 추가, 없으면 효과만 발생
+        if (data.role) {
+            const squad = this.registry.get('playerSquad') || [];
+            const newMember = { 
+                role: data.role, 
+                level: 1, 
+                xp: 0, 
+                fatigue: 0, 
+                name: data.name || getRandomUnitName(data.role)
+            };
+            squad.push(newMember);
+            this.registry.set('playerSquad', squad);
+            console.log(`🎉 [Event] Recruited: ${newMember.role} (${newMember.name})`);
+        }
+    }
+
+    // [New] 유닛 해금 로직
+    unlockUnit(data) {
+        if (data.unit && Array.isArray(data.unit)) {
+            const unlocked = this.registry.get('unlockedRoles') || ['Normal'];
+            let changed = false;
+            data.unit.forEach(role => {
+                if (!unlocked.includes(role)) {
+                    unlocked.push(role);
+                    changed = true;
+                    console.log(`🔓 [Event] Unlocked Role: ${role}`);
+                }
+            });
+            if (changed) {
+                this.registry.set('unlockedRoles', unlocked);
             }
         }
     }

@@ -106,6 +106,16 @@ export default class SystemModal {
 
     resetGame() {
         if (confirm("현재 진행 데이터를 모두 삭제하고 처음부터 시작하시겠습니까?")) {
+
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('map_script_played_') || key.startsWith('tutorial_played_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+
             SaveManager.clearSave();
             window.location.reload();
         }

@@ -102,6 +102,7 @@ export default class BattleScene extends BaseScene {
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
         
         this.hasScriptPlayed = false;
+        this.isWaitingForIntro = false; // 인트로 대기 플래그
 
         console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}`);
     }
@@ -150,8 +151,8 @@ export default class BattleScene extends BaseScene {
         this.pathfindingManager = new PathfindingManager(this); 
         
         this.placementZone = null;
-        this.catsArea = null; // 아군 구역 저장용
-        this.dogsArea = null; // 적군 구역 저장용
+        this.catsArea = null; 
+        this.dogsArea = null; 
         
         this.zoneGraphics = null; 
         this.blocksDebugGraphics = null;
@@ -161,20 +162,43 @@ export default class BattleScene extends BaseScene {
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
-        this.npcGroup = null; // NPC 그룹 참조
-        this.touchingNpc = null; // 현재 접촉 중인 NPC
-        this.npcTouchTimer = 0; // 접촉 시간 누적
-        this.npcInteractionTriggered = false; // 중복 실행 방지 플래그
+        this.npcGroup = null; 
+        this.touchingNpc = null; 
+        this.npcTouchTimer = 0; 
+        this.npcInteractionTriggered = false; 
 
         this.input.keyboard.on('keydown-D', (event) => { if (event.shiftKey) this.toggleDebugMode(); });
         
-        this.events.on('resume', (scene, data) => {
-            console.log("▶️ [BattleScene] Resumed from Cutscene");
-        });
+        // [New] Resume 이벤트 리스너 (이벤트 씬 종료 후 처리)
+        this.events.on('resume', this.handleResume, this);
 
         this.uiManager.create();
 
         this.fetchConfigAndStart();
+    }
+
+    // [New] 이벤트 씬 종료 후 호출되는 핸들러
+    handleResume(scene, data) {
+        if (this.isWaitingForIntro) {
+            console.log("▶️ [BattleScene] Intro Script Finished. Spawning units...");
+            this.isWaitingForIntro = false;
+
+            // 스크립트 실행 완료 표시 (1회성 보장)
+            const storageKey = `map_script_played_${this.currentMapKey}`;
+            localStorage.setItem(storageKey, 'true');
+
+            // 유닛 스폰 (이때 Registry가 업데이트되어 있으므로 Shooter 등이 정상 소환됨)
+            if (this.pendingConfig && this.currentMap) {
+                this.spawnUnits(this.pendingConfig, this.currentMap);
+                this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
+                
+                // 플레이어 유닛이 생겼으므로 카메라 추적 시작
+                if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
+                    this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+                    this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
+                }
+            }
+        }
     }
 
     pauseBattle(isPaused) {
@@ -280,12 +304,12 @@ export default class BattleScene extends BaseScene {
     }
 
     startGame(config, mapKey) {
+        this.currentMapKey = mapKey; 
         let scriptData = null;
 
         if (!mapKey) {
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
             this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
-            
             const gridGraphics = this.add.graphics();
             gridGraphics.lineStyle(1, 0x333333, 0.5);
             gridGraphics.fillStyle(0x111111, 1);
@@ -310,6 +334,7 @@ export default class BattleScene extends BaseScene {
             const mapDataObj = this.mapManager.createMap(mapKey);
             
             const map = mapDataObj.map;
+            this.currentMap = map;
             this.wallLayer = mapDataObj.layers.wallLayer;
             this.blockLayer = mapDataObj.layers.blockLayer;
             this.blockObjectGroup = mapDataObj.blockObjectGroup;
@@ -322,8 +347,30 @@ export default class BattleScene extends BaseScene {
             this.mapWidth = map.widthInPixels; this.mapHeight = map.heightInPixels;
             
             this.fitCameraToMap(); 
-
             this.initializeGameVariables(config);
+
+            // [Modified] 스크립트 실행 여부 체크 (최초 1회만 실행)
+            const scriptPlayedKey = `map_script_played_${mapKey}`;
+            const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';
+
+            if (scriptData && !alreadyPlayed) {
+                console.log(`📜 [BattleScene] Found new script for ${mapKey}. Playing Intro.`);
+                
+                this.isWaitingForIntro = true;
+                this.pendingConfig = config; 
+                
+                this.scene.pause(); 
+                this.scene.launch('EventScene', { 
+                    mode: 'overlay', 
+                    script: scriptData, 
+                    parentScene: 'BattleScene' 
+                });
+                
+                // 스크립트가 있다면 유닛 소환을 보류하고 리턴
+                return;
+            }
+
+            // 스크립트가 없거나 이미 본 경우: 바로 유닛 소환
             this.spawnUnits(config, map);
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
         }
@@ -331,17 +378,6 @@ export default class BattleScene extends BaseScene {
         if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
-        }
-
-        if (scriptData && !this.hasScriptPlayed) {
-            console.log("📜 [BattleScene] Script detected. Launching EventScene.");
-            this.hasScriptPlayed = true;
-            this.scene.pause(); 
-            this.scene.launch('EventScene', { 
-                mode: 'overlay', 
-                script: scriptData, 
-                parentScene: 'BattleScene' 
-            });
         }
     }
 
@@ -358,9 +394,7 @@ export default class BattleScene extends BaseScene {
 
         const { width, height } = this.scale;
         const footerHeight = 80;
-        
         const availableHeight = height - footerHeight;
-
         const zoomX = width / this.mapWidth;
         const zoomY = availableHeight / this.mapHeight;
         const targetZoom = Math.max(zoomX, zoomY);
@@ -424,7 +458,6 @@ export default class BattleScene extends BaseScene {
     
     createStandardAnimations() {
         const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal', 'wawa']; 
-        
         unitTextures.forEach(key => {
             if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
                 const frameRate = (key === 'healer') ? 3 : 6;
@@ -446,7 +479,6 @@ export default class BattleScene extends BaseScene {
         }
 
         const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-        
         let baseStats = ROLE_BASE_STATS[stats.role] || {};
         if (this.gameConfig && this.gameConfig.roleDefinitions && this.gameConfig.roleDefinitions[stats.role]) {
              baseStats = { ...baseStats, ...this.gameConfig.roleDefinitions[stats.role] };
@@ -480,7 +512,6 @@ export default class BattleScene extends BaseScene {
                 finalStats.attackPower = Math.floor(finalStats.attackPower * multiplier);
                 if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
                 finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
-                
                 applyFatigueTint = true; 
             }
         }
@@ -504,7 +535,6 @@ export default class BattleScene extends BaseScene {
     spawnUnits(config, map) {
         const { startY, spawnGap } = config.gameSettings;
 
-        // 1. 아군 스폰
         let spawnZone = null;
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
@@ -519,7 +549,6 @@ export default class BattleScene extends BaseScene {
             }
         }
         
-        // [New] 아군 구역 저장
         this.catsArea = spawnZone;
 
         const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
@@ -529,13 +558,29 @@ export default class BattleScene extends BaseScene {
             if (!roleConfig.name) roleConfig.name = getRandomUnitName(roleConfig.role);
 
             let spawnX, spawnY;
-            if (spawnZone) {
+            
+            // [Modified] NPC 대체 스폰 로직 (role과 일치하는 NPC 찾기)
+            let matchedNpc = null;
+            if (this.npcGroup) {
+                matchedNpc = this.npcGroup.getChildren().find(npc => 
+                    npc.active && 
+                    (npc.texture.key === member.role || npc.texture.key.toLowerCase() === member.role.toLowerCase())
+                );
+            }
+
+            if (matchedNpc) {
+                spawnX = matchedNpc.x;
+                spawnY = matchedNpc.y;
+                matchedNpc.destroy(); // NPC 제거 (유닛으로 변신)
+                console.log(`✨ [BattleScene] NPC Transformed to Unit: ${member.role} at (${spawnX}, ${spawnY})`);
+            } else if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
                 spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
             } else {
                 spawnX = 300;
                 spawnY = startY + (i * spawnGap);
             }
+
             const isLeader = (member.role === 'Leader');
             const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
             unit.squadIndex = i;
@@ -560,14 +605,11 @@ export default class BattleScene extends BaseScene {
                 }
             }
         }
-        
-        // [New] 적군 구역 저장
         this.dogsArea = redSpawnArea;
 
         let enemyRoster = [];
         if (this.armyConfig) {
             const configs = Array.isArray(this.armyConfig) ? this.armyConfig : [this.armyConfig];
-
             configs.forEach(cfg => {
                 const count = cfg.count || 1;
                 const type = cfg.type || 'NormalDog';
@@ -658,7 +700,6 @@ export default class BattleScene extends BaseScene {
         this.initialRedCount = this.redTeam.getLength();
     }
     
-    // [New] 화자(Speaker)에 따른 카메라 타겟 좌표 반환
     getCameraTarget(speaker) {
         if (speaker === '들개' && this.dogsArea) {
             return { x: this.dogsArea.centerX, y: this.dogsArea.centerY };
@@ -666,7 +707,7 @@ export default class BattleScene extends BaseScene {
         if (speaker === '김냐냐' && this.catsArea) {
             return { x: this.catsArea.centerX, y: this.catsArea.centerY };
         }
-        return null; // 매칭 안되거나 구역 없으면 null
+        return null; 
     }
 
     animateCoinDrop(startX, startY, amount) {
@@ -702,16 +743,13 @@ export default class BattleScene extends BaseScene {
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
         
-        // [Modified] NPC 충돌 설정 (BlueTeam 추가)
         if (this.npcGroup) {
             this.physics.add.collider(this.redTeam, this.npcGroup, this.handleNpcCollision, null, this);
             this.physics.add.collider(this.blueTeam, this.npcGroup, this.handleNpcCollision, null, this);
         }
     }
 
-    // [New] 충돌 콜백: 매 프레임 충돌 시 호출됨
     handleNpcCollision(unit, npc) {
-        // 플레이어 리더 유닛만 상호작용 가능하게 할지, 아군 전체 가능하게 할지 결정 (여기선 리더만)
         if (unit === this.playerUnit) {
             this.currentFrameTouchingNpc = npc;
         }
@@ -774,34 +812,23 @@ export default class BattleScene extends BaseScene {
         this.time.timeScale = this.gameSpeed;
         this.uiManager.updateSpeedButton(this.gameSpeed);
     }
-    
-    // [Modified] 이벤트 시 슬로우 모션 + 채도 감소 효과
     slowMotionForModal(isActive) {
         if (isActive) {
-            // 0.2배속 (Phaser physics timeScale은 값이 클수록 느려짐: 1/0.2 = 5)
             this.physics.world.timeScale = 5; 
-            this.time.timeScale = 0.1;
-            
-            // [New] 50% 채도 감소 (PostFX 사용 - Phaser 3.60+)
+            this.time.timeScale = 0.2;
             if (this.cameras.main.postFX) {
-                // 기존 효과 클리어 후 적용 (중복 방지)
                 this.cameras.main.postFX.clear(); 
                 const colorMatrix = this.cameras.main.postFX.addColorMatrix();
-                // 0: 흑백, 1: 원본, 0.5: 반쯤 색 빠짐
-                colorMatrix.grayscale(0.5);
+                colorMatrix.saturate(0.5); 
             }
         } else {
-            // 원래 게임 속도로 복구
             this.physics.world.timeScale = 1 / this.gameSpeed; 
             this.time.timeScale = this.gameSpeed;
-
-            // [New] 효과 제거
             if (this.cameras.main.postFX) {
                 this.cameras.main.postFX.clear();
             }
         }
     }
-
     startBattle() {
         if (this.battleStarted) return;
         this.battleStarted = true;
@@ -840,17 +867,11 @@ export default class BattleScene extends BaseScene {
             else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); } 
             else { this.uiManager.updateScore(blueCount, redCount); }
         }
-        // [New] NPC 상호작용 로직
         this.updateNpcInteraction(delta);
     }
 
-    /////////////NPC 부분 추가///////////////////////////
-    // [NewLogic] NPC 상호작용 (밀기 감지)
     updateNpcInteraction(delta) {
-        // 1. 이번 프레임에 NPC와 물리적 충돌이 있었는지 확인
         if (this.currentFrameTouchingNpc) {
-            
-            // 2. 플레이어가 실제로 "이동 입력"을 하고 있는지 확인 (가만히 닿아있는 것 제외)
             const cursors = this.cursors || {};
             const wasd = this.wasd || {};
             const joy = this.joystickCursors || {};
@@ -861,70 +882,49 @@ export default class BattleScene extends BaseScene {
                 joy.left?.isDown || joy.right?.isDown || joy.up?.isDown || joy.down?.isDown
             );
 
-            // [Debug] 상태 로그
             if (isPushing) {
-                 console.log(`Pushing NPC... Timer: ${this.npcTouchTimer.toFixed(0)}ms`);
-            }
-
-            if (isPushing) {
-                // 같은 NPC를 계속 밀고 있는 경우
                 if (this.touchingNpc === this.currentFrameTouchingNpc) {
                     if (!this.npcInteractionTriggered) {
                         this.npcTouchTimer += delta;
-                        
-                        // [Modified] 1초 -> 0.5초(500ms)로 단축
                         if (this.npcTouchTimer > 500) {
                             console.log("✅ NPC Interaction Triggered!"); 
                             this.triggerNpcEvent(this.touchingNpc);
-                            this.npcInteractionTriggered = true; // 중복 실행 방지
+                            this.npcInteractionTriggered = true; 
                         }
                     }
                 } else {
-                    // 새로운 NPC와 밀기 시작 (타이머 리셋)
                     console.log("🆕 Started pushing new NPC");
                     this.touchingNpc = this.currentFrameTouchingNpc;
                     this.npcTouchTimer = 0;
                     this.npcInteractionTriggered = false;
                 }
             } else {
-                // 충돌은 했으나 입력이 없음 (그냥 옆에 서 있음) -> 타이머 초기화
                 this.npcTouchTimer = 0;
             }
         } else {
-            // 충돌 없음 -> 초기화
             this.touchingNpc = null;
             this.npcTouchTimer = 0;
             this.npcInteractionTriggered = false;
         }
-
-        // 다음 프레임 판단을 위해 리셋
         this.currentFrameTouchingNpc = null;
     }
 
-    // [New] NPC 이벤트 실행
     triggerNpcEvent(npc) {
         if (!npc.scriptData) return;
-
         console.log("🗣️ NPC Event Triggered:", npc.texture.key);
-        
-        // [Modified] 이벤트 시작 시 0.2배속 (Slow Motion ON)
         this.slowMotionForModal(true);
 
-        // 스크립트 배열 순회 (보통 하나지만 배열이므로)
         npc.scriptData.forEach(script => {
             if (script.type === 'dialog_confirm') {
                 let dialogText = script.text;
                 let dialogOptions = script.options;
 
-                // [New] 코인 부족 체크 로직
-                // 옵션 중에 'remove_coins' 액션이 있는지 확인
                 const costOption = script.options.find(opt => 
                     opt.action && opt.action.includes('remove_coins')
                 );
 
                 if (costOption) {
                     const idx = costOption.action.indexOf('remove_coins');
-                    // 액션 배열 구조: [..., "remove_coins", 5, ...] -> 다음 인덱스가 비용
                     const cost = costOption.action[idx + 1];
                     
                     if (this.playerCoins < cost) {
@@ -944,28 +944,24 @@ export default class BattleScene extends BaseScene {
         });
     }
 
-    // [New] 스크립트 액션 파서 (flat array 처리)
     executeScriptAction(actions) {
         if (!Array.isArray(actions)) return;
-
         let i = 0;
         while (i < actions.length) {
             const command = actions[i];
             i++;
-
             switch (command) {
                 case 'restore_fatigue':
-                    const amount = actions[i]; // arg1: amount
+                    const amount = actions[i]; 
                     i++;
                     this.restoreFatigue(amount);
                     break;
                 case 'remove_coins':
-                    const cost = actions[i]; // arg1: cost
+                    const cost = actions[i]; 
                     i++;
                     this.removeCoins(cost);
                     break;
                 case 'close':
-                    // [New] 다이얼로그 닫힐 때 게임 속도 정상화 (Slow Motion OFF)
                     this.slowMotionForModal(false);
                     break;
                 default:
@@ -975,9 +971,7 @@ export default class BattleScene extends BaseScene {
         }
     }
 
-    // [New] 액션: 피로도 회복 (모달 제거, 텍스트 표시)
     restoreFatigue(amount) {
-        // 1. 레지스트리(데이터) 업데이트
         const squad = this.registry.get('playerSquad') || [];
         let recoveredCount = 0;
         squad.forEach(member => {
@@ -988,11 +982,10 @@ export default class BattleScene extends BaseScene {
         });
         this.registry.set('playerSquad', squad);
         
-        // 2. [Modified] 현재 전투 중인 아군 유닛들 머리 위에 텍스트 표시
         this.blueTeam.getChildren().forEach(unit => {
             if (unit.active && !unit.isDying) {
                 if (unit.showEmote) {
-                    unit.showEmote(`피로도 -${amount}`, '#44ff44'); // 초록색 텍스트
+                    unit.showEmote(`피로도 -${amount}`, '#44ff44'); 
                 }
             }
         });
@@ -1000,7 +993,6 @@ export default class BattleScene extends BaseScene {
         console.log(`💪 Fatigue restored by ${amount} for active units.`);
     }
 
-    // [New] 액션: 코인 차감
     removeCoins(amount) {
         if (this.playerCoins >= amount) {
             this.playerCoins -= amount;
@@ -1008,7 +1000,6 @@ export default class BattleScene extends BaseScene {
             console.log(`💰 Coins removed: ${amount}. Current: ${this.playerCoins}`);
         } else {
             console.log("💸 Not enough coins!");
-            // 실패 처리 로직이 필요하다면 추가 (예: 아이템 지급 취소)
         }
     }
 
@@ -1223,5 +1214,28 @@ export default class BattleScene extends BaseScene {
         });
     }
     restartLevel() { this.scene.restart({ levelIndex: this.currentLevelIndex, currentCoins: this.levelInitialCoins }); }
-    restartGamerFromBeginning() { this.scene.restart({ levelIndex: 0 }); }
+    
+    // [Modified] 새 게임 시작 시 스크립트 실행 기록 초기화
+    restartGamerFromBeginning() {
+        // 1. 스크립트/튜토리얼 재생 기록 삭제
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith('map_script_played_') || key.startsWith('tutorial_played_')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        
+        console.log("🔄 [BattleScene] Game Reset: Script history cleared.");
+
+        // 2. 레지스트리 초기화 (새 게임 상태)
+        this.registry.set('playerSquad', [{ role: 'Leader' }]);
+        this.registry.set('unlockedRoles', ['Normal']);
+        this.registry.set('fallenUnits', []);
+        this.registry.set('prisonerList', []);
+
+        // 3. 레벨 0부터 다시 시작
+        this.scene.restart({ levelIndex: 0 }); 
+    }
 }

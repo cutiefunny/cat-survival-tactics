@@ -93,15 +93,15 @@
          "name":"Dogs",
          "objects":[
                 {
-                 "height":160,
+                 "height":344.52332381341,
                  "id":4,
                  "name":"",
                  "rotation":0,
                  "type":"",
                  "visible":true,
-                 "width":1128,
-                 "x":80,
-                 "y":316
+                 "width":400.351421188631,
+                 "x":426.416428668571,
+                 "y":9.62165102679177
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -130,9 +130,32 @@
          "visible":true,
          "x":0,
          "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":6,
+         "name":"NPC",
+         "objects":[
+                {
+                 "height":60,
+                 "id":8,
+                 "name":"Shooter",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":60,
+                 "x":600,
+                 "y":895
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
         }],
- "nextlayerid":5,
- "nextobjectid":7,
+ "nextlayerid":7,
+ "nextobjectid":9,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
@@ -167,5 +190,41 @@
  "tilewidth":32,
  "type":"map",
  "version":"1.10",
- "width":40
+ "width":40,
+ "script": [
+       {
+              "type": "dialog",
+              "speaker": "슈터",
+              "avatar": "shooter",
+              "text": "김냐냐! 소식을 듣고 도우러 왔따! 괜찮냥?"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "우옷 턱시도! 반갑다냥! 보다시피 멀쩡하다!" 
+       },
+       {
+              "type": "dialog",
+              "speaker": "슈터",
+              "avatar": "shooter",
+              "text": "이제부터 내가 돕겠따 걱정 마라냥!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "감샤하다! 몹시 든든하군!" 
+       },
+       {
+              "type": "recruit_unit",
+              "role": "Shooter",
+              "text": "턱시도가 동료로 합류했다!"
+       },
+       {
+              "type": "unlock_unit",
+              "unit": ["Shooter"],
+              "text": "이제 슈터를 동료로 영입할 수 있다!"
+       }
+  ]
 }
