@@ -168,6 +168,45 @@
         }, 
         {
          "draworder":"topdown",
+         "id":5,
+         "name":"NPC",
+         "objects":[
+                {
+                 "height":60,
+                 "id":13,
+                 "name":"coffee",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":41,
+                 "x":285.182912438046,
+                 "y":415.690346943592,
+                 "script":[
+                        {
+                         "type":"dialog_confirm",
+                         "text":"안녕하세요! 메가커피입니다. 커피 드릴까요?",
+                            "options":[
+                                   {
+                                          "text":"네(5코인)",
+                                          "action":["restore_fatigue",1,"remove_coins",5,"close"]
+                                   },
+                                   {
+                                          "text":"아니요",
+                                          "action":["close"]
+
+                                   }
+                            ]
+                     }]
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
          "id":3,
          "name":"Dogs",
          "objects":[
@@ -210,8 +249,8 @@
          "x":0,
          "y":0
         }],
- "nextlayerid":5,
- "nextobjectid":13,
+ "nextlayerid":6,
+ "nextobjectid":14,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",

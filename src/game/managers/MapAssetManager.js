@@ -1,43 +1,31 @@
 import Phaser from 'phaser';
 
-// 1. Vite의 glob 기능으로 맵 JSON 파일들을 자동 수집
 const mapJsonFiles = import.meta.glob('../../assets/maps/*.json', { eager: true });
+const npcImageFiles = import.meta.glob('../../assets/npcs/*.png', { eager: true });
 
-// 2. 타일셋 이미지 매핑
+// ... (TILESET_MAPPING 생략 - 기존과 동일) ...
 const TILESET_MAPPING = {
     'tileser_nature': new URL('../../assets/tilesets/TX_Tileset_Grass.png', import.meta.url).href,
     'tileset_trees': new URL('../../assets/tilesets/TX_Plant.png', import.meta.url).href,
-    
-    // [Fix] 대소문자 호환성을 위해 소문자 키 추가 및 매핑 보강
     'City': new URL('../../assets/tilesets/City_20.jpg', import.meta.url).href,
     'City2': new URL('../../assets/tilesets/City_20_2.jpg', import.meta.url).href,
     'Park': new URL('../../assets/tilesets/park.png', import.meta.url).href,
-    
     'Car': new URL('../../assets/tilesets/car.jpg', import.meta.url).href,
-    'car': new URL('../../assets/tilesets/car.jpg', import.meta.url).href, // 소문자 추가
-
+    'car': new URL('../../assets/tilesets/car.jpg', import.meta.url).href,
     'Street1': new URL('../../assets/tilesets/street1.jpg', import.meta.url).href,
     'street1': new URL('../../assets/tilesets/street1.jpg', import.meta.url).href,
-
     'Street2': new URL('../../assets/tilesets/street2.jpg', import.meta.url).href,
-    'street2': new URL('../../assets/tilesets/street2.jpg', import.meta.url).href, // 소문자 추가
-
+    'street2': new URL('../../assets/tilesets/street2.jpg', import.meta.url).href,
     'Street3': new URL('../../assets/tilesets/street3.jpg', import.meta.url).href,
-    'street3': new URL('../../assets/tilesets/street3.jpg', import.meta.url).href, // 소문자 추가
-
+    'street3': new URL('../../assets/tilesets/street3.jpg', import.meta.url).href,
     'Street4': new URL('../../assets/tilesets/street4.jpg', import.meta.url).href,
     'street4': new URL('../../assets/tilesets/street4.jpg', import.meta.url).href,
-
     'Road': new URL('../../assets/tilesets/road.jpg', import.meta.url).href,
     'road': new URL('../../assets/tilesets/road.jpg', import.meta.url).href,
-
     'baekam': new URL('../../assets/tilesets/baekam.jpg', import.meta.url).href,
     'mega_coffee': new URL('../../assets/tilesets/mega_coffee.jpg', import.meta.url).href,
-
     'Big_city': new URL('../../assets/tilesets/big_city.jpg', import.meta.url).href,
     'Big_Street': new URL('../../assets/tilesets/big_street.jpg', import.meta.url).href,
-
-    // 특정 레벨용 타일셋 매핑
     'level5': new URL('../../assets/tilesets/road.jpg', import.meta.url).href,
     'level5-2': new URL('../../assets/tilesets/street2.jpg', import.meta.url).href,
     'level6': new URL('../../assets/tilesets/parking.jpg', import.meta.url).href,
@@ -50,15 +38,17 @@ export default class MapAssetManager {
     }
 
     preload() {
-        // 1. 맵 JSON 자동 로드
         for (const path in mapJsonFiles) {
             const fileName = path.split('/').pop().replace('.json', '');
             this.scene.load.tilemapTiledJSON(fileName, mapJsonFiles[path].default || mapJsonFiles[path]);
             this.loadedMapKeys.push(fileName);
-            console.log(`🗺️ [MapAssetManager] Auto-loaded Map: ${fileName}`);
         }
 
-        // 2. 타일셋 이미지 로드
+        for (const path in npcImageFiles) {
+            const fileName = path.split('/').pop().replace(/\.png$/i, '');
+            this.scene.load.image(fileName, npcImageFiles[path].default || npcImageFiles[path]);
+        }
+
         for (const [tiledName, filePath] of Object.entries(TILESET_MAPPING)) {
             this.scene.load.image(tiledName, filePath);
         }
@@ -66,14 +56,12 @@ export default class MapAssetManager {
 
     createMap(mapKey) {
         if (!this.loadedMapKeys.includes(mapKey)) {
-            console.warn(`⚠️ Map key '${mapKey}' not found. Loading 'level0' instead.`);
             mapKey = 'level0';
         }
 
         const map = this.scene.make.tilemap({ key: mapKey });
         const tilesets = [];
 
-        // 3. 스마트 타일셋 연결
         map.tilesets.forEach(tilesetData => {
             const tilesetName = tilesetData.name;
             if (this.scene.textures.exists(tilesetName)) {
@@ -84,15 +72,11 @@ export default class MapAssetManager {
                 if (partialMatch && this.scene.textures.exists(partialMatch)) {
                     const ts = map.addTilesetImage(tilesetName, partialMatch);
                     if (ts) tilesets.push(ts);
-                } else {
-                    console.warn(`❌ Missing Tileset Image for: '${tilesetName}'`);
                 }
             }
         });
 
-        // [Fix] 레이어가 존재할 때만 생성하도록 안전 장치 추가
         const createLayerIfExist = (layerName) => {
-            // 타일 레이어 데이터 확인
             if (map.getLayer(layerName)) {
                 return map.createLayer(layerName, tilesets, 0, 0);
             }
@@ -106,7 +90,6 @@ export default class MapAssetManager {
         if (wallLayer) wallLayer.setCollisionByExclusion([-1]);
         if (blockLayer) blockLayer.setCollisionByExclusion([-1]);
 
-        // 디버그용 (블록 오브젝트)
         const blockObjectGroup = this.scene.physics.add.staticGroup();
         const blockObjectLayer = map.getObjectLayer('Blocks');
         
@@ -115,12 +98,71 @@ export default class MapAssetManager {
                 const rect = this.scene.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
                 this.scene.physics.add.existing(rect, true); 
                 rect.setVisible(false); 
-                
-                // [Fix] this.scene.blockObjectGroup 대신 지역 변수 blockObjectGroup 사용
                 blockObjectGroup.add(rect); 
             });
         }
 
-        return { map, layers: { groundLayer, wallLayer, blockLayer }, blockObjectGroup };
+        // [Modified] NPC 생성 및 스크립트 데이터 주입 (Raw Data 참조 로직 추가)
+        const npcGroup = this.scene.physics.add.staticGroup();
+        const npcLayer = map.getObjectLayer('NPC');
+
+        // [New] Raw JSON 데이터 가져오기 (스크립트 복구용)
+        let rawNpcObjects = [];
+        if (this.scene.cache.tilemap.exists(mapKey)) {
+            const rawData = this.scene.cache.tilemap.get(mapKey).data;
+            if (rawData && rawData.layers) {
+                const rawLayer = rawData.layers.find(l => l.name === 'NPC');
+                if (rawLayer && rawLayer.objects) {
+                    rawNpcObjects = rawLayer.objects;
+                }
+            }
+        }
+        
+        if (npcLayer) {
+            npcLayer.objects.forEach(obj => {
+                const textureKey = obj.name; 
+                if (this.scene.textures.exists(textureKey)) {
+                    
+                    const finalX = obj.x;
+                    const finalY = obj.y;
+
+                    const npc = npcGroup.create(finalX, finalY, textureKey);
+                    
+                    npc.setDisplaySize(obj.width, obj.height);
+                    npc.setDepth(obj.y); 
+                    
+                    if (npc.body) {
+                        npc.body.updateFromGameObject();
+                    }
+
+                    // [Modified] 스크립트 데이터 주입 로직 강화
+                    // 1. Phaser 객체에 이미 있다면 사용
+                    if (obj.script) {
+                        npc.scriptData = obj.script;
+                    } 
+                    // 2. 없다면 Raw Data에서 id로 검색하여 복구
+                    else {
+                        const rawObj = rawNpcObjects.find(r => r.id === obj.id);
+                        if (rawObj && rawObj.script) {
+                            npc.scriptData = rawObj.script;
+                            // console.log(`🔧 Script recovered for NPC ${textureKey} from raw JSON`);
+                        }
+                    }
+
+                    if (npc.scriptData) {
+                        console.log(`✅ NPC Created: ${textureKey} (Script Loaded: YES)`);
+                    } else {
+                        console.log(`✅ NPC Created: ${textureKey} (Script Loaded: NO)`);
+                    }
+
+                    npcGroup.add(npc);
+
+                } else {
+                    console.warn(`⚠️ NPC Texture missing: '${textureKey}'`);
+                }
+            });
+        }
+
+        return { map, layers: { groundLayer, wallLayer, blockLayer }, blockObjectGroup, npcGroup };
     }
 }

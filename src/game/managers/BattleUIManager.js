@@ -8,6 +8,7 @@ export default class BattleUIManager {
         
         this.isDebugEnabled = false; 
         this.itemModal = null; 
+        this.dialogContainer = null;
 
         // UIScene 실행 확인 및 실행
         if (this.scene.scene.isActive('UIScene')) {
@@ -143,6 +144,80 @@ export default class BattleUIManager {
                 }
                 ui.updateDebugStats(loop.actualFps, memInfo);
             }
+        }
+    }
+
+    showDialogConfirm(text, options, onAction) {
+        const uiScene = this.scene.scene.get('UIScene');
+        if (!uiScene) return;
+
+        if (this.dialogContainer) this.dialogContainer.destroy();
+
+        const { width, height } = uiScene.scale;
+        
+        // 반투명 배경 (클릭 차단)
+        const blocker = uiScene.add.rectangle(width/2, height/2, width, height, 0x000000, 0.3)
+            .setInteractive();
+
+        const dialogW = 500;
+        const dialogH = 250;
+        const bg = uiScene.add.rectangle(0, 0, dialogW, dialogH, 0x222222)
+            .setStrokeStyle(4, 0xffffff);
+        
+        const msgText = uiScene.add.text(0, -40, text, {
+            fontSize: '20px', color: '#ffffff', align: 'center', wordWrap: { width: dialogW - 40 }
+        }).setOrigin(0.5);
+
+        this.dialogContainer = uiScene.add.container(width/2, height/2, [blocker, bg, msgText]);
+        this.dialogContainer.setDepth(6000);
+
+        // 옵션 버튼 생성
+        const btnWidth = 180;
+        const btnHeight = 50;
+        const spacing = 20;
+        const totalW = options.length * btnWidth + (options.length - 1) * spacing;
+        let startX = -totalW / 2 + btnWidth / 2;
+
+        options.forEach(opt => {
+            const btnBg = uiScene.add.rectangle(startX, 60, btnWidth, btnHeight, 0x444444)
+                .setInteractive({ useHandCursor: true })
+                .setStrokeStyle(2, 0x888888);
+            
+            const btnTxt = uiScene.add.text(startX, 60, opt.text, {
+                fontSize: '18px', fontStyle: 'bold', color: '#ffffff'
+            }).setOrigin(0.5);
+
+            btnBg.on('pointerdown', () => {
+                // UI 닫기
+                this.closeDialog();
+                // 액션 콜백 실행
+                if (onAction && opt.action) {
+                    onAction(opt.action);
+                }
+            });
+            
+            // 호버 효과
+            btnBg.on('pointerover', () => btnBg.setFillStyle(0x666666));
+            btnBg.on('pointerout', () => btnBg.setFillStyle(0x444444));
+
+            this.dialogContainer.add([btnBg, btnTxt]);
+            startX += btnWidth + spacing;
+        });
+        
+        // 등장 애니메이션
+        this.dialogContainer.setScale(0);
+        uiScene.tweens.add({
+            targets: this.dialogContainer,
+            scale: 1,
+            duration: 200,
+            ease: 'Back.out'
+        });
+    }
+
+    closeDialog() {
+        if (this.dialogContainer) {
+            this.dialogContainer.destroy();
+            this.dialogContainer = null;
         }
     }
     

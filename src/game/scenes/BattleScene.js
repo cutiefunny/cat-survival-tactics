@@ -161,6 +161,11 @@ export default class BattleScene extends BaseScene {
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
+        this.npcGroup = null; // NPC 그룹 참조
+        this.touchingNpc = null; // 현재 접촉 중인 NPC
+        this.npcTouchTimer = 0; // 접촉 시간 누적
+        this.npcInteractionTriggered = false; // 중복 실행 방지 플래그
+
         this.input.keyboard.on('keydown-D', (event) => { if (event.shiftKey) this.toggleDebugMode(); });
         
         this.events.on('resume', (scene, data) => {
@@ -308,6 +313,7 @@ export default class BattleScene extends BaseScene {
             this.wallLayer = mapDataObj.layers.wallLayer;
             this.blockLayer = mapDataObj.layers.blockLayer;
             this.blockObjectGroup = mapDataObj.blockObjectGroup;
+            this.npcGroup = mapDataObj.npcGroup;
 
             this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
@@ -319,7 +325,7 @@ export default class BattleScene extends BaseScene {
 
             this.initializeGameVariables(config);
             this.spawnUnits(config, map);
-            this.setupPhysicsColliders(this.wallLayer, this.blockLayer);
+            this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
         }
         
         if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
@@ -684,6 +690,7 @@ export default class BattleScene extends BaseScene {
         text.setOrigin(0.5); text.setDepth(2000);
         this.tweens.add({ targets: text, y: y - 50, alpha: 0, duration: 1000, ease: 'Power2', onComplete: () => { text.destroy(); } });
     }
+    
     setupPhysicsColliders(wallLayer, blockLayer) {
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
@@ -694,6 +701,20 @@ export default class BattleScene extends BaseScene {
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
+        
+        // [Modified] NPC 충돌 설정 (BlueTeam 추가)
+        if (this.npcGroup) {
+            this.physics.add.collider(this.redTeam, this.npcGroup, this.handleNpcCollision, null, this);
+            this.physics.add.collider(this.blueTeam, this.npcGroup, this.handleNpcCollision, null, this);
+        }
+    }
+
+    // [New] 충돌 콜백: 매 프레임 충돌 시 호출됨
+    handleNpcCollision(unit, npc) {
+        // 플레이어 리더 유닛만 상호작용 가능하게 할지, 아군 전체 가능하게 할지 결정 (여기선 리더만)
+        if (unit === this.playerUnit) {
+            this.currentFrameTouchingNpc = npc;
+        }
     }
     handleStartBattle() {
         this.saveInitialFormation(); 
@@ -753,17 +774,34 @@ export default class BattleScene extends BaseScene {
         this.time.timeScale = this.gameSpeed;
         this.uiManager.updateSpeedButton(this.gameSpeed);
     }
+    
+    // [Modified] 이벤트 시 슬로우 모션 + 채도 감소 효과
     slowMotionForModal(isActive) {
         if (isActive) {
             // 0.2배속 (Phaser physics timeScale은 값이 클수록 느려짐: 1/0.2 = 5)
             this.physics.world.timeScale = 5; 
-            this.time.timeScale = 0.2;
+            this.time.timeScale = 0.1;
+            
+            // [New] 50% 채도 감소 (PostFX 사용 - Phaser 3.60+)
+            if (this.cameras.main.postFX) {
+                // 기존 효과 클리어 후 적용 (중복 방지)
+                this.cameras.main.postFX.clear(); 
+                const colorMatrix = this.cameras.main.postFX.addColorMatrix();
+                // 0: 흑백, 1: 원본, 0.5: 반쯤 색 빠짐
+                colorMatrix.grayscale(0.5);
+            }
         } else {
             // 원래 게임 속도로 복구
             this.physics.world.timeScale = 1 / this.gameSpeed; 
             this.time.timeScale = this.gameSpeed;
+
+            // [New] 효과 제거
+            if (this.cameras.main.postFX) {
+                this.cameras.main.postFX.clear();
+            }
         }
     }
+
     startBattle() {
         if (this.battleStarted) return;
         this.battleStarted = true;
@@ -802,7 +840,178 @@ export default class BattleScene extends BaseScene {
             else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); } 
             else { this.uiManager.updateScore(blueCount, redCount); }
         }
+        // [New] NPC 상호작용 로직
+        this.updateNpcInteraction(delta);
     }
+
+    /////////////NPC 부분 추가///////////////////////////
+    // [NewLogic] NPC 상호작용 (밀기 감지)
+    updateNpcInteraction(delta) {
+        // 1. 이번 프레임에 NPC와 물리적 충돌이 있었는지 확인
+        if (this.currentFrameTouchingNpc) {
+            
+            // 2. 플레이어가 실제로 "이동 입력"을 하고 있는지 확인 (가만히 닿아있는 것 제외)
+            const cursors = this.cursors || {};
+            const wasd = this.wasd || {};
+            const joy = this.joystickCursors || {};
+            
+            const isPushing = (
+                cursors.left?.isDown || cursors.right?.isDown || cursors.up?.isDown || cursors.down?.isDown ||
+                wasd.left?.isDown || wasd.right?.isDown || wasd.up?.isDown || wasd.down?.isDown ||
+                joy.left?.isDown || joy.right?.isDown || joy.up?.isDown || joy.down?.isDown
+            );
+
+            // [Debug] 상태 로그
+            if (isPushing) {
+                 console.log(`Pushing NPC... Timer: ${this.npcTouchTimer.toFixed(0)}ms`);
+            }
+
+            if (isPushing) {
+                // 같은 NPC를 계속 밀고 있는 경우
+                if (this.touchingNpc === this.currentFrameTouchingNpc) {
+                    if (!this.npcInteractionTriggered) {
+                        this.npcTouchTimer += delta;
+                        
+                        // [Modified] 1초 -> 0.5초(500ms)로 단축
+                        if (this.npcTouchTimer > 500) {
+                            console.log("✅ NPC Interaction Triggered!"); 
+                            this.triggerNpcEvent(this.touchingNpc);
+                            this.npcInteractionTriggered = true; // 중복 실행 방지
+                        }
+                    }
+                } else {
+                    // 새로운 NPC와 밀기 시작 (타이머 리셋)
+                    console.log("🆕 Started pushing new NPC");
+                    this.touchingNpc = this.currentFrameTouchingNpc;
+                    this.npcTouchTimer = 0;
+                    this.npcInteractionTriggered = false;
+                }
+            } else {
+                // 충돌은 했으나 입력이 없음 (그냥 옆에 서 있음) -> 타이머 초기화
+                this.npcTouchTimer = 0;
+            }
+        } else {
+            // 충돌 없음 -> 초기화
+            this.touchingNpc = null;
+            this.npcTouchTimer = 0;
+            this.npcInteractionTriggered = false;
+        }
+
+        // 다음 프레임 판단을 위해 리셋
+        this.currentFrameTouchingNpc = null;
+    }
+
+    // [New] NPC 이벤트 실행
+    triggerNpcEvent(npc) {
+        if (!npc.scriptData) return;
+
+        console.log("🗣️ NPC Event Triggered:", npc.texture.key);
+        
+        // [Modified] 이벤트 시작 시 0.2배속 (Slow Motion ON)
+        this.slowMotionForModal(true);
+
+        // 스크립트 배열 순회 (보통 하나지만 배열이므로)
+        npc.scriptData.forEach(script => {
+            if (script.type === 'dialog_confirm') {
+                let dialogText = script.text;
+                let dialogOptions = script.options;
+
+                // [New] 코인 부족 체크 로직
+                // 옵션 중에 'remove_coins' 액션이 있는지 확인
+                const costOption = script.options.find(opt => 
+                    opt.action && opt.action.includes('remove_coins')
+                );
+
+                if (costOption) {
+                    const idx = costOption.action.indexOf('remove_coins');
+                    // 액션 배열 구조: [..., "remove_coins", 5, ...] -> 다음 인덱스가 비용
+                    const cost = costOption.action[idx + 1];
+                    
+                    if (this.playerCoins < cost) {
+                        dialogText = "코인이 부족합니다!";
+                        dialogOptions = [
+                            { text: "닫기", action: ["close"] }
+                        ];
+                    }
+                }
+
+                this.uiManager.showDialogConfirm(
+                    dialogText, 
+                    dialogOptions, 
+                    (actionArray) => this.executeScriptAction(actionArray)
+                );
+            }
+        });
+    }
+
+    // [New] 스크립트 액션 파서 (flat array 처리)
+    executeScriptAction(actions) {
+        if (!Array.isArray(actions)) return;
+
+        let i = 0;
+        while (i < actions.length) {
+            const command = actions[i];
+            i++;
+
+            switch (command) {
+                case 'restore_fatigue':
+                    const amount = actions[i]; // arg1: amount
+                    i++;
+                    this.restoreFatigue(amount);
+                    break;
+                case 'remove_coins':
+                    const cost = actions[i]; // arg1: cost
+                    i++;
+                    this.removeCoins(cost);
+                    break;
+                case 'close':
+                    // [New] 다이얼로그 닫힐 때 게임 속도 정상화 (Slow Motion OFF)
+                    this.slowMotionForModal(false);
+                    break;
+                default:
+                    console.warn(`Unknown script command: ${command}`);
+                    break;
+            }
+        }
+    }
+
+    // [New] 액션: 피로도 회복 (모달 제거, 텍스트 표시)
+    restoreFatigue(amount) {
+        // 1. 레지스트리(데이터) 업데이트
+        const squad = this.registry.get('playerSquad') || [];
+        let recoveredCount = 0;
+        squad.forEach(member => {
+            if (member.fatigue > 0) {
+                member.fatigue = Math.max(0, member.fatigue - amount);
+                recoveredCount++;
+            }
+        });
+        this.registry.set('playerSquad', squad);
+        
+        // 2. [Modified] 현재 전투 중인 아군 유닛들 머리 위에 텍스트 표시
+        this.blueTeam.getChildren().forEach(unit => {
+            if (unit.active && !unit.isDying) {
+                if (unit.showEmote) {
+                    unit.showEmote(`피로도 -${amount}`, '#44ff44'); // 초록색 텍스트
+                }
+            }
+        });
+        
+        console.log(`💪 Fatigue restored by ${amount} for active units.`);
+    }
+
+    // [New] 액션: 코인 차감
+    removeCoins(amount) {
+        if (this.playerCoins >= amount) {
+            this.playerCoins -= amount;
+            this.uiManager.updateCoins(this.playerCoins);
+            console.log(`💰 Coins removed: ${amount}. Current: ${this.playerCoins}`);
+        } else {
+            console.log("💸 Not enough coins!");
+            // 실패 처리 로직이 필요하다면 추가 (예: 아이템 지급 취소)
+        }
+    }
+
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
