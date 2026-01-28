@@ -59,7 +59,7 @@
          "name":"Blocks",
          "objects":[
                 {
-                 "height":412,
+                 "height":382,
                  "id":1,
                  "name":"",
                  "rotation":0,
@@ -90,6 +90,45 @@
                  "width":825.333666666667,
                  "x":449.333166666667,
                  "y":873.333316666667
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":5,
+         "name":"NPC",
+         "objects":[
+                {
+                 "height":60,
+                 "id":37,
+                 "name":"coffee",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":41,
+                 "x":522,
+                 "y":411,
+                 "script":[
+                        {
+                         "type":"dialog_confirm",
+                         "text":"안녕하세요! 무대륙입니다. 커피 드릴까요?",
+                            "options":[
+                                   {
+                                          "text":"네(5코인)",
+                                          "action":["restore_fatigue",1,"remove_coins",5,"close"]
+                                   },
+                                   {
+                                          "text":"아니요",
+                                          "action":["close"]
+
+                                   }
+                            ]
+                     }]
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -141,8 +180,8 @@
          "x":0,
          "y":0
         }],
- "nextlayerid":5,
- "nextobjectid":37,
+ "nextlayerid":6,
+ "nextobjectid":38,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
