@@ -998,48 +998,61 @@ export default class BattleScene extends BaseScene {
         console.log(`💪 Fatigue restored by ${amount} for active units.`);
     }
 
-    // [New] 로그 및 데이터 검증이 강화된 에너지 회복 함수
+    // [New] '에너지 회복' 커맨드지만 실제로는 '체력(HP)'을 회복하도록 변경
     restoreEnergy(amount) {
-        console.log(`%c[restoreEnergy] Called with amount: ${amount}`, 'color: cyan; font-weight: bold;');
+        console.log(`%c[restoreEnergy/HP] Called with amount: ${amount}`, 'color: cyan; font-weight: bold;');
         const numericAmount = Number(amount);
 
-        // 1. Registry Update
+        // 1. Registry (저장 데이터) 업데이트 - HP 회복
         const squad = this.registry.get('playerSquad') || [];
         squad.forEach((member, i) => {
-            const maxE = member.maxEnergy || 100;
-            const curE = (member.energy !== undefined) ? member.energy : 0;
-            const nextE = Math.min(maxE, curE + numericAmount);
-            console.log(`[Registry] Unit ${i} (${member.role}): ${curE} -> ${nextE} (Max: ${maxE})`);
-            member.energy = nextE;
+            // [Fix] 화면에 있는 해당 유닛을 찾아서 정확한 Max 값을 가져옴
+            let maxHp = member.maxHp;
+            
+            // 화면에 있는 유닛(active unit)이 있다면 거기서 maxHp 정보를 가져오는 것이 가장 정확함
+            const activeUnit = this.blueTeam.getChildren().find(u => u.squadIndex === i);
+            if (activeUnit && activeUnit.maxHp) {
+                maxHp = activeUnit.maxHp;
+            } 
+            
+            // 유닛이 없거나 정보가 없다면 Base Stats 혹은 HP를 fallback으로 사용
+            if (maxHp === undefined) {
+                 const baseStats = ROLE_BASE_STATS[member.role] || {};
+                 maxHp = member.hp || baseStats.hp || 100; 
+            }
+
+            const curHp = (member.hp !== undefined) ? member.hp : maxHp;
+            const nextHp = Math.min(maxHp, curHp + numericAmount);
+            console.log(`[Registry] Unit ${i} (${member.role}) HP: ${curHp} -> ${nextHp} (Max: ${maxHp})`);
+            member.hp = nextHp;
         });
         this.registry.set('playerSquad', squad);
 
-        // 2. In-Game Unit Update
+        // 2. In-Game Unit Update - 화면상의 유닛 HP 회복
         this.blueTeam.getChildren().forEach((unit, i) => {
             if (unit.active && !unit.isDying) {
-                // Safe access to maxEnergy (유닛 데이터 누락 방지)
-                if (unit.maxEnergy === undefined) {
-                    console.warn(`[Unit ${i}] maxEnergy is undefined! Defaulting to 100.`);
-                    unit.maxEnergy = 100;
+                // Safe access to maxHp
+                if (unit.maxHp === undefined) {
+                    console.warn(`[Unit ${i}] maxHp is undefined! Defaulting to 100.`);
+                    unit.maxHp = 100;
                 }
-                if (unit.energy === undefined) {
-                    console.warn(`[Unit ${i}] energy is undefined! Defaulting to 0.`);
-                    unit.energy = 0;
-                }
-
-                const prevE = unit.energy;
-                unit.energy = Math.min(unit.maxEnergy, unit.energy + numericAmount);
                 
-                console.log(`[Ingame] Unit ${i} (${unit.role}): ${prevE} -> ${unit.energy} (Max: ${unit.maxEnergy})`);
+                const prevHp = unit.hp;
+                unit.hp = Math.min(unit.maxHp, unit.hp + numericAmount);
+                
+                // HP Bar 갱신
+                unit.redrawHpBar();
+                
+                console.log(`[Ingame] Unit ${i} (${unit.role}) HP: ${prevHp} -> ${unit.hp} (Max: ${unit.maxHp})`);
 
                 if (unit.showEmote) {
                     if(numericAmount > 999) unit.showEmote(`완전 회복!`, '#030e9eff'); 
-                    else unit.showEmote(`에너지 +${numericAmount}`, '#030e9eff'); 
+                    else unit.showEmote(`체력 +${numericAmount}`, '#030e9eff'); 
                 }
             }
         });
         
-        console.log(`⚡ Energy restored by ${numericAmount} for active units and registry.`);
+        console.log(`⚡ HP restored by ${numericAmount} for active units and registry.`);
     }
 
     removeCoins(amount) {

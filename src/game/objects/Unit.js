@@ -27,11 +27,14 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
         this.baseSize = size;
 
-        this.maxHp = stats.hp;
-        this.hp = this.maxHp;
+        // [Modified] HP 초기화 순서 및 maxHp 확보
+        // stats.maxHp가 있으면 쓰고, 없으면 hp를 maxHp로 간주 (생성 시점 기준)
+        this.maxHp = stats.maxHp || stats.hp || 100;
+        this.hp = stats.hp !== undefined ? stats.hp : this.maxHp;
 
-        // [New] 에너지(MP) 속성 초기화 추가
-        this.maxEnergy = stats.maxEnergy || 100; 
+        // [Modified] 에너지(MP) 속성 초기화 개선
+        // stats.maxEnergy가 없으면 maxHp를 따라가도록 변경 (기본값 100 대신)
+        this.maxEnergy = stats.maxEnergy || this.maxHp || 100; 
         this.energy = (stats.energy !== undefined) ? stats.energy : 0; 
 
         this.baseAttackPower = stats.attackPower;
@@ -586,7 +589,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         }
 
         const hpPct = (this.hp / this.maxHp * 100).toFixed(0);
-        this.debugText.setText(`${statusStr}\nHP:${hpPct}%`);
+        // [New] Debug text includes Energy (EP)
+        const ep = (this.energy !== undefined) ? this.energy.toFixed(0) : '?';
+        const maxEp = (this.maxEnergy !== undefined) ? this.maxEnergy : '?';
+
+        this.debugText.setText(`${statusStr}\nHP:${hpPct}%\nEP:${ep}/${maxEp}`);
         this.debugText.setColor(color);
 
         // [Update] Draw Field of View with Raycasting (Shadow Casting)
