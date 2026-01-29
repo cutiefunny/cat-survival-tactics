@@ -30,6 +30,10 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         this.maxHp = stats.hp;
         this.hp = this.maxHp;
 
+        // [New] 에너지(MP) 속성 초기화 추가
+        this.maxEnergy = stats.maxEnergy || 100; 
+        this.energy = (stats.energy !== undefined) ? stats.energy : 0; 
+
         this.baseAttackPower = stats.attackPower;
         this.attackPower = this.baseAttackPower;
         this.moveSpeed = stats.moveSpeed;

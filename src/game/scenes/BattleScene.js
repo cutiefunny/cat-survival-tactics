@@ -952,9 +952,14 @@ export default class BattleScene extends BaseScene {
             i++;
             switch (command) {
                 case 'restore_fatigue':
-                    const amount = actions[i]; 
+                    const fatigueAmount = actions[i]; 
                     i++;
-                    this.restoreFatigue(amount);
+                    this.restoreFatigue(fatigueAmount);
+                    break;
+                case 'restore_energy': 
+                    const energyAmount = actions[i];
+                    i++;
+                    this.restoreEnergy(energyAmount);
                     break;
                 case 'remove_coins':
                     const cost = actions[i]; 
@@ -991,6 +996,50 @@ export default class BattleScene extends BaseScene {
         });
         
         console.log(`💪 Fatigue restored by ${amount} for active units.`);
+    }
+
+    // [New] 로그 및 데이터 검증이 강화된 에너지 회복 함수
+    restoreEnergy(amount) {
+        console.log(`%c[restoreEnergy] Called with amount: ${amount}`, 'color: cyan; font-weight: bold;');
+        const numericAmount = Number(amount);
+
+        // 1. Registry Update
+        const squad = this.registry.get('playerSquad') || [];
+        squad.forEach((member, i) => {
+            const maxE = member.maxEnergy || 100;
+            const curE = (member.energy !== undefined) ? member.energy : 0;
+            const nextE = Math.min(maxE, curE + numericAmount);
+            console.log(`[Registry] Unit ${i} (${member.role}): ${curE} -> ${nextE} (Max: ${maxE})`);
+            member.energy = nextE;
+        });
+        this.registry.set('playerSquad', squad);
+
+        // 2. In-Game Unit Update
+        this.blueTeam.getChildren().forEach((unit, i) => {
+            if (unit.active && !unit.isDying) {
+                // Safe access to maxEnergy (유닛 데이터 누락 방지)
+                if (unit.maxEnergy === undefined) {
+                    console.warn(`[Unit ${i}] maxEnergy is undefined! Defaulting to 100.`);
+                    unit.maxEnergy = 100;
+                }
+                if (unit.energy === undefined) {
+                    console.warn(`[Unit ${i}] energy is undefined! Defaulting to 0.`);
+                    unit.energy = 0;
+                }
+
+                const prevE = unit.energy;
+                unit.energy = Math.min(unit.maxEnergy, unit.energy + numericAmount);
+                
+                console.log(`[Ingame] Unit ${i} (${unit.role}): ${prevE} -> ${unit.energy} (Max: ${unit.maxEnergy})`);
+
+                if (unit.showEmote) {
+                    if(numericAmount > 999) unit.showEmote(`완전 회복!`, '#030e9eff'); 
+                    else unit.showEmote(`에너지 +${numericAmount}`, '#030e9eff'); 
+                }
+            }
+        });
+        
+        console.log(`⚡ Energy restored by ${numericAmount} for active units and registry.`);
     }
 
     removeCoins(amount) {

@@ -101,6 +101,18 @@
       "difficulty": 2,
       "bgm": "level2"
     },
+    "13": {
+      "mapId": "level7",
+      "name": "큰 길",
+      "difficulty": 2,
+      "bgm": "level2"
+    },
+    "14": {
+      "mapId": "level8",
+      "name": "빌라촌",
+      "difficulty": 2,
+      "bgm": "level2"
+    },
     "15": {
       "mapId": "level4",
       "name": "한강파 근거지",
