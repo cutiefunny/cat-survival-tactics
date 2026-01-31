@@ -168,6 +168,8 @@ export default class EventScene extends Phaser.Scene {
         const isOverlay = (this.viewMode === 'overlay');
         const isMobile = width <= 640;
 
+        const mobileShiftY = (!isOverlay && isMobile) ? height * 0.1 : 0;
+
         if (isOverlay) {
             this.cameras.main.setBackgroundColor('rgba(0,0,0,0.5)'); 
         } else {
@@ -177,9 +179,16 @@ export default class EventScene extends Phaser.Scene {
             }
         }
 
-        const boxHeight = isOverlay ? 160 : 200;
+        const contentHeight = isOverlay ? 160 : 200;
+        let boxHeight = contentHeight;
+        
+        if (!isOverlay && isMobile) {
+            boxHeight += mobileShiftY;
+        }
+
         const marginY = isOverlay ? 30 : 0; 
         const boxY = isOverlay ? marginY : (height - boxHeight);
+        
         const marginX = isOverlay ? (isMobile ? 10 : 40) : 0;
         const boxWidth = width - (marginX * 2);
         const boxX = marginX;
@@ -190,15 +199,25 @@ export default class EventScene extends Phaser.Scene {
         const padding = 20;
         const avatarSize = 100;
         
-        this.avatarImage.setPosition(boxX + padding + avatarSize / 2, boxY + boxHeight / 2);
+        this.avatarImage.setPosition(boxX + padding + avatarSize / 2, boxY + contentHeight / 2);
         
         this.baseTextX = boxX + padding;
         this.avatarTextX = boxX + padding + avatarSize + padding;
         const textY = boxY + 25;
 
+        if (isMobile) {
+            this.speakerText.setFontSize('22px');
+            this.storyText.setFontSize('15px');
+        } else {
+            this.speakerText.setFontSize('28px');
+            this.storyText.setFontSize('24px');
+        }
+
         this.speakerText.setPosition(this.baseTextX, textY); 
         this.storyText.setPosition(this.baseTextX, textY + 40); 
-        this.storyText.setStyle({ wordWrap: { width: boxWidth - 100 } });
+        
+        // [Modified] 고정된 wordWrap 설정 제거 (아래에서 동적으로 설정)
+        // this.storyText.setStyle({ wordWrap: { width: boxWidth - 100 } });
 
         if (isOverlay) {
             this.skipBtn.setPosition(width - marginX, boxY + boxHeight + 10);
@@ -216,7 +235,6 @@ export default class EventScene extends Phaser.Scene {
             const data = this.currentScript[this.currentCutIndex];
             const type = data.type || 'dialog';
             
-            // Notice 처리 시 텍스트 위치 리셋
             if (type === 'notice' || type === 'recruit_unit' || type === 'unlock_unit') {
                 this.speakerText.setX(this.baseTextX);
                 this.storyText.setX(this.baseTextX);
@@ -230,6 +248,12 @@ export default class EventScene extends Phaser.Scene {
                 }
             }
         }
+
+        // [New] 현재 텍스트 위치를 기반으로 가용 너비를 동적으로 계산 (우측 여백 30px 확보)
+        // 기존 100px 여백 -> 30px로 줄여서 텍스트 공간 확장
+        const currentTextX = this.storyText.x;
+        const wrapWidth = boxWidth - (currentTextX - boxX) - 30; 
+        this.storyText.setStyle({ wordWrap: { width: wrapWidth } });
     }
 
     resizeVideoLayout1to1() {
@@ -306,10 +330,8 @@ export default class EventScene extends Phaser.Scene {
             this.videoContainer.setVisible(false);
             this.uiContainer.setVisible(true);
 
-            // [Modified] 시스템 메시지 타입 판별
             const isNotice = (type === 'notice' || type === 'recruit_unit' || type === 'unlock_unit');
 
-            // [New] 특수 이벤트 처리 (즉시 적용)
             if (type === 'recruit_unit') {
                 this.recruitUnit(data);
             } else if (type === 'unlock_unit') {
@@ -330,7 +352,6 @@ export default class EventScene extends Phaser.Scene {
                 if (this.bgImage) this.bgImage.setVisible(false);
             }
             
-            // 아바타 및 화자 텍스트 처리
             if (!isNotice && data.avatar) {
                 this.avatarImage.setVisible(true);
                 if (this.textures.exists(data.avatar)) {
@@ -340,12 +361,9 @@ export default class EventScene extends Phaser.Scene {
                 this.storyText.setX(this.avatarTextX);
                 this.speakerText.setText(data.speaker || '');
             } else {
-                // 아바타가 없거나 Notice인 경우
                 this.avatarImage.setVisible(false);
                 this.speakerText.setX(this.baseTextX);
                 this.storyText.setX(this.baseTextX);
-                
-                // Notice면 화자 이름 비우기
                 this.speakerText.setText('');
             }
             
@@ -355,7 +373,6 @@ export default class EventScene extends Phaser.Scene {
             this.isTyping = true;
             this.startTyping(this.fullText);
 
-            // 선택지(Choices) 처리
             this.choiceContainer.removeAll(true);
             this.choiceContainer.setVisible(false);
             this.isWaitingForChoice = false;
@@ -365,11 +382,9 @@ export default class EventScene extends Phaser.Scene {
                 this.createChoices(data.choices);
             }
 
-            // 카메라 이동 (Overlay 모드)
             if (this.viewMode === 'overlay' && this.parentSceneKey) {
                 const parent = this.scene.get(this.parentSceneKey);
                 if (parent && typeof parent.getCameraTarget === 'function') {
-                    // Notice일 때는 화자 이동 안함
                     const target = parent.getCameraTarget(data.speaker);
                     if (target) {
                         const cam = parent.cameras.main;
@@ -381,6 +396,9 @@ export default class EventScene extends Phaser.Scene {
                     }
                 }
             }
+
+            // [New] 아바타 유무에 따라 텍스트 공간이 달라지므로 레이아웃 갱신 호출
+            this.updateLayout();
         }
     }
 
@@ -510,13 +528,22 @@ export default class EventScene extends Phaser.Scene {
     fitImageToScreen(image) {
         if (!image) return;
         const { width, height } = this.scale;
+        
+        // [New] 이미지 위치도 동일하게 위로 시프트
+        const isMobile = width <= 640;
+        const isOverlay = (this.viewMode === 'overlay');
+        const mobileShiftY = (!isOverlay && isMobile) ? height * 0.1 : 0;
+
         const scaleX = width / image.width;
         const scaleY = height / image.height;
         let scale = Math.min(scaleX, scaleY);
         const maxWidth = 1000;
         if (image.width * scale > maxWidth) scale = maxWidth / image.width;
+        
         image.setScale(scale);
-        image.setPosition(width / 2, height / 2);
+        
+        // [Modified] Y 좌표에 시프트 적용
+        image.setPosition(width / 2, (height / 2) - mobileShiftY);
     }
 
     endEvent() {
@@ -539,7 +566,7 @@ export default class EventScene extends Phaser.Scene {
     getOpeningSequence() {
         return [
             { type: 'image', image: 'opening1', text: "상수동은 원래 거대 고양이 김냐냐씨의 영역이었다.\n그가 이끄는 상수동 고양이회는 지역을 평화롭게 다스렸다." },
-            { type: 'image', image: 'opening2', text: "어느 날부터 구역 내에 들개들이 점점 늘어나기 시작했지만\n상수동의 길냥이들은 크게 신경 쓰지 않았다.\n상수동은 강력한 김냐냐씨의 영역이었으니까." },
+            { type: 'image', image: 'opening2', text: "어느 날부터 구역 내에\n들개들이 점점 늘어나기 시작했지만\n상수동의 길냥이들은 크게 신경 쓰지 않았다.\n상수동은 강력한 김냐냐씨의 영역이었으니까." },
             { type: 'image', image: 'opening3', text: "그러던 어느 날,\n영역의 급식소를 순찰하던 김냐냐씨는" },
             { type: 'image', image: 'opening4', text: "상수동 고양이회의 2인자 '탱크'의 계략에 빠져\n영역 최남단의 유니타워에 고립 되고 말았다!" },
             { type: 'image', image: 'opening5', text: "그 사이 상수동 전체는 들개들에게 점령 되었고\n레드로드 서쪽은 배신의 대가로 탱크가 다스리게 되었다.\n" },

@@ -167,5 +167,49 @@
  "tilewidth":32,
  "type":"map",
  "version":"1.10",
- "width":40
+ "width":40,
+ "script": [
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "탱크! 나에게 언제든 도전해도 된다고 말했었지.\n하지만 이렇게 뒷통수를 치는 방식으로는 아니었다냐!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "탱크",
+              "avatar": "tanker",
+              "text": "정정당당 따위의 말을 하려는거냥?\n하! 진짜 웃기는군!!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "탱크",
+              "avatar": "tanker",
+              "text": "정면으로 싸우면 내가 뭘 해도 진다는걸 너도 알고 있었어!\n계속 패배하는 날 비웃으며 즐기기라도 하려 했던거냥?" 
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "이 바보 같은 녀석!\n도전이라는건 반드시 이겨야만 의미가 있는게 아니다냐!" 
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "나에게 계속 도전하면서 너는 항상 그대로였냥?"
+       },
+       {
+              "type": "dialog",
+              "speaker": "탱크",
+              "avatar": "tanker",
+              "text": "물론 처음보다 훨씬훨씬 강해졌지!\n그래서 이렇게 너를 이기러 온거 아니겠냥!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "아무래도 일단 몇 대 맞아야 말이 통할 것 같구냥!\n대화는 나중에 하자냐!"
+       }
+  ]
 }
