@@ -89,6 +89,12 @@ export default class BattleScene extends BaseScene {
         this.armyConfig = data ? data.armyConfig : null; 
         this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
+        // [New] 스크립트 조건 및 상태 변수 초기화
+        this.levelScript = (data && data.script) ? data.script : null;
+        this.levelScriptCondition = (data && data.script_condition) ? data.script_condition : null;
+        this.postBattleScriptPlayed = false; // 전투 후 스크립트 재생 완료 여부
+        this.pendingFinishArgs = null;       // finishGame 재호출을 위한 인자 저장
+
         this.deadSquadIndices = [];
 
         if (data && data.levelIndex !== undefined) {
@@ -102,7 +108,7 @@ export default class BattleScene extends BaseScene {
         this.passedCoins = (data && data.currentCoins !== undefined) ? data.currentCoins : null;
         
         this.hasScriptPlayed = false;
-        this.isWaitingForIntro = false; // 인트로 대기 플래그
+        this.isWaitingForIntro = false;
 
         console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}`);
     }
@@ -177,27 +183,32 @@ export default class BattleScene extends BaseScene {
         this.fetchConfigAndStart();
     }
 
-    // [New] 이벤트 씬 종료 후 호출되는 핸들러
     handleResume(scene, data) {
+        // 1. 인트로 스크립트 종료 시 (기존 로직)
         if (this.isWaitingForIntro) {
             console.log("▶️ [BattleScene] Intro Script Finished. Spawning units...");
             this.isWaitingForIntro = false;
 
-            // 스크립트 실행 완료 표시 (1회성 보장)
             const storageKey = `map_script_played_${this.currentMapKey}`;
             localStorage.setItem(storageKey, 'true');
 
-            // 유닛 스폰 (이때 Registry가 업데이트되어 있으므로 Shooter 등이 정상 소환됨)
             if (this.pendingConfig && this.currentMap) {
                 this.spawnUnits(this.pendingConfig, this.currentMap);
                 this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
                 
-                // 플레이어 유닛이 생겼으므로 카메라 추적 시작
                 if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
                     this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
                     this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
                 }
             }
+        }
+        // 2. [New] 전투 후 승리 스크립트 종료 시
+        else if (this.postBattleScriptPlayed && this.pendingFinishArgs) {
+            console.log("▶️ [BattleScene] Win Script Finished. Showing Victory UI.");
+            // 저장해둔 승리 처리 재개
+            const args = this.pendingFinishArgs;
+            this.pendingFinishArgs = null;
+            this.finishGame(...args);
         }
     }
 
@@ -305,7 +316,15 @@ export default class BattleScene extends BaseScene {
 
     startGame(config, mapKey) {
         this.currentMapKey = mapKey; 
-        let scriptData = null;
+        
+        // [Debug] 스크립트 실행 조건 데이터 확인 로그
+        console.log(`🔍 [BattleScene] startGame Check:`);
+        console.log(`   - MapKey: ${mapKey}`);
+        console.log(`   - this.levelScript present: ${!!this.levelScript}`);
+        console.log(`   - this.levelScriptCondition: "${this.levelScriptCondition}"`);
+
+        // 전달받은 스크립트 데이터 우선 사용
+        let scriptData = this.levelScript;
 
         if (!mapKey) {
             this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
@@ -326,8 +345,14 @@ export default class BattleScene extends BaseScene {
         } else {
             if (this.cache.tilemap.exists(mapKey)) {
                 const mapData = this.cache.tilemap.get(mapKey).data;
-                if (mapData && mapData.script) {
+                // 전달받은 데이터가 없으면 맵 데이터 사용
+                if (!scriptData && mapData && mapData.script) {
                     scriptData = mapData.script;
+                    // [Caution] 맵 파일(json)에서 스크립트를 가져올 경우 condition도 같이 가져와야 함
+                    if (mapData.script_condition) {
+                        this.levelScriptCondition = mapData.script_condition;
+                        console.log(`   - (Updated) Condition loaded from Map JSON: "${this.levelScriptCondition}"`);
+                    }
                 }
             }
 
@@ -349,12 +374,19 @@ export default class BattleScene extends BaseScene {
             this.fitCameraToMap(); 
             this.initializeGameVariables(config);
 
-            // [Modified] 스크립트 실행 여부 체크 (최초 1회만 실행)
             const scriptPlayedKey = `map_script_played_${mapKey}`;
             const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';
 
-            if (scriptData && !alreadyPlayed) {
-                console.log(`📜 [BattleScene] Found new script for ${mapKey}. Playing Intro.`);
+            // [Modified] 조건 체크 로직 디버깅
+            const isWinCondition = (this.levelScriptCondition === 'win');
+            
+            console.log(`   - ScriptData Exists: ${!!scriptData}`);
+            console.log(`   - AlreadyPlayed: ${alreadyPlayed}`);
+            console.log(`   - IsWinCondition: ${isWinCondition} (Value: ${this.levelScriptCondition})`);
+
+            // 조건: 스크립트 있음 AND 아직 안봄 AND 승리조건 아님(즉시 실행)
+            if (scriptData && !alreadyPlayed && !isWinCondition) {
+                console.log(`📜 [BattleScene] Playing Intro Script (Reason: Not 'win' condition).`);
                 
                 this.isWaitingForIntro = true;
                 this.pendingConfig = config; 
@@ -366,11 +398,11 @@ export default class BattleScene extends BaseScene {
                     parentScene: 'BattleScene' 
                 });
                 
-                // 스크립트가 있다면 유닛 소환을 보류하고 리턴
                 return;
+            } else if (isWinCondition) {
+                console.log(`🚫 [BattleScene] Intro Script Skipped (Reason: 'win' condition set).`);
             }
 
-            // 스크립트가 없거나 이미 본 경우: 바로 유닛 소환
             this.spawnUnits(config, map);
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
         }
@@ -831,8 +863,11 @@ export default class BattleScene extends BaseScene {
     }
     startBattle() {
         if (this.battleStarted) return;
+        
         this.battleStarted = true;
         this.battleStartTime = Date.now();
+        
+        // UI 매니저를 통해 전투 시작 애니메이션("BATTLE START" 등) 표시
         this.uiManager.showStartAnimation();
     }
     update(time, delta) {
@@ -1075,18 +1110,42 @@ export default class BattleScene extends BaseScene {
     }
     finishGame(message, color, isWin, fatiguePenalty = 1) {
         if (this.isGameOver) return; 
+
+        // [New] 승리 시 'win' 조건 스크립트가 있다면 먼저 실행
+        if (isWin && this.levelScript && this.levelScriptCondition === 'win' && !this.postBattleScriptPlayed) {
+            console.log("📜 [BattleScene] Victory! Playing Win Script first.");
+            
+            this.postBattleScriptPlayed = true;
+            this.pendingFinishArgs = [message, color, isWin, fatiguePenalty]; // 인자 저장
+            
+            this.physics.pause();
+            this.inputManager.destroy(); // 조작 차단
+            
+            this.scene.pause();
+            this.scene.launch('EventScene', { 
+                script: this.levelScript, 
+                mode: 'overlay', 
+                parentScene: 'BattleScene' 
+            });
+            return; // 종료 처리 보류
+        }
+
         this.isGameOver = true;
         this.physics.pause();
         this.inputManager.destroy(); 
         if (this.bgm) this.bgm.stop();
+        
         const battleResult = this.processBattleOutcome(isWin, fatiguePenalty);
         const { resultStats, totalScore, totalRewardCoins, capturedUnits } = battleResult;
+        
         if (capturedUnits.length > 0) {
             const names = capturedUnits.map(u => u.name).join(", ");
             message += `\n⛓️ 포로 발생: ${names}`;
         }
+        
         let btnText = "Tap to Restart";
         let callback = () => this.restartLevel();
+        
         if (this.isStrategyMode) {
             btnText = "맵으로";
             callback = () => {
@@ -1113,6 +1172,7 @@ export default class BattleScene extends BaseScene {
                 }
             }
         }
+        
         const uiData = {
             isWin: isWin, 
             title: message, 

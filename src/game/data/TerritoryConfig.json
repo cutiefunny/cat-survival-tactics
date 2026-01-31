@@ -93,7 +93,51 @@
       "difficulty": 2,
       "bgm": "level6",
       "unit": "Tanker",
-      "text": "이 곳은 중간보스 '탱크'가 지키고 있다."
+      "text": "이 곳은 중간보스 '탱크'가 지키고 있다.",
+      "script_condition": "win",
+      "script": [
+        {
+          "type": "dialog",
+          "speaker": "탱크",
+          "avatar": "tanker",
+          "text": "졌다.. 이렇게 해도 내가 못 이기는거냥?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "아니. 이건 우리 둘의 승부가 아니었따!\n내 친구들이 더 강했던거지!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "탱크",
+          "avatar": "tanker",
+          "text": "나는 이제 어떻게 되는거냥?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "싸워! 싸워서 주워 담아라냥!\n네놈이 내 준 것들을 다시 되찾아!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "그러면 다시 내 옆에 서게 해주겠다냐!\n너의 쓸모를 다시 증명해 보이라냥!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "탱크",
+          "avatar": "tanker",
+          "text": "여전히 단순한 놈이군. 나 역시!\n그래 그게 길냥이들의 방식 아니겠냥!"
+        },
+        {
+          "type": "unlock_unit",
+          "unit": ["Tanker"],
+          "text": "이제 탱커를 동료로 영입할 수 있다!"
+        }
+      ]
     },
     "10": {
       "mapId": "level2",

@@ -233,6 +233,8 @@ export default class StrategyScene extends BaseScene {
         const mapNodes = this.mapManager.mapNodes;
 
         let battleResultMessage = null;
+        let postBattleScript = null; // [New] 전투 후 재생할 스크립트 저장소
+
         if (this.battleResultData) {
             const { targetNodeId, isWin, remainingCoins } = this.battleResultData;
             
@@ -241,9 +243,15 @@ export default class StrategyScene extends BaseScene {
             if (isWin) {
                 const node = mapNodes.find(n => n.id === targetNodeId);
                 if (node) {
+                    // [New] 승리 시 실행할 스크립트가 있는지 확인 (condition: 'win')
+                    // 노드 데이터를 초기화(null)하기 전에 미리 가져옵니다.
+                    if (node.script && node.script_condition === 'win') {
+                        postBattleScript = node.script;
+                    }
+
                     node.owner = 'player';
                     node.army = null; 
-                    node.script = null; 
+                    node.script = null; // 초기화 (재실행 방지)
                     this.registry.set('worldMapData', mapNodes);
                     this.registry.set('leaderPosition', targetNodeId);
                     
@@ -283,6 +291,20 @@ export default class StrategyScene extends BaseScene {
         this.updateCameraLayout();
         this.setupCameraControls();
         this.prevPinchDistance = 0;
+
+        // [New] 전투 승리 스크립트가 있다면 재생
+        if (postBattleScript) {
+            console.log("📜 Playing Post-Battle Script (Win Condition)");
+            // UI 초기화가 끝난 뒤 약간의 딜레이 후 재생
+            this.time.delayedCall(500, () => {
+                this.scene.pause();
+                this.scene.launch('EventScene', { 
+                    mode: 'overlay', 
+                    script: postBattleScript, 
+                    parentScene: 'StrategyScene' 
+                });
+            });
+        }
     }
 
     handleStoryUnlocks(conqueredNodeId) {}
@@ -373,7 +395,16 @@ export default class StrategyScene extends BaseScene {
         this.moveLeaderToken(node, () => {
             this.hasMoved = true; 
             
-            if (node.script) {
+            // [Modified] 이동 완료 시 스크립트 실행 조건 체크 로그
+            console.log(`📍 Arrived at ${node.name} (ID: ${node.id})`);
+            console.log(`   - Script exists: ${!!node.script}`);
+            console.log(`   - Condition: ${node.script_condition}`);
+
+            // 조건이 'win'이면 여기서 실행하지 않음 (전투 후 실행)
+            const isWinCondition = (node.script_condition === 'win');
+
+            if (node.script && !isWinCondition) {
+                console.log("   - Playing Script immediately (Reason: No 'win' condition)");
                 this.pendingNode = node; 
                 this.scene.pause(); 
                 this.scene.launch('EventScene', { 
@@ -382,6 +413,7 @@ export default class StrategyScene extends BaseScene {
                     parentScene: 'StrategyScene' 
                 });
             } else {
+                if (isWinCondition) console.log("   - Script Deferred (Reason: 'win' condition)");
                 this.handleNodeArrival(node);
             }
         });
@@ -744,7 +776,9 @@ export default class StrategyScene extends BaseScene {
             levelIndex: selectedLevelIndex,
             currentCoins: currentCoins, 
             armyConfig: targetNode.army || null, 
-            bgmKey: targetNode.bgm 
+            bgmKey: targetNode.bgm,
+            // [Modified] script, script_condition 전달 삭제!
+            // 이렇게 해야 BattleScene이 맵 파일(level6.json)의 스크립트를 우선 로드합니다.
         };
 
         this.scene.start('LoadingScene', {

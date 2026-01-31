@@ -93,6 +93,8 @@ export default class StrategyMapManager {
                     army: armyData, 
                     bgm: config.bgm || "stage1_bgm",
                     script: savedNode && savedNode.script !== undefined ? savedNode.script : (config.script || null),
+                    // [Fix] config에서 조건(win 등)을 읽어오도록 추가
+                    script_condition: config.script_condition || null,
                     add_menu: config.add_menu || [] 
                 };
             });
