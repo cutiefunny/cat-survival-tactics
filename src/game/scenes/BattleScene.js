@@ -184,28 +184,25 @@ export default class BattleScene extends BaseScene {
     }
 
     handleResume(scene, data) {
-        // 1. 인트로 스크립트 종료 시 (기존 로직)
+        // 1. 인트로 스크립트 종료 시
         if (this.isWaitingForIntro) {
-            console.log("▶️ [BattleScene] Intro Script Finished. Spawning units...");
+            console.log("▶️ [BattleScene] Intro Script Finished. Resuming game...");
             this.isWaitingForIntro = false;
 
             const storageKey = `map_script_played_${this.currentMapKey}`;
             localStorage.setItem(storageKey, 'true');
 
-            if (this.pendingConfig && this.currentMap) {
-                this.spawnUnits(this.pendingConfig, this.currentMap);
-                this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
-                
-                if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
-                    this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-                    this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
-                }
+            // [Modified] 중복 소환 방지를 위해 spawnUnits 호출 제거 (startGame에서 이미 수행됨)
+            
+            // 카메라 복구 등 후처리
+            if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
+                this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
+                this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
             }
         }
-        // 2. [New] 전투 후 승리 스크립트 종료 시
+        // 2. 전투 후 승리 스크립트 종료 시
         else if (this.postBattleScriptPlayed && this.pendingFinishArgs) {
             console.log("▶️ [BattleScene] Win Script Finished. Showing Victory UI.");
-            // 저장해둔 승리 처리 재개
             const args = this.pendingFinishArgs;
             this.pendingFinishArgs = null;
             this.finishGame(...args);
@@ -317,13 +314,6 @@ export default class BattleScene extends BaseScene {
     startGame(config, mapKey) {
         this.currentMapKey = mapKey; 
         
-        // [Debug] 스크립트 실행 조건 데이터 확인 로그
-        console.log(`🔍 [BattleScene] startGame Check:`);
-        console.log(`   - MapKey: ${mapKey}`);
-        console.log(`   - this.levelScript present: ${!!this.levelScript}`);
-        console.log(`   - this.levelScriptCondition: "${this.levelScriptCondition}"`);
-
-        // 전달받은 스크립트 데이터 우선 사용
         let scriptData = this.levelScript;
 
         if (!mapKey) {
@@ -345,13 +335,10 @@ export default class BattleScene extends BaseScene {
         } else {
             if (this.cache.tilemap.exists(mapKey)) {
                 const mapData = this.cache.tilemap.get(mapKey).data;
-                // 전달받은 데이터가 없으면 맵 데이터 사용
                 if (!scriptData && mapData && mapData.script) {
                     scriptData = mapData.script;
-                    // [Caution] 맵 파일(json)에서 스크립트를 가져올 경우 condition도 같이 가져와야 함
                     if (mapData.script_condition) {
                         this.levelScriptCondition = mapData.script_condition;
-                        console.log(`   - (Updated) Condition loaded from Map JSON: "${this.levelScriptCondition}"`);
                     }
                 }
             }
@@ -374,19 +361,16 @@ export default class BattleScene extends BaseScene {
             this.fitCameraToMap(); 
             this.initializeGameVariables(config);
 
+            // [Modified] 유닛 소환을 먼저 수행 (스크립트 실행 시 배경에 유닛이 보이도록)
+            this.spawnUnits(config, map);
+            this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
+
             const scriptPlayedKey = `map_script_played_${mapKey}`;
             const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';
-
-            // [Modified] 조건 체크 로직 디버깅
             const isWinCondition = (this.levelScriptCondition === 'win');
-            
-            console.log(`   - ScriptData Exists: ${!!scriptData}`);
-            console.log(`   - AlreadyPlayed: ${alreadyPlayed}`);
-            console.log(`   - IsWinCondition: ${isWinCondition} (Value: ${this.levelScriptCondition})`);
 
-            // 조건: 스크립트 있음 AND 아직 안봄 AND 승리조건 아님(즉시 실행)
             if (scriptData && !alreadyPlayed && !isWinCondition) {
-                console.log(`📜 [BattleScene] Playing Intro Script (Reason: Not 'win' condition).`);
+                console.log(`📜 [BattleScene] Playing Intro Script.`);
                 
                 this.isWaitingForIntro = true;
                 this.pendingConfig = config; 
@@ -398,13 +382,8 @@ export default class BattleScene extends BaseScene {
                     parentScene: 'BattleScene' 
                 });
                 
-                return;
-            } else if (isWinCondition) {
-                console.log(`🚫 [BattleScene] Intro Script Skipped (Reason: 'win' condition set).`);
+                // [Modified] return 문 제거: 유닛은 이미 소환되었고, 게임은 pause 상태로 대기합니다.
             }
-
-            this.spawnUnits(config, map);
-            this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
         }
         
         if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
@@ -730,6 +709,58 @@ export default class BattleScene extends BaseScene {
         });
 
         this.initialRedCount = this.redTeam.getLength();
+    }
+
+    // [New] 이벤트로 영입된 유닛을 전장에 즉시 소환하는 함수
+    spawnRecruitedUnit(memberConfig) {
+        if (!memberConfig) return;
+
+        console.log(`🆕 [BattleScene] Spawning recruited unit: ${memberConfig.role}`);
+
+        let spawnX = this.playerUnit ? this.playerUnit.x : 300;
+        let spawnY = this.playerUnit ? this.playerUnit.y : 300;
+
+        // 1. 해당 역할의 NPC가 맵에 있는지 확인 (있으면 그 자리에서 변신)
+        let matchedNpc = null;
+        if (this.npcGroup) {
+            matchedNpc = this.npcGroup.getChildren().find(npc => 
+                npc.active && 
+                (npc.texture.key === memberConfig.role || npc.texture.key.toLowerCase() === memberConfig.role.toLowerCase())
+            );
+        }
+
+        if (matchedNpc) {
+            spawnX = matchedNpc.x;
+            spawnY = matchedNpc.y;
+            matchedNpc.destroy(); // NPC 제거
+            console.log(`✨ NPC Transformed to Unit at (${spawnX}, ${spawnY})`);
+        } else {
+            // NPC가 없다면 리더 근처에 소환
+            spawnX += Phaser.Math.Between(-60, 60);
+            spawnY += Phaser.Math.Between(-60, 60);
+        }
+
+        // 2. 유닛 생성 및 아군 그룹에 추가
+        const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, memberConfig, false);
+        
+        // 스쿼드 인덱스 설정 (현재 팀원 수 기준)
+        unit.squadIndex = this.blueTeam.getLength();
+        
+        this.blueTeam.add(unit);
+
+        // 3. 등장 연출 (크기 0에서 커지면서 등장)
+        // unit.setScale(0);
+        // this.tweens.add({
+        //     targets: unit,
+        //     scale: { from: 0, to: 1 },
+        //     duration: 600,
+        //     ease: 'Back.out'
+        // });
+        
+        // 4. 포메이션 오프셋 계산 (전투 중 대형 유지를 위해)
+        if (this.playerUnit && this.playerUnit.active) {
+            unit.calculateFormationOffset(this.playerUnit);
+        }
     }
     
     getCameraTarget(speaker) {

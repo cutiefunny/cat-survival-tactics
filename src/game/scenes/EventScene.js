@@ -402,11 +402,18 @@ export default class EventScene extends Phaser.Scene {
         }
     }
 
-    // [New] 동료 영입 로직
+    // [Modified] 동료 영입 로직 (화면 소환 요청 추가)
     recruitUnit(data) {
-        // data.role이 지정되어 있으면 해당 유닛을 추가, 없으면 효과만 발생
         if (data.role) {
             const squad = this.registry.get('playerSquad') || [];
+            
+            // 이미 있는 유닛인지 체크 (선택사항, 중복 영입 방지)
+            const exists = squad.some(u => u.role === data.role);
+            if (exists) {
+                console.log(`⚠️ [Event] Already recruited: ${data.role}`);
+                return;
+            }
+
             const newMember = { 
                 role: data.role, 
                 level: 1, 
@@ -414,9 +421,18 @@ export default class EventScene extends Phaser.Scene {
                 fatigue: 0, 
                 name: data.name || getRandomUnitName(data.role)
             };
+            
             squad.push(newMember);
             this.registry.set('playerSquad', squad);
             console.log(`🎉 [Event] Recruited: ${newMember.role} (${newMember.name})`);
+
+            // [New] 부모 씬이 BattleScene이라면 유닛 즉시 소환 메서드 호출
+            if (this.parentSceneKey === 'BattleScene') {
+                const battleScene = this.scene.get('BattleScene');
+                if (battleScene && typeof battleScene.spawnRecruitedUnit === 'function') {
+                    battleScene.spawnRecruitedUnit(newMember);
+                }
+            }
         }
     }
 
