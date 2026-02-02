@@ -121,7 +121,7 @@ export default class StrategyUIManager {
         });
         
         // 부대 편성 (상점) 버튼
-        this.shopBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '🏰 부대편성', 0x444444, () => {
+        this.shopBtnObj = this.createStyledButton(isMobile ? 100 : 100, h - btnMargin, '부대편성', 0x444444, () => {
             if (this.systemModal.isOpen) this.systemModal.toggle();
             if (this.daisoModal.isOpen) this.daisoModal.toggle();
             this.shopModal.toggle();

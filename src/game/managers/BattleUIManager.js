@@ -10,10 +10,15 @@ export default class BattleUIManager {
         this.itemModal = null; 
         this.dialogContainer = null;
 
+        // UI 요소 참조 저장을 위한 객체 (UIScene의 객체를 논리적으로 연결)
+        this.uiButtons = {
+            auto: null,
+            squad: null,
+            speed: null
+        };
+
         // UIScene 실행 확인 및 실행
-        if (this.scene.scene.isActive('UIScene')) {
-            // 이미 실행 중이면 유지
-        } else {
+        if (!this.scene.scene.isActive('UIScene')) {
             this.scene.scene.launch('UIScene');
         }
     }
@@ -23,40 +28,47 @@ export default class BattleUIManager {
         this.scene.time.delayedCall(100, () => {
             const uiScene = this.scene.scene.get('UIScene');
             if (uiScene) {
-                // UI Scene에 모달과 버튼 생성
+                // UI Scene에 모달 초기화 (버튼 생성 로직은 제거됨)
                 this.itemModal = new BattleItemModal(uiScene, this.scene);
-                this.createInventoryButton(uiScene);
             } else {
                 console.error("❌ UIScene not found!");
             }
         });
     }
 
-    createInventoryButton(uiScene) {
-        const { width, height } = uiScene.scale;
-        // 위치: 우측 상단
-        const x = width - 60;
-        const y = 140; 
+    // [제거] createInventoryButton 메서드를 삭제했습니다.
+    // 이제 아이템 버튼 생성은 UIScene.js의 createFooter에서 통합 관리합니다.
 
-        const btn = uiScene.add.container(x, y);
-        
-        const bg = uiScene.add.circle(0, 0, 30, 0x444444)
-            .setStrokeStyle(2, 0xffffff)
-            .setInteractive({ useHandCursor: true });
-            
-        const icon = uiScene.add.text(0, 0, "🎒", { fontSize: '30px' }).setOrigin(0.5);
-
-        bg.on('pointerdown', () => {
-            if (this.itemModal) {
-                uiScene.tweens.add({ targets: btn, scale: 0.9, duration: 50, yoyo: true });
-                this.itemModal.toggle();
-            }
-        });
-
-        btn.add([bg, icon]);
+    // Bridge Methods: UIScene의 메서드를 호출하도록 데이터 흐름 연결
+    updateAutoButton(isAuto) {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.updateAutoButton) {
+            ui.updateAutoButton(isAuto);
+        }
+        this.emitUIEvent('auto', isAuto);
     }
 
-    // --- Bridge Methods (기존과 동일) ---
+    updateSquadButton(state) {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.updateSquadButton) {
+            ui.updateSquadButton(state);
+        }
+        this.emitUIEvent('squad', state);
+    }
+
+    updateSpeedButton(speed) {
+        const ui = this.scene.scene.get('UIScene');
+        if (ui && ui.updateSpeedButton) {
+            ui.updateSpeedButton(speed);
+        }
+        this.emitUIEvent('speed', speed);
+    }
+
+    emitUIEvent(type, value) {
+        this.scene.events.emit('updateUI', { type, value });
+    }
+
+    // --- 시스템 기능 유지를 위한 나머지 메서드 ---
     createFooter() { }
     createAutoBattleButton() { }
     createSquadButton() { }
@@ -99,10 +111,6 @@ export default class BattleUIManager {
         const ui = this.scene.scene.get('UIScene');
         if (ui && ui.updateCoins) ui.updateCoins(amount);
     }
-
-    updateAutoButton(isAuto) { this.emitUIEvent('auto', isAuto); }
-    updateSquadButton(state) { this.emitUIEvent('squad', state); }
-    updateSpeedButton(speed) { this.emitUIEvent('speed', speed); }
 
     showStartAnimation() {
         const ui = this.scene.scene.get('UIScene');
@@ -154,16 +162,10 @@ export default class BattleUIManager {
         if (this.dialogContainer) this.dialogContainer.destroy();
 
         const { width, height } = uiScene.scale;
-        
-        // 반투명 배경 (클릭 차단)
-        const blocker = uiScene.add.rectangle(width/2, height/2, width, height, 0x000000, 0.3)
-            .setInteractive();
-
+        const blocker = uiScene.add.rectangle(width/2, height/2, width, height, 0x000000, 0.3).setInteractive();
         const dialogW = 500;
         const dialogH = 250;
-        const bg = uiScene.add.rectangle(0, 0, dialogW, dialogH, 0x222222)
-            .setStrokeStyle(4, 0xffffff);
-        
+        const bg = uiScene.add.rectangle(0, 0, dialogW, dialogH, 0x222222).setStrokeStyle(4, 0xffffff);
         const msgText = uiScene.add.text(0, -40, text, {
             fontSize: '20px', color: '#ffffff', align: 'center', wordWrap: { width: dialogW - 40 }
         }).setOrigin(0.5);
@@ -171,7 +173,6 @@ export default class BattleUIManager {
         this.dialogContainer = uiScene.add.container(width/2, height/2, [blocker, bg, msgText]);
         this.dialogContainer.setDepth(6000);
 
-        // 옵션 버튼 생성
         const btnWidth = 180;
         const btnHeight = 50;
         const spacing = 20;
@@ -188,15 +189,10 @@ export default class BattleUIManager {
             }).setOrigin(0.5);
 
             btnBg.on('pointerdown', () => {
-                // UI 닫기
                 this.closeDialog();
-                // 액션 콜백 실행
-                if (onAction && opt.action) {
-                    onAction(opt.action);
-                }
+                if (onAction && opt.action) onAction(opt.action);
             });
             
-            // 호버 효과
             btnBg.on('pointerover', () => btnBg.setFillStyle(0x666666));
             btnBg.on('pointerout', () => btnBg.setFillStyle(0x444444));
 
@@ -204,14 +200,8 @@ export default class BattleUIManager {
             startX += btnWidth + spacing;
         });
         
-        // 등장 애니메이션
         this.dialogContainer.setScale(0);
-        uiScene.tweens.add({
-            targets: this.dialogContainer,
-            scale: 1,
-            duration: 200,
-            ease: 'Back.out'
-        });
+        uiScene.tweens.add({ targets: this.dialogContainer, scale: 1, duration: 200, ease: 'Back.out' });
     }
 
     closeDialog() {
@@ -224,8 +214,4 @@ export default class BattleUIManager {
     updateScore(blue, red) {}
     cleanupBeforeBattle() {} 
     handleResize(w, h) {} 
-
-    emitUIEvent(type, value) {
-        this.scene.events.emit('updateUI', { type, value });
-    }
 }
