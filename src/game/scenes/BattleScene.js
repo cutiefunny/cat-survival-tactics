@@ -37,6 +37,8 @@ import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
 import normalSheet from '../../assets/units/normal.png'; 
 import bossSheet from '../../assets/units/boss.png'; 
+// [Removed] import 문제 방지를 위해 제거하고 직접 경로 사용
+// import mouseSheet from '../../assets/units/mouse.png'; 
 
 // [Sounds]
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
@@ -89,11 +91,10 @@ export default class BattleScene extends BaseScene {
         this.armyConfig = data ? data.armyConfig : null; 
         this.bgmKey = (data && data.bgmKey) ? data.bgmKey : 'default';
 
-        // [New] 스크립트 조건 및 상태 변수 초기화
         this.levelScript = (data && data.script) ? data.script : null;
         this.levelScriptCondition = (data && data.script_condition) ? data.script_condition : null;
-        this.postBattleScriptPlayed = false; // 전투 후 스크립트 재생 완료 여부
-        this.pendingFinishArgs = null;       // finishGame 재호출을 위한 인자 저장
+        this.postBattleScriptPlayed = false; 
+        this.pendingFinishArgs = null;       
 
         this.deadSquadIndices = [];
 
@@ -127,7 +128,11 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('runner', runnerSheet, sheetConfig);
         this.load.spritesheet('healer', healerSheet, sheetConfig);
         this.load.spritesheet('normal', normalSheet, sheetConfig);
-        if (bossSheet) this.load.spritesheet('boss', bossSheet, sheetConfig); 
+        if (bossSheet) this.load.spritesheet('boss', bossSheet, sheetConfig);
+        
+        // [Fixed] public/images/mouse.png 경로를 직접 사용하여 스프라이트 시트 로드
+        // (100x100 프레임, 총 200x65 크기 이미지)
+        this.load.spritesheet('mouse', 'images/mouse.png', { frameWidth: 100, frameHeight: 65 });
 
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
         if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
@@ -173,9 +178,36 @@ export default class BattleScene extends BaseScene {
         this.npcTouchTimer = 0; 
         this.npcInteractionTriggered = false; 
 
+        // 쥐 그룹 초기화
+        this.miceGroup = this.physics.add.group({
+            collideWorldBounds: true,
+            bounceX: 1,
+            bounceY: 1
+        });
+
+        // [Check] 텍스처 로드 확인 및 애니메이션 생성
+        if (this.textures.exists('mouse')) {
+            const texture = this.textures.get('mouse');
+            const frameCount = texture.frameTotal;
+            // console.log(`🐁 Mouse texture loaded. Frames: ${frameCount}`);
+
+            // 텍스처가 로드되었고 프레임이 1개 이상일 때만 애니메이션 생성
+            if (frameCount > 1 && !this.anims.exists('mouse_run')) {
+                this.anims.create({
+                    key: 'mouse_run',
+                    frames: this.anims.generateFrameNumbers('mouse', { start: 0, end: 1 }),
+                    frameRate: 6,
+                    repeat: -1
+                });
+            } else if (frameCount <= 1) {
+                console.warn("⚠️ 'mouse' texture has only 1 frame. Animation might look static.");
+            }
+        } else {
+            console.error("❌ 'mouse' texture FAILED to load.");
+        }
+
         this.input.keyboard.on('keydown-D', (event) => { if (event.shiftKey) this.toggleDebugMode(); });
         
-        // [New] Resume 이벤트 리스너 (이벤트 씬 종료 후 처리)
         this.events.on('resume', this.handleResume, this);
 
         this.uiManager.create();
@@ -184,7 +216,6 @@ export default class BattleScene extends BaseScene {
     }
 
     handleResume(scene, data) {
-        // 1. 인트로 스크립트 종료 시
         if (this.isWaitingForIntro) {
             console.log("▶️ [BattleScene] Intro Script Finished. Resuming game...");
             this.isWaitingForIntro = false;
@@ -192,15 +223,11 @@ export default class BattleScene extends BaseScene {
             const storageKey = `map_script_played_${this.currentMapKey}`;
             localStorage.setItem(storageKey, 'true');
 
-            // [Modified] 중복 소환 방지를 위해 spawnUnits 호출 제거 (startGame에서 이미 수행됨)
-            
-            // 카메라 복구 등 후처리
             if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
                 this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
                 this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
             }
         }
-        // 2. 전투 후 승리 스크립트 종료 시
         else if (this.postBattleScriptPlayed && this.pendingFinishArgs) {
             console.log("▶️ [BattleScene] Win Script Finished. Showing Victory UI.");
             const args = this.pendingFinishArgs;
@@ -361,8 +388,12 @@ export default class BattleScene extends BaseScene {
             this.fitCameraToMap(); 
             this.initializeGameVariables(config);
 
-            // [Modified] 유닛 소환을 먼저 수행 (스크립트 실행 시 배경에 유닛이 보이도록)
             this.spawnUnits(config, map);
+            
+            // 쥐 소환
+            this.spawnMice();
+
+            // [Important] setupPhysicsColliders는 spawnMice 이후에 호출되어야 합니다.
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
 
             const scriptPlayedKey = `map_script_played_${mapKey}`;
@@ -381,8 +412,6 @@ export default class BattleScene extends BaseScene {
                     script: scriptData, 
                     parentScene: 'BattleScene' 
                 });
-                
-                // [Modified] return 문 제거: 유닛은 이미 소환되었고, 게임은 pause 상태로 대기합니다.
             }
         }
         
@@ -390,6 +419,97 @@ export default class BattleScene extends BaseScene {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
+    }
+    
+    // [Fixed] 랜덤 쥐 소환 (장애물 제외 위치 선정)
+    spawnMice() {
+        if (!this.miceGroup) return;
+        this.miceGroup.clear(true, true); 
+
+        const count = Phaser.Math.Between(1, 2); 
+        console.log(`🐁 Spawning ${count} mice...`);
+
+        // 텍스처 로드 확인
+        if (!this.textures.exists('mouse')) {
+            console.error("❌ Mouse texture missing! Skipping spawn.");
+            return;
+        }
+
+        const padding = 100;
+
+        for (let i = 0; i < count; i++) {
+            let x, y;
+            let attempts = 0;
+            let validPosition = false;
+
+            // 유효한 위치를 찾을 때까지 최대 50번 시도
+            while (!validPosition && attempts < 50) {
+                attempts++;
+                
+                // 1. 맵 범위 내 랜덤 좌표 생성
+                x = Phaser.Math.Between(padding, this.mapWidth - padding);
+                y = Phaser.Math.Between(padding, this.mapHeight - padding);
+                
+                validPosition = true; // 일단 유효하다고 가정
+
+                // 2. Wall 레이어(벽)와 겹치는지 확인
+                if (this.wallLayer) {
+                    const tile = this.wallLayer.getTileAtWorldXY(x, y);
+                    // 타일이 존재하고(인덱스가 -1이 아니면) 벽으로 간주
+                    if (tile && tile.index !== -1) validPosition = false;
+                }
+
+                // 3. Block 레이어(장애물 타일)와 겹치는지 확인
+                if (validPosition && this.blockLayer) {
+                    const tile = this.blockLayer.getTileAtWorldXY(x, y);
+                    if (tile && tile.index !== -1) validPosition = false;
+                }
+
+                // 4. Block 오브젝트(오브젝트 장애물)와 겹치는지 확인
+                if (validPosition && this.blockObjectGroup) {
+                    const blocks = this.blockObjectGroup.getChildren();
+                    for (const block of blocks) {
+                        // 블록의 영역(Bounds) 안에 좌표가 포함되는지 체크
+                        if (block.getBounds().contains(x, y)) {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 시도 횟수 초과 등으로 실패했어도 일단 마지막 좌표에 생성 (혹은 건너뛰기 가능)
+            const mouse = this.miceGroup.create(x, y, 'mouse');
+            mouse.setDisplaySize(30, 20);
+            
+            // 랜덤하게 좌우 반전
+            mouse.setFlipX(Phaser.Math.Between(0, 1) === 0); 
+            
+            // 애니메이션 재생
+            if (this.anims.exists('mouse_run')) {
+                mouse.play('mouse_run');
+            } else {
+                mouse.setFrame(0);
+            }
+            
+            mouse.setCollideWorldBounds(true);
+            mouse.setBounce(1);
+            
+            this.changeMouseDirection(mouse);
+        }
+    }
+
+    changeMouseDirection(mouse) {
+        if (!mouse.active) return;
+        
+        const speed = 40; 
+        const angle = Phaser.Math.Between(0, 360);
+        const velocity = this.physics.velocityFromAngle(angle, speed);
+        
+        mouse.setVelocity(velocity.x, velocity.y);
+        mouse.setFlipX(velocity.x > 0); 
+
+        mouse.nextMoveTime = this.time.now + Phaser.Math.Between(1000, 3000);
     }
 
     fitCameraToMap() {
@@ -570,7 +690,6 @@ export default class BattleScene extends BaseScene {
 
             let spawnX, spawnY;
             
-            // [Modified] NPC 대체 스폰 로직 (role과 일치하는 NPC 찾기)
             let matchedNpc = null;
             if (this.npcGroup) {
                 matchedNpc = this.npcGroup.getChildren().find(npc => 
@@ -582,7 +701,7 @@ export default class BattleScene extends BaseScene {
             if (matchedNpc) {
                 spawnX = matchedNpc.x;
                 spawnY = matchedNpc.y;
-                matchedNpc.destroy(); // NPC 제거 (유닛으로 변신)
+                matchedNpc.destroy(); 
                 console.log(`✨ [BattleScene] NPC Transformed to Unit: ${member.role} at (${spawnX}, ${spawnY})`);
             } else if (spawnZone) {
                 spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
@@ -599,7 +718,6 @@ export default class BattleScene extends BaseScene {
             this.blueTeam.add(unit);
         });
 
-        // 2. 적군 스폰 로직
         let redSpawnArea = null;
         let bossSpawnPoint = null; 
         
@@ -711,7 +829,6 @@ export default class BattleScene extends BaseScene {
         this.initialRedCount = this.redTeam.getLength();
     }
 
-    // [New] 이벤트로 영입된 유닛을 전장에 즉시 소환하는 함수
     spawnRecruitedUnit(memberConfig) {
         if (!memberConfig) return;
 
@@ -720,7 +837,6 @@ export default class BattleScene extends BaseScene {
         let spawnX = this.playerUnit ? this.playerUnit.x : 300;
         let spawnY = this.playerUnit ? this.playerUnit.y : 300;
 
-        // 1. 해당 역할의 NPC가 맵에 있는지 확인 (있으면 그 자리에서 변신)
         let matchedNpc = null;
         if (this.npcGroup) {
             matchedNpc = this.npcGroup.getChildren().find(npc => 
@@ -732,32 +848,18 @@ export default class BattleScene extends BaseScene {
         if (matchedNpc) {
             spawnX = matchedNpc.x;
             spawnY = matchedNpc.y;
-            matchedNpc.destroy(); // NPC 제거
+            matchedNpc.destroy(); 
             console.log(`✨ NPC Transformed to Unit at (${spawnX}, ${spawnY})`);
         } else {
-            // NPC가 없다면 리더 근처에 소환
             spawnX += Phaser.Math.Between(-60, 60);
             spawnY += Phaser.Math.Between(-60, 60);
         }
 
-        // 2. 유닛 생성 및 아군 그룹에 추가
         const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, memberConfig, false);
-        
-        // 스쿼드 인덱스 설정 (현재 팀원 수 기준)
         unit.squadIndex = this.blueTeam.getLength();
         
         this.blueTeam.add(unit);
 
-        // 3. 등장 연출 (크기 0에서 커지면서 등장)
-        // unit.setScale(0);
-        // this.tweens.add({
-        //     targets: unit,
-        //     scale: { from: 0, to: 1 },
-        //     duration: 600,
-        //     ease: 'Back.out'
-        // });
-        
-        // 4. 포메이션 오프셋 계산 (전투 중 대형 유지를 위해)
         if (this.playerUnit && this.playerUnit.active) {
             unit.calculateFormationOffset(this.playerUnit);
         }
@@ -799,9 +901,21 @@ export default class BattleScene extends BaseScene {
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
-        if (wallLayer) { this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision); this.physics.add.collider(this.redTeam, wallLayer, onWallCollision); }
-        if (blockLayer) { this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision); this.physics.add.collider(this.redTeam, blockLayer, onWallCollision); }
-        if (this.blockObjectGroup) { this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision); this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision); }
+        if (wallLayer) { 
+            this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision); 
+            this.physics.add.collider(this.redTeam, wallLayer, onWallCollision); 
+            this.physics.add.collider(this.miceGroup, wallLayer);
+        }
+        if (blockLayer) { 
+            this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision); 
+            this.physics.add.collider(this.redTeam, blockLayer, onWallCollision); 
+            this.physics.add.collider(this.miceGroup, blockLayer);
+        }
+        if (this.blockObjectGroup) { 
+            this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision); 
+            this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision); 
+            this.physics.add.collider(this.miceGroup, this.blockObjectGroup);
+        }
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
@@ -809,6 +923,35 @@ export default class BattleScene extends BaseScene {
         if (this.npcGroup) {
             this.physics.add.collider(this.redTeam, this.npcGroup, this.handleNpcCollision, null, this);
             this.physics.add.collider(this.blueTeam, this.npcGroup, this.handleNpcCollision, null, this);
+        }
+
+        this.physics.add.overlap(this.blueTeam, this.miceGroup, this.handleMouseConsumption, null, this);
+    }
+
+    handleMouseConsumption(unit, mouse) {
+        if (!unit.active || !mouse.active) return;
+
+        console.log(`🍖 ${unit.role} ate a mouse!`);
+        
+        mouse.destroy();
+
+        const healAmount = 100;
+        
+        if (unit.maxHp) {
+            unit.hp = Math.min(unit.maxHp, unit.hp + healAmount);
+            unit.redrawHpBar();
+            
+            if (unit.showEmote) {
+                unit.showEmote(`HP +${healAmount}`, '#00ff00');
+            }
+            
+            if (unit.squadIndex !== undefined) {
+                const squad = this.registry.get('playerSquad');
+                if (squad && squad[unit.squadIndex]) {
+                    squad[unit.squadIndex].hp = unit.hp;
+                    this.registry.set('playerSquad', squad);
+                }
+            }
         }
     }
 
@@ -898,7 +1041,6 @@ export default class BattleScene extends BaseScene {
         this.battleStarted = true;
         this.battleStartTime = Date.now();
         
-        // UI 매니저를 통해 전투 시작 애니메이션("BATTLE START" 등) 표시
         this.uiManager.showStartAnimation();
     }
     update(time, delta) {
@@ -917,6 +1059,9 @@ export default class BattleScene extends BaseScene {
             }
         }
         if (!this.blueTeam || !this.redTeam || this.isGameOver || this.isSetupPhase) return;
+        
+        this.updateMiceBehavior(time);
+
         if (!this.battleStarted && this.playerUnit?.active) {
             this.checkBattleTimer -= delta;
             if (this.checkBattleTimer <= 0) {
@@ -934,6 +1079,21 @@ export default class BattleScene extends BaseScene {
             else { this.uiManager.updateScore(blueCount, redCount); }
         }
         this.updateNpcInteraction(delta);
+    }
+
+    updateMiceBehavior(time) {
+        if (!this.miceGroup) return;
+
+        this.miceGroup.children.iterate((mouse) => {
+            if (mouse && mouse.active) {
+                if (time > mouse.nextMoveTime) {
+                    this.changeMouseDirection(mouse);
+                }
+                if (mouse.body.velocity.x === 0 && mouse.body.velocity.y === 0) {
+                     this.changeMouseDirection(mouse);
+                }
+            }
+        });
     }
 
     updateNpcInteraction(delta) {
@@ -1064,24 +1224,17 @@ export default class BattleScene extends BaseScene {
         console.log(`💪 Fatigue restored by ${amount} for active units.`);
     }
 
-    // [New] '에너지 회복' 커맨드지만 실제로는 '체력(HP)'을 회복하도록 변경
     restoreEnergy(amount) {
         console.log(`%c[restoreEnergy/HP] Called with amount: ${amount}`, 'color: cyan; font-weight: bold;');
         const numericAmount = Number(amount);
 
-        // 1. Registry (저장 데이터) 업데이트 - HP 회복
         const squad = this.registry.get('playerSquad') || [];
         squad.forEach((member, i) => {
-            // [Fix] 화면에 있는 해당 유닛을 찾아서 정확한 Max 값을 가져옴
             let maxHp = member.maxHp;
-            
-            // 화면에 있는 유닛(active unit)이 있다면 거기서 maxHp 정보를 가져오는 것이 가장 정확함
             const activeUnit = this.blueTeam.getChildren().find(u => u.squadIndex === i);
             if (activeUnit && activeUnit.maxHp) {
                 maxHp = activeUnit.maxHp;
             } 
-            
-            // 유닛이 없거나 정보가 없다면 Base Stats 혹은 HP를 fallback으로 사용
             if (maxHp === undefined) {
                  const baseStats = ROLE_BASE_STATS[member.role] || {};
                  maxHp = member.hp || baseStats.hp || 100; 
@@ -1089,28 +1242,20 @@ export default class BattleScene extends BaseScene {
 
             const curHp = (member.hp !== undefined) ? member.hp : maxHp;
             const nextHp = Math.min(maxHp, curHp + numericAmount);
-            console.log(`[Registry] Unit ${i} (${member.role}) HP: ${curHp} -> ${nextHp} (Max: ${maxHp})`);
             member.hp = nextHp;
         });
         this.registry.set('playerSquad', squad);
 
-        // 2. In-Game Unit Update - 화면상의 유닛 HP 회복
         this.blueTeam.getChildren().forEach((unit, i) => {
             if (unit.active && !unit.isDying) {
-                // Safe access to maxHp
                 if (unit.maxHp === undefined) {
                     console.warn(`[Unit ${i}] maxHp is undefined! Defaulting to 100.`);
                     unit.maxHp = 100;
                 }
-                
                 const prevHp = unit.hp;
                 unit.hp = Math.min(unit.maxHp, unit.hp + numericAmount);
-                
-                // HP Bar 갱신
                 unit.redrawHpBar();
                 
-                console.log(`[Ingame] Unit ${i} (${unit.role}) HP: ${prevHp} -> ${unit.hp} (Max: ${unit.maxHp})`);
-
                 if (unit.showEmote) {
                     if(numericAmount > 999) unit.showEmote(`완전 회복!`, '#030e9eff'); 
                     else unit.showEmote(`체력 +${numericAmount}`, '#030e9eff'); 
@@ -1142,15 +1287,14 @@ export default class BattleScene extends BaseScene {
     finishGame(message, color, isWin, fatiguePenalty = 1) {
         if (this.isGameOver) return; 
 
-        // [New] 승리 시 'win' 조건 스크립트가 있다면 먼저 실행
         if (isWin && this.levelScript && this.levelScriptCondition === 'win' && !this.postBattleScriptPlayed) {
             console.log("📜 [BattleScene] Victory! Playing Win Script first.");
             
             this.postBattleScriptPlayed = true;
-            this.pendingFinishArgs = [message, color, isWin, fatiguePenalty]; // 인자 저장
+            this.pendingFinishArgs = [message, color, isWin, fatiguePenalty]; 
             
             this.physics.pause();
-            this.inputManager.destroy(); // 조작 차단
+            this.inputManager.destroy(); 
             
             this.scene.pause();
             this.scene.launch('EventScene', { 
@@ -1158,7 +1302,7 @@ export default class BattleScene extends BaseScene {
                 mode: 'overlay', 
                 parentScene: 'BattleScene' 
             });
-            return; // 종료 처리 보류
+            return; 
         }
 
         this.isGameOver = true;
@@ -1368,9 +1512,7 @@ export default class BattleScene extends BaseScene {
     }
     restartLevel() { this.scene.restart({ levelIndex: this.currentLevelIndex, currentCoins: this.levelInitialCoins }); }
     
-    // [Modified] 새 게임 시작 시 스크립트 실행 기록 초기화
     restartGamerFromBeginning() {
-        // 1. 스크립트/튜토리얼 재생 기록 삭제
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -1382,13 +1524,11 @@ export default class BattleScene extends BaseScene {
         
         console.log("🔄 [BattleScene] Game Reset: Script history cleared.");
 
-        // 2. 레지스트리 초기화 (새 게임 상태)
         this.registry.set('playerSquad', [{ role: 'Leader' }]);
         this.registry.set('unlockedRoles', ['Normal']);
         this.registry.set('fallenUnits', []);
         this.registry.set('prisonerList', []);
 
-        // 3. 레벨 0부터 다시 시작
         this.scene.restart({ levelIndex: 0 }); 
     }
 }
