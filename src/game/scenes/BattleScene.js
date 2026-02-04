@@ -1,20 +1,8 @@
 import Phaser from 'phaser';
 import BaseScene from './BaseScene'; 
 
-// [Objects & Roles]
-import Unit from '../objects/Unit'; 
-import Shooter from '../objects/roles/Shooter';
-import Runner from '../objects/roles/Runner';
-import Tanker from '../objects/roles/Tanker';
-import Dealer from '../objects/roles/Dealer';
-import Normal from '../objects/roles/Normal';
-import Leader from '../objects/roles/Leader';
-import Healer from '../objects/roles/Healer';
-import Raccoon from '../objects/roles/Raccoon';
-import Wawa from '../objects/roles/Wawa';
-
 // [Data & Config]
-import { ROLE_BASE_STATS, DEFAULT_AI_SETTINGS, getRandomUnitName } from '../data/UnitData'; 
+import { DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS } from '../managers/LevelManager'; 
@@ -25,47 +13,12 @@ import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../managers/CombatManager';       
 import PathfindingManager from '../managers/PathfindingManager'; 
-import BattleObjectManager from '../managers/BattleObjectManager';      // [New] 쥐/오브젝트
-import BattleInteractionManager from '../managers/BattleInteractionManager'; // [New] NPC/상호작용
-
-// [Unit Sprites]
-import leaderSheet from '../../assets/units/leader.png';
-import dogSheet from '../../assets/units/dog.png';
-import raccoonSheet from '../../assets/units/raccoon.png';
-import wawaSheet from '../../assets/units/wawa.png';
-import shooterSheet from '../../assets/units/shooter.png';
-import tankerSheet from '../../assets/units/tanker.png';
-import runnerSheet from '../../assets/units/runner.png';
-import healerSheet from '../../assets/units/healer.png';
-import normalSheet from '../../assets/units/normal.png'; 
-import bossSheet from '../../assets/units/boss.png'; 
-
-// [Sounds]
-import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
-import level1 from '../../assets/sounds/level1.mp3';
-import level2 from '../../assets/sounds/level2.mp3';
-import level3 from '../../assets/sounds/level3.mp3';
-import level6 from '../../assets/sounds/level6.mp3';
-import hit1 from '../../assets/sounds/Hit1.wav';
-import hit2 from '../../assets/sounds/Hit2.wav';
-import hit3 from '../../assets/sounds/Hit3.wav';
-import ouch1 from '../../assets/sounds/Ouch1.mp3';
-import ouch2 from '../../assets/sounds/Ouch2.mp3';
-
-const UnitClasses = {
-    'Shooter': Shooter, 'Runner': Runner, 'Tanker': Tanker,
-    'Dealer': Dealer, 'Normal': Normal, 'Leader': Leader, 
-    'Healer': Healer, 'Raccoon': Raccoon, 'Wawa': Wawa,'NormalDog': Unit 
-};
-
-const BGM_SOURCES = {
-    'stage1_bgm': stage1BgmFile,
-    'level1': level1,
-    'level3': level3,
-    'level2': level2,
-    'level6': level6,
-    'default': stage1BgmFile
-};
+import BattleObjectManager from '../managers/BattleObjectManager';
+import BattleInteractionManager from '../managers/BattleInteractionManager';
+import BattleAudioManager from '../managers/BattleAudioManager';
+import BattleAssetLoader from '../managers/BattleAssetLoader';
+import BattleUnitSpawner from '../managers/BattleUnitSpawner';
+import BattleLifecycleManager from '../managers/BattleLifecycleManager';
 
 const DEFAULT_CONFIG = {
     showDebugStats: false, 
@@ -120,50 +73,33 @@ export default class BattleScene extends BaseScene {
         this.mapManager = new MapAssetManager(this);
         this.mapManager.preload();
 
-        const sheetConfig = { frameWidth: 100, frameHeight: 100 };
-        this.load.spritesheet('leader', leaderSheet, sheetConfig);
-        this.load.spritesheet('dog', dogSheet, sheetConfig); 
-        this.load.spritesheet('raccoon', raccoonSheet, sheetConfig);
-        this.load.spritesheet('wawa', wawaSheet, sheetConfig);
-        this.load.spritesheet('shooter', shooterSheet, sheetConfig);
-        this.load.spritesheet('tanker', tankerSheet, sheetConfig);
-        this.load.spritesheet('runner', runnerSheet, sheetConfig);
-        this.load.spritesheet('healer', healerSheet, sheetConfig);
-        this.load.spritesheet('normal', normalSheet, sheetConfig);
-        if (bossSheet) this.load.spritesheet('boss', bossSheet, sheetConfig);
-        
-        // 쥐 스프라이트 로드
-        this.load.spritesheet('mouse', 'images/mouse.png', { frameWidth: 100, frameHeight: 65 });
+        this.assetLoader = new BattleAssetLoader(this);
+        this.assetLoader.preloadAll();
 
-        const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
-        if (bgmFile) this.load.audio(this.bgmKey, bgmFile);
-        else this.load.audio('default', BGM_SOURCES['default']);
-
-        this.load.audio('hit1', hit1);
-        this.load.audio('hit2', hit2);
-        this.load.audio('hit3', hit3);
-        this.load.audio('ouch1', ouch1);
-        this.load.audio('ouch2', ouch2);
+        this.audioManager = new BattleAudioManager(this);
+        this.audioManager.preload(this.bgmKey);
     }
 
     create() {
         super.create();
         
-        if (!this.initData || !this.initData.debugConfig) {
-            let playKey = this.bgmKey;
-            if (!this.cache.audio.exists(playKey)) playKey = 'default';
-            this.playBgm(playKey, 0.5);
-        } else {
-            console.log("🔇 [BattleScene] Mock Battle - BGM Skipped");
-        }
-
         // Managers 초기화
+        this.lifecycleManager = new BattleLifecycleManager(this);
+        this.unitSpawner = new BattleUnitSpawner(this);
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
         this.pathfindingManager = new PathfindingManager(this); 
-        this.objectManager = new BattleObjectManager(this);         // [New]
-        this.interactionManager = new BattleInteractionManager(this); // [New]
+        this.objectManager = new BattleObjectManager(this);
+        this.interactionManager = new BattleInteractionManager(this);
+        
+        // BGM 재생
+        if (!this.initData || !this.initData.debugConfig) {
+            let playKey = this.bgmKey;
+            this.audioManager.playBgm(playKey, 0.5);
+        } else {
+            console.log("🔇 [BattleScene] Mock Battle - BGM Skipped");
+        }
         
         this.placementZone = null;
         this.catsArea = null; 
@@ -223,18 +159,14 @@ export default class BattleScene extends BaseScene {
     }
 
     playHitSound() {
-        const hits = ['hit1', 'hit2', 'hit3'];
-        const key = Phaser.Math.RND.pick(hits);
-        if (this.sound && this.cache.audio.exists(key)) {
-            this.sound.play(key, { volume: 0.4, detune: Phaser.Math.Between(-100, 100) });
+        if (this.audioManager) {
+            this.audioManager.playHitSound();
         }
     }
 
     playDieSound() {
-        const dieSounds = ['ouch1', 'ouch2'];
-        const key = Phaser.Math.RND.pick(dieSounds);
-        if (this.sound && this.cache.audio.exists(key)) {
-            this.sound.play(key, { volume: 0.6, detune: Phaser.Math.Between(-100, 100) });
+        if (this.audioManager) {
+            this.audioManager.playDieSound();
         }
     }
 
@@ -474,281 +406,21 @@ export default class BattleScene extends BaseScene {
     }
     
     createStandardAnimations() {
-        const unitTextures = ['leader', 'dog', 'raccoon', 'tanker', 'shooter', 'runner', 'healer', 'normal', 'wawa']; 
-        unitTextures.forEach(key => {
-            if (this.textures.exists(key) && !this.anims.exists(`${key}_walk`)) {
-                const frameRate = (key === 'healer') ? 3 : 6;
-                this.anims.create({
-                    key: `${key}_walk`,
-                    frames: this.anims.generateFrameNumbers(key, { frames: [1, 2] }),
-                    frameRate: frameRate,
-                    repeat: -1
-                });
-            }
-        });
+        if (this.assetLoader) {
+            this.assetLoader.createUnitAnimations();
+        }
     }
 
     createUnitInstance(x, y, team, target, stats, isLeader) {
-        if (this.gameConfig && this.gameConfig.aiSettings) {
-            stats.aiConfig = this.gameConfig.aiSettings;
-        } else {
-            stats.aiConfig = DEFAULT_AI_SETTINGS;
-        }
-
-        const UnitClass = UnitClasses[stats.role] || UnitClasses['Normal'];
-        let baseStats = ROLE_BASE_STATS[stats.role] || {};
-        if (this.gameConfig && this.gameConfig.roleDefinitions && this.gameConfig.roleDefinitions[stats.role]) {
-             baseStats = { ...baseStats, ...this.gameConfig.roleDefinitions[stats.role] };
-        }
-
-        const safeStats = { ...stats };
-        if (baseStats.attackRange) { safeStats.attackRange = baseStats.attackRange; }
-        
-        const finalStats = { ...baseStats, ...safeStats };
-
-        const growthHp = this.gameConfig?.gameSettings?.growthHp ?? 10;
-        const growthAtk = this.gameConfig?.gameSettings?.growthAtk ?? 1;
-
-        const level = safeStats.level || 1;
-        if (level > 1) {
-            finalStats.attackPower += (level - 1) * growthAtk;
-            finalStats.hp += (level - 1) * growthHp;
-            finalStats.maxHp = finalStats.hp; 
-        }
-
-        let applyFatigueTint = false;
-
-        if (team === 'blue') {
-            const fatigue = safeStats.fatigue || 0;
-            const penaltyRate = this.gameConfig?.gameSettings?.fatiguePenaltyRate ?? 0.05;
-            const penaltyRatio = fatigue * penaltyRate; 
-            const multiplier = Math.max(0, 1 - penaltyRatio);
-
-            if (fatigue > 0) {
-                finalStats.hp = Math.floor(finalStats.hp * multiplier);
-                finalStats.attackPower = Math.floor(finalStats.attackPower * multiplier);
-                if (finalStats.defense) finalStats.defense = Math.floor(finalStats.defense * multiplier);
-                finalStats.moveSpeed = Math.floor(finalStats.moveSpeed * multiplier);
-                applyFatigueTint = true; 
-            }
-        }
-
-        const unit = new UnitClass(this, x, y, null, team, target, finalStats, isLeader);
-        unit.setInteractive();
-        
-        if (stats.name) {
-            unit.unitName = stats.name;
-        }
-
-        if (team === 'blue') {
-            this.input.setDraggable(unit);
-            if (applyFatigueTint) {
-                unit.setTint(0x999999); 
-            }
-        }
-        return unit;
+        return this.unitSpawner.createUnitInstance(x, y, team, target, stats, isLeader);
     }
 
     spawnUnits(config, map) {
-        const { startY, spawnGap } = config.gameSettings;
-
-        let spawnZone = null;
-        if (map) {
-            const catsLayer = map.getObjectLayer('Cats');
-            if (catsLayer && catsLayer.objects.length > 0) {
-                const obj = catsLayer.objects[0];
-                spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
-                this.placementZone = spawnZone; 
-                this.zoneGraphics = this.add.graphics();
-                this.zoneGraphics.fillStyle(0x00ff00, 0.2); 
-                this.zoneGraphics.fillRectShape(spawnZone);
-                this.zoneGraphics.setDepth(0); 
-            }
-        }
-        
-        this.catsArea = spawnZone;
-
-        const playerSquad = this.registry.get('playerSquad') || [{ role: 'Leader' }];
-        
-        playerSquad.forEach((member, i) => {
-            const roleConfig = { ...member }; 
-            if (!roleConfig.name) roleConfig.name = getRandomUnitName(roleConfig.role);
-
-            let spawnX, spawnY;
-            
-            let matchedNpc = null;
-            if (this.npcGroup) {
-                matchedNpc = this.npcGroup.getChildren().find(npc => 
-                    npc.active && 
-                    (npc.texture.key === member.role || npc.texture.key.toLowerCase() === member.role.toLowerCase())
-                );
-            }
-
-            if (matchedNpc) {
-                spawnX = matchedNpc.x;
-                spawnY = matchedNpc.y;
-                matchedNpc.destroy(); 
-                console.log(`✨ [BattleScene] NPC Transformed to Unit: ${member.role} at (${spawnX}, ${spawnY})`);
-            } else if (spawnZone) {
-                spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
-                spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
-            } else {
-                spawnX = 300;
-                spawnY = startY + (i * spawnGap);
-            }
-
-            const isLeader = (member.role === 'Leader');
-            const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, roleConfig, isLeader);
-            unit.squadIndex = i;
-            if (isLeader) this.playerUnit = unit;
-            this.blueTeam.add(unit);
-        });
-
-        let redSpawnArea = null;
-        let bossSpawnPoint = null; 
-        
-        if (map) {
-            const dogLayer = map.getObjectLayer('Dogs');
-            if (dogLayer && dogLayer.objects.length > 0) {
-                const areaObj = dogLayer.objects.find(obj => obj.width > 0 && obj.height > 0);
-                if (areaObj) {
-                    redSpawnArea = new Phaser.Geom.Rectangle(areaObj.x, areaObj.y, areaObj.width, areaObj.height);
-                }
-                const pointObj = dogLayer.objects.find(obj => !obj.width && !obj.height);
-                if (pointObj) {
-                    bossSpawnPoint = { x: pointObj.x, y: pointObj.y };
-                }
-            }
-        }
-        this.dogsArea = redSpawnArea;
-
-        let enemyRoster = [];
-        if (this.armyConfig) {
-            const configs = Array.isArray(this.armyConfig) ? this.armyConfig : [this.armyConfig];
-            configs.forEach(cfg => {
-                const count = cfg.count || 1;
-                const type = cfg.type || 'NormalDog';
-                const role = type.charAt(0).toUpperCase() + type.slice(1);
-                for(let i=0; i<count; i++) {
-                    enemyRoster.push(role);
-                }
-            });
-        } else {
-            const redCount = config.gameSettings.redCount ?? 6;
-            const defaultRedRoles = config.redTeamRoles || [config.redTeamStats];
-            for(let i=0; i<redCount; i++) {
-                const stats = defaultRedRoles[i % defaultRedRoles.length];
-                enemyRoster.push(stats.role || 'NormalDog');
-            }
-        }
-
-        let bossUnitRole = null;
-        let bossIndex = -1;
-
-        if (this.armyConfig) {
-            const priority = ['Boss', 'Tanker', 'Leader', 'Raccoon', 'Shooter', 'Healer', 'Runner'];
-            for (const pRole of priority) {
-                bossIndex = enemyRoster.findIndex(r => r === pRole);
-                if (bossIndex !== -1) {
-                    bossUnitRole = enemyRoster[bossIndex];
-                    break;
-                }
-            }
-            if (bossIndex === -1) {
-                for (const pRole of priority) {
-                    bossIndex = enemyRoster.findIndex(r => r.includes(pRole));
-                    if (bossIndex !== -1) {
-                        bossUnitRole = enemyRoster[bossIndex];
-                        break;
-                    }
-                }
-            }
-            if (bossIndex === -1 && enemyRoster.length > 0) {
-                bossIndex = 0;
-                bossUnitRole = enemyRoster[0];
-            }
-        }
-
-        if (bossIndex !== -1) {
-            let bossX, bossY;
-            if (bossSpawnPoint) {
-                bossX = bossSpawnPoint.x;
-                bossY = bossSpawnPoint.y;
-            } else if (redSpawnArea) {
-                bossX = redSpawnArea.centerX;
-                bossY = redSpawnArea.centerY;
-            } else {
-                bossX = 1300;
-                bossY = startY;
-            }
-
-            const bossStats = { 
-                role: bossUnitRole, 
-                name: `Boss ${bossUnitRole}`,
-                level: 10
-            };
-            
-            const bossUnit = this.createUnitInstance(bossX, bossY, 'red', this.blueTeam, bossStats, false);
-            if ((bossUnitRole === 'Boss' || bossUnitRole === 'Tanker') && bossUnit.team === 'red') {
-                bossUnit.baseSize *= 2;
-                bossUnit.resetVisuals();
-            }
-            this.redTeam.add(bossUnit);
-            const removed = enemyRoster.splice(bossIndex, 1);
-        }
-
-        enemyRoster.forEach((role, i) => {
-            const stats = { role: role, name: `${role} ${i+1}` };
-            let spawnX, spawnY;
-            if (redSpawnArea) {
-                spawnX = Phaser.Math.Between(redSpawnArea.x, redSpawnArea.right);
-                spawnY = Phaser.Math.Between(redSpawnArea.y, redSpawnArea.bottom);
-            } else {
-                spawnX = 1300 + Phaser.Math.Between(-50, 50);
-                spawnY = startY + (i * spawnGap);
-            }
-
-            const unit = this.createUnitInstance(spawnX, spawnY, 'red', this.blueTeam, stats, false);
-            this.redTeam.add(unit);
-        });
-
-        this.initialRedCount = this.redTeam.getLength();
+        this.unitSpawner.spawnAllUnits(config, map);
     }
 
     spawnRecruitedUnit(memberConfig) {
-        if (!memberConfig) return;
-
-        console.log(`🆕 [BattleScene] Spawning recruited unit: ${memberConfig.role}`);
-
-        let spawnX = this.playerUnit ? this.playerUnit.x : 300;
-        let spawnY = this.playerUnit ? this.playerUnit.y : 300;
-
-        let matchedNpc = null;
-        if (this.npcGroup) {
-            matchedNpc = this.npcGroup.getChildren().find(npc => 
-                npc.active && 
-                (npc.texture.key === memberConfig.role || npc.texture.key.toLowerCase() === memberConfig.role.toLowerCase())
-            );
-        }
-
-        if (matchedNpc) {
-            spawnX = matchedNpc.x;
-            spawnY = matchedNpc.y;
-            matchedNpc.destroy(); 
-            console.log(`✨ NPC Transformed to Unit at (${spawnX}, ${spawnY})`);
-        } else {
-            spawnX += Phaser.Math.Between(-60, 60);
-            spawnY += Phaser.Math.Between(-60, 60);
-        }
-
-        const unit = this.createUnitInstance(spawnX, spawnY, 'blue', this.redTeam, memberConfig, false);
-        unit.squadIndex = this.blueTeam.getLength();
-        
-        this.blueTeam.add(unit);
-
-        if (this.playerUnit && this.playerUnit.active) {
-            unit.calculateFormationOffset(this.playerUnit);
-        }
+        this.unitSpawner.spawnRecruitedUnit(memberConfig);
     }
     
     getCameraTarget(speaker) {
@@ -917,12 +589,9 @@ export default class BattleScene extends BaseScene {
         }
     }
     startBattle() {
-        if (this.battleStarted) return;
-        
-        this.battleStarted = true;
-        this.battleStartTime = Date.now();
-        
-        this.uiManager.showStartAnimation();
+        if (this.lifecycleManager) {
+            this.lifecycleManager.startBattle();
+        }
     }
     
     update(time, delta) {
@@ -1027,203 +696,30 @@ export default class BattleScene extends BaseScene {
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
     
-    // [Fix] finishGame이 누락되지 않도록 주의
     finishGame(message, color, isWin, fatiguePenalty = 1) {
-        if (this.isGameOver) return; 
-
-        if (isWin && this.levelScript && this.levelScriptCondition === 'win' && !this.postBattleScriptPlayed) {
-            console.log("📜 [BattleScene] Victory! Playing Win Script first.");
-            
-            this.postBattleScriptPlayed = true;
-            this.pendingFinishArgs = [message, color, isWin, fatiguePenalty]; 
-            
-            this.physics.pause();
-            this.inputManager.destroy(); 
-            
-            this.scene.pause();
-            this.scene.launch('EventScene', { 
-                script: this.levelScript, 
-                mode: 'overlay', 
-                parentScene: 'BattleScene' 
-            });
-            return; 
+        if (this.lifecycleManager) {
+            this.lifecycleManager.finishGame(message, color, isWin, fatiguePenalty);
         }
-
-        this.isGameOver = true;
-        this.physics.pause();
-        this.inputManager.destroy(); 
-        if (this.bgm) this.bgm.stop();
-        
-        const battleResult = this.processBattleOutcome(isWin, fatiguePenalty);
-        const { resultStats, totalScore, totalRewardCoins, capturedUnits } = battleResult;
-        
-        if (capturedUnits.length > 0) {
-            const names = capturedUnits.map(u => u.name).join(", ");
-            message += `\n⛓️ 포로 발생: ${names}`;
-        }
-        
-        let btnText = "Tap to Restart";
-        let callback = () => this.restartLevel();
-        
-        if (this.isStrategyMode) {
-            btnText = "맵으로";
-            callback = () => {
-                const finalCoins = this.playerCoins + (isWin ? Math.floor(totalScore / 1000) : 0); 
-                this.scene.stop('UIScene'); 
-                this.scene.start('StrategyScene', {
-                    battleResult: { 
-                        isWin: isWin, 
-                        targetNodeId: this.targetNodeId, 
-                        remainingCoins: finalCoins, 
-                        score: totalScore 
-                    }
-                });
-            };
-        } else {
-            if (isWin) {
-                if (this.currentLevelIndex !== -1 && this.currentLevelIndex < LEVEL_KEYS.length - 1) {
-                    btnText = "Next Level ▶️"; 
-                    callback = () => this.nextLevel(totalScore); 
-                } else {
-                    btnText = "All Clear! 🏆"; 
-                    message = "Champion!"; 
-                    callback = () => this.restartGamerFromBeginning();
-                }
-            }
-        }
-        
-        const uiData = {
-            isWin: isWin, 
-            title: message, 
-            color: color, 
-            btnText: btnText,
-            stats: resultStats
-        };
-        this.uiManager.createGameOverUI(uiData, callback);
     }
 
     processBattleOutcome(isWin, fatiguePenalty) {
-        const killedEnemies = Math.max(0, this.initialRedCount - this.redTeam.countActive());
-        const xpGained = killedEnemies * 10;
-        const currentSquad = this.registry.get('playerSquad') || [];
-        const fallenUnits = this.registry.get('fallenUnits') || [];
-        const prisonerList = this.registry.get('prisonerList') || [];
-        const nextSquad = [];
-        const leveledUpUnits = [];
-        const deadUnits = [];
-        const capturedUnits = []; 
-        let prisonersToTake = 0;
-        if (!isWin && fatiguePenalty >= 2) {
-            const rand = Math.random() * 100;
-            if (rand < 2) prisonersToTake = 3;       
-            else if (rand < 7) prisonersToTake = 2;  
-            else if (rand < 17) prisonersToTake = 1; 
-        }
-        const captureCandidates = currentSquad.map((u, i) => i).filter(i => {
-            const member = currentSquad[i];
-            return member.role !== 'Leader' && !this.deadSquadIndices.includes(i);
-        });
-        Phaser.Utils.Array.Shuffle(captureCandidates);
-        const selectedPrisonerIndices = captureCandidates.slice(0, prisonersToTake);
-        currentSquad.forEach((member, i) => {
-            if (member.role === 'Leader') member.name = '김냐냐';
-            if (this.deadSquadIndices.includes(i)) {
-                if (member.role === 'Leader') {
-                    member.fatigue = (member.fatigue || 0) + 5;
-                    nextSquad.push(member);
-                } else {
-                    fallenUnits.push({
-                        ...member,
-                        deathDate: new Date().toISOString(),
-                        cause: 'Killed by Wild Dog',
-                        deathLevel: this.currentLevelIndex + 1
-                    });
-                    deadUnits.push({ name: member.name, role: member.role });
-                }
-            } else if (selectedPrisonerIndices.includes(i)) {
-                prisonerList.push({
-                    ...member,
-                    capturedDate: new Date().toISOString(),
-                    capturedLevel: this.currentLevelIndex + 1
-                });
-                capturedUnits.push({ name: member.name, role: member.role });
-            } else {
-                member.xp = (member.xp || 0) + xpGained;
-                let oldLevel = member.level || 1;
-                let reqXp = oldLevel * 100;
-                let leveledUp = false;
-                while (member.xp >= reqXp) {
-                    member.xp -= reqXp;
-                    member.level = (member.level || 1) + 1;
-                    reqXp = member.level * 100;
-                    leveledUp = true;
-                }
-                if (leveledUp) {
-                    leveledUpUnits.push({ 
-                        name: member.name, 
-                        role: member.role, 
-                        oldLevel: oldLevel, 
-                        newLevel: member.level 
-                    });
-                }
-                member.fatigue = (member.fatigue || 0) + fatiguePenalty;
-                nextSquad.push(member);
-            }
-        });
-        this.registry.set('playerSquad', nextSquad);
-        this.registry.set('fallenUnits', fallenUnits);
-        this.registry.set('prisonerList', prisonerList);
-        const endTime = Date.now();
-        const durationSec = Math.floor((endTime - this.battleStartTime) / 1000);
-        const survivors = this.blueTeam.countActive();
-        const survivorScore = survivors * 500;
-        const timeScore = Math.max(0, (300 - durationSec) * 10);
-        const totalScore = isWin ? (survivorScore + timeScore) : 0;
-        const battleEarnings = Math.max(0, this.playerCoins - this.levelInitialCoins);
-        const scoreBonus = isWin ? Math.floor(totalScore / 1000) : 0;
-        const totalRewardCoins = battleEarnings + scoreBonus;
-        return {
-            resultStats: {
-                rewardCoins: totalRewardCoins,
-                leveledUpUnits,
-                deadUnits,
-                capturedUnits
-            },
-            totalScore,
-            totalRewardCoins,
-            capturedUnits
-        };
+        return this.lifecycleManager.processBattleOutcome(isWin, fatiguePenalty);
     }
 
     nextLevel(score) {
-        const nextIndex = this.currentLevelIndex + 1;
-        const bonusCoins = Math.floor(score / 1000);
-        const nextCoins = this.playerCoins + bonusCoins; 
-        const centerX = this.scale.width / 2;
-        const centerY = this.scale.height / 2;
-        this.uiManager.playCoinAnimation(centerX, centerY, bonusCoins, () => {
-            this.scene.restart({ levelIndex: nextIndex, currentCoins: nextCoins });
-        });
+        if (this.lifecycleManager) {
+            this.lifecycleManager.nextLevel(score);
+        }
     }
-    restartLevel() { this.scene.restart({ levelIndex: this.currentLevelIndex, currentCoins: this.levelInitialCoins }); }
+    restartLevel() {
+        if (this.lifecycleManager) {
+            this.lifecycleManager.restartLevel();
+        }
+    }
     
     restartGamerFromBeginning() {
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith('map_script_played_') || key.startsWith('tutorial_played_')) {
-                keysToRemove.push(key);
-            }
+        if (this.lifecycleManager) {
+            this.lifecycleManager.restartGameFromBeginning();
         }
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-        
-        console.log("🔄 [BattleScene] Game Reset: Script history cleared.");
-
-        this.registry.set('playerSquad', [{ role: 'Leader' }]);
-        this.registry.set('unlockedRoles', ['Normal']);
-        this.registry.set('fallenUnits', []);
-        this.registry.set('prisonerList', []);
-
-        this.scene.restart({ levelIndex: 0 }); 
     }
 }
