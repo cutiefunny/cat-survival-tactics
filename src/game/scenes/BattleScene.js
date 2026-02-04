@@ -25,6 +25,8 @@ import BattleUIManager from '../managers/BattleUIManager';
 import InputManager from '../managers/InputManager';
 import CombatManager from '../managers/CombatManager';       
 import PathfindingManager from '../managers/PathfindingManager'; 
+import BattleObjectManager from '../managers/BattleObjectManager';      // [New] 쥐/오브젝트
+import BattleInteractionManager from '../managers/BattleInteractionManager'; // [New] NPC/상호작용
 
 // [Unit Sprites]
 import leaderSheet from '../../assets/units/leader.png';
@@ -37,13 +39,12 @@ import runnerSheet from '../../assets/units/runner.png';
 import healerSheet from '../../assets/units/healer.png';
 import normalSheet from '../../assets/units/normal.png'; 
 import bossSheet from '../../assets/units/boss.png'; 
-// [Removed] import 문제 방지를 위해 제거하고 직접 경로 사용
-// import mouseSheet from '../../assets/units/mouse.png'; 
 
 // [Sounds]
 import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
+import level3 from '../../assets/sounds/level3.mp3';
 import level6 from '../../assets/sounds/level6.mp3';
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
@@ -60,6 +61,7 @@ const UnitClasses = {
 const BGM_SOURCES = {
     'stage1_bgm': stage1BgmFile,
     'level1': level1,
+    'level3': level3,
     'level2': level2,
     'level6': level6,
     'default': stage1BgmFile
@@ -130,8 +132,7 @@ export default class BattleScene extends BaseScene {
         this.load.spritesheet('normal', normalSheet, sheetConfig);
         if (bossSheet) this.load.spritesheet('boss', bossSheet, sheetConfig);
         
-        // [Fixed] public/images/mouse.png 경로를 직접 사용하여 스프라이트 시트 로드
-        // (100x100 프레임, 총 200x65 크기 이미지)
+        // 쥐 스프라이트 로드
         this.load.spritesheet('mouse', 'images/mouse.png', { frameWidth: 100, frameHeight: 65 });
 
         const bgmFile = BGM_SOURCES[this.bgmKey] || BGM_SOURCES['default'];
@@ -156,10 +157,13 @@ export default class BattleScene extends BaseScene {
             console.log("🔇 [BattleScene] Mock Battle - BGM Skipped");
         }
 
+        // Managers 초기화
         this.uiManager = new BattleUIManager(this);
         this.inputManager = new InputManager(this);
         this.combatManager = new CombatManager(this);
         this.pathfindingManager = new PathfindingManager(this); 
+        this.objectManager = new BattleObjectManager(this);         // [New]
+        this.interactionManager = new BattleInteractionManager(this); // [New]
         
         this.placementZone = null;
         this.catsArea = null; 
@@ -174,37 +178,9 @@ export default class BattleScene extends BaseScene {
         this.inputManager.checkMobileAndSetup();
 
         this.npcGroup = null; 
-        this.touchingNpc = null; 
-        this.npcTouchTimer = 0; 
-        this.npcInteractionTriggered = false; 
-
-        // 쥐 그룹 초기화
-        this.miceGroup = this.physics.add.group({
-            collideWorldBounds: true,
-            bounceX: 1,
-            bounceY: 1
-        });
-
-        // [Check] 텍스처 로드 확인 및 애니메이션 생성
-        if (this.textures.exists('mouse')) {
-            const texture = this.textures.get('mouse');
-            const frameCount = texture.frameTotal;
-            // console.log(`🐁 Mouse texture loaded. Frames: ${frameCount}`);
-
-            // 텍스처가 로드되었고 프레임이 1개 이상일 때만 애니메이션 생성
-            if (frameCount > 1 && !this.anims.exists('mouse_run')) {
-                this.anims.create({
-                    key: 'mouse_run',
-                    frames: this.anims.generateFrameNumbers('mouse', { start: 0, end: 1 }),
-                    frameRate: 6,
-                    repeat: -1
-                });
-            } else if (frameCount <= 1) {
-                console.warn("⚠️ 'mouse' texture has only 1 frame. Animation might look static.");
-            }
-        } else {
-            console.error("❌ 'mouse' texture FAILED to load.");
-        }
+        
+        // [New] 오브젝트 매니저 초기화 (쥐 그룹 생성 등)
+        this.objectManager.create();
 
         this.input.keyboard.on('keydown-D', (event) => { if (event.shiftKey) this.toggleDebugMode(); });
         
@@ -390,10 +366,9 @@ export default class BattleScene extends BaseScene {
 
             this.spawnUnits(config, map);
             
-            // 쥐 소환
-            this.spawnMice();
+            // [Modified] 매니저를 통해 쥐 소환
+            this.objectManager.spawnMice();
 
-            // [Important] setupPhysicsColliders는 spawnMice 이후에 호출되어야 합니다.
             this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
 
             const scriptPlayedKey = `map_script_played_${mapKey}`;
@@ -419,97 +394,6 @@ export default class BattleScene extends BaseScene {
             this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
             this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
         }
-    }
-    
-    // [Fixed] 랜덤 쥐 소환 (장애물 제외 위치 선정)
-    spawnMice() {
-        if (!this.miceGroup) return;
-        this.miceGroup.clear(true, true); 
-
-        const count = Phaser.Math.Between(1, 2); 
-        console.log(`🐁 Spawning ${count} mice...`);
-
-        // 텍스처 로드 확인
-        if (!this.textures.exists('mouse')) {
-            console.error("❌ Mouse texture missing! Skipping spawn.");
-            return;
-        }
-
-        const padding = 100;
-
-        for (let i = 0; i < count; i++) {
-            let x, y;
-            let attempts = 0;
-            let validPosition = false;
-
-            // 유효한 위치를 찾을 때까지 최대 50번 시도
-            while (!validPosition && attempts < 50) {
-                attempts++;
-                
-                // 1. 맵 범위 내 랜덤 좌표 생성
-                x = Phaser.Math.Between(padding, this.mapWidth - padding);
-                y = Phaser.Math.Between(padding, this.mapHeight - padding);
-                
-                validPosition = true; // 일단 유효하다고 가정
-
-                // 2. Wall 레이어(벽)와 겹치는지 확인
-                if (this.wallLayer) {
-                    const tile = this.wallLayer.getTileAtWorldXY(x, y);
-                    // 타일이 존재하고(인덱스가 -1이 아니면) 벽으로 간주
-                    if (tile && tile.index !== -1) validPosition = false;
-                }
-
-                // 3. Block 레이어(장애물 타일)와 겹치는지 확인
-                if (validPosition && this.blockLayer) {
-                    const tile = this.blockLayer.getTileAtWorldXY(x, y);
-                    if (tile && tile.index !== -1) validPosition = false;
-                }
-
-                // 4. Block 오브젝트(오브젝트 장애물)와 겹치는지 확인
-                if (validPosition && this.blockObjectGroup) {
-                    const blocks = this.blockObjectGroup.getChildren();
-                    for (const block of blocks) {
-                        // 블록의 영역(Bounds) 안에 좌표가 포함되는지 체크
-                        if (block.getBounds().contains(x, y)) {
-                            validPosition = false;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // 시도 횟수 초과 등으로 실패했어도 일단 마지막 좌표에 생성 (혹은 건너뛰기 가능)
-            const mouse = this.miceGroup.create(x, y, 'mouse');
-            mouse.setDisplaySize(30, 20);
-            
-            // 랜덤하게 좌우 반전
-            mouse.setFlipX(Phaser.Math.Between(0, 1) === 0); 
-            
-            // 애니메이션 재생
-            if (this.anims.exists('mouse_run')) {
-                mouse.play('mouse_run');
-            } else {
-                mouse.setFrame(0);
-            }
-            
-            mouse.setCollideWorldBounds(true);
-            mouse.setBounce(1);
-            
-            this.changeMouseDirection(mouse);
-        }
-    }
-
-    changeMouseDirection(mouse) {
-        if (!mouse.active) return;
-        
-        const speed = 40; 
-        const angle = Phaser.Math.Between(0, 360);
-        const velocity = this.physics.velocityFromAngle(angle, speed);
-        
-        mouse.setVelocity(velocity.x, velocity.y);
-        mouse.setFlipX(velocity.x > 0); 
-
-        mouse.nextMoveTime = this.time.now + Phaser.Math.Between(1000, 3000);
     }
 
     fitCameraToMap() {
@@ -572,6 +456,7 @@ export default class BattleScene extends BaseScene {
     }
 
     incrementSkillCount() { if (this.battleStarted && !this.isGameOver) { this.playerSkillCount++; } }
+    
     createBlocksDebug() {
         this.blocksDebugGraphics = this.add.graphics().setDepth(1000);
         if (this.blockObjectGroup) {
@@ -582,6 +467,7 @@ export default class BattleScene extends BaseScene {
             });
         }
     }
+    
     updateCameraBounds(w, h) { 
         if (!this.mapWidth) return;
         this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
@@ -901,65 +787,60 @@ export default class BattleScene extends BaseScene {
         const onWallCollision = (unit, tile) => {
             if (unit && typeof unit.handleWallCollision === 'function') unit.handleWallCollision(tile);
         };
+        
+        // [Modified] 매니저로부터 miceGroup 가져오기
+        const miceGroup = this.objectManager.getGroup();
+
         if (wallLayer) { 
             this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision); 
             this.physics.add.collider(this.redTeam, wallLayer, onWallCollision); 
-            this.physics.add.collider(this.miceGroup, wallLayer);
+            if (miceGroup) this.physics.add.collider(miceGroup, wallLayer);
         }
         if (blockLayer) { 
             this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision); 
             this.physics.add.collider(this.redTeam, blockLayer, onWallCollision); 
-            this.physics.add.collider(this.miceGroup, blockLayer);
+            if (miceGroup) this.physics.add.collider(miceGroup, blockLayer);
         }
         if (this.blockObjectGroup) { 
             this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision); 
             this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision); 
-            this.physics.add.collider(this.miceGroup, this.blockObjectGroup);
+            if (miceGroup) this.physics.add.collider(miceGroup, this.blockObjectGroup);
         }
+        
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
         this.physics.add.collider(this.blueTeam, this.blueTeam);
         this.physics.add.collider(this.redTeam, this.redTeam);
         
         if (this.npcGroup) {
-            this.physics.add.collider(this.redTeam, this.npcGroup, this.handleNpcCollision, null, this);
-            this.physics.add.collider(this.blueTeam, this.npcGroup, this.handleNpcCollision, null, this);
+            // [Modified] InteractionManager 콜백 사용
+            this.physics.add.collider(
+                this.redTeam, 
+                this.npcGroup, 
+                (unit, npc) => this.interactionManager.handleNpcCollision(unit, npc), 
+                null, 
+                this
+            );
+            this.physics.add.collider(
+                this.blueTeam, 
+                this.npcGroup, 
+                (unit, npc) => this.interactionManager.handleNpcCollision(unit, npc), 
+                null, 
+                this
+            );
         }
 
-        this.physics.add.overlap(this.blueTeam, this.miceGroup, this.handleMouseConsumption, null, this);
-    }
-
-    handleMouseConsumption(unit, mouse) {
-        if (!unit.active || !mouse.active) return;
-
-        console.log(`🍖 ${unit.role} ate a mouse!`);
-        
-        mouse.destroy();
-
-        const healAmount = 100;
-        
-        if (unit.maxHp) {
-            unit.hp = Math.min(unit.maxHp, unit.hp + healAmount);
-            unit.redrawHpBar();
-            
-            if (unit.showEmote) {
-                unit.showEmote(`HP +${healAmount}`, '#00ff00');
-            }
-            
-            if (unit.squadIndex !== undefined) {
-                const squad = this.registry.get('playerSquad');
-                if (squad && squad[unit.squadIndex]) {
-                    squad[unit.squadIndex].hp = unit.hp;
-                    this.registry.set('playerSquad', squad);
-                }
-            }
+        // [Modified] 쥐 섭취 핸들러 연결
+        if (miceGroup) {
+            this.physics.add.overlap(
+                this.blueTeam, 
+                miceGroup, 
+                (unit, mouse) => this.objectManager.handleMouseConsumption(unit, mouse), 
+                null, 
+                this
+            );
         }
     }
 
-    handleNpcCollision(unit, npc) {
-        if (unit === this.playerUnit) {
-            this.currentFrameTouchingNpc = npc;
-        }
-    }
     handleStartBattle() {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
@@ -1043,24 +924,30 @@ export default class BattleScene extends BaseScene {
         
         this.uiManager.showStartAnimation();
     }
+    
     update(time, delta) {
         if (this.inputManager.isOrientationBad) return;
         this.uiManager.updateDebugStats(this.game.loop);
+        
         if (this.uiManager.isDebugEnabled) {
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(true);
         } else {
             if (this.blocksDebugGraphics) this.blocksDebugGraphics.setVisible(false);
         }
+        
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
             if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { this.playerUnit.tryUseSkill(); }
             if (!this.isGameOver && !this.isRetreatModalOpen) {
                 this.checkRetreatCondition(delta);
             }
         }
+        
         if (!this.blueTeam || !this.redTeam || this.isGameOver || this.isSetupPhase) return;
         
-        this.updateMiceBehavior(time);
+        // [Modified] 매니저에게 업데이트 위임
+        this.objectManager.updateMiceBehavior(time);
+        this.interactionManager.update(delta);
 
         if (!this.battleStarted && this.playerUnit?.active) {
             this.checkBattleTimer -= delta;
@@ -1078,204 +965,59 @@ export default class BattleScene extends BaseScene {
             else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); } 
             else { this.uiManager.updateScore(blueCount, redCount); }
         }
-        this.updateNpcInteraction(delta);
     }
 
-    updateMiceBehavior(time) {
-        if (!this.miceGroup) return;
-
-        this.miceGroup.children.iterate((mouse) => {
-            if (mouse && mouse.active) {
-                if (time > mouse.nextMoveTime) {
-                    this.changeMouseDirection(mouse);
-                }
-                if (mouse.body.velocity.x === 0 && mouse.body.velocity.y === 0) {
-                     this.changeMouseDirection(mouse);
-                }
-            }
-        });
-    }
-
-    updateNpcInteraction(delta) {
-        if (this.currentFrameTouchingNpc) {
-            const cursors = this.cursors || {};
-            const wasd = this.wasd || {};
-            const joy = this.joystickCursors || {};
-            
-            const isPushing = (
-                cursors.left?.isDown || cursors.right?.isDown || cursors.up?.isDown || cursors.down?.isDown ||
-                wasd.left?.isDown || wasd.right?.isDown || wasd.up?.isDown || wasd.down?.isDown ||
-                joy.left?.isDown || joy.right?.isDown || joy.up?.isDown || joy.down?.isDown
-            );
-
-            if (isPushing) {
-                if (this.touchingNpc === this.currentFrameTouchingNpc) {
-                    if (!this.npcInteractionTriggered) {
-                        this.npcTouchTimer += delta;
-                        if (this.npcTouchTimer > 500) {
-                            console.log("✅ NPC Interaction Triggered!"); 
-                            this.triggerNpcEvent(this.touchingNpc);
-                            this.npcInteractionTriggered = true; 
-                        }
-                    }
-                } else {
-                    console.log("🆕 Started pushing new NPC");
-                    this.touchingNpc = this.currentFrameTouchingNpc;
-                    this.npcTouchTimer = 0;
-                    this.npcInteractionTriggered = false;
-                }
-            } else {
-                this.npcTouchTimer = 0;
+    checkRetreatCondition(delta) {
+        if (!this.playerUnit || !this.playerUnit.active) return;
+        const bounds = this.physics.world.bounds;
+        const padding = this.playerUnit.baseSize / 2 + 10; 
+        const { x, y } = this.playerUnit;
+        let isPushing = false;
+        const cursors = this.cursors || {};
+        const wasd = this.wasd || {};
+        const joy = this.joystickCursors || {};
+        const leftInput = cursors.left?.isDown || wasd.left?.isDown || joy.left?.isDown;
+        const rightInput = cursors.right?.isDown || wasd.right?.isDown || joy.right?.isDown;
+        const upInput = cursors.up?.isDown || wasd.up?.isDown || joy.up?.isDown;
+        const downInput = cursors.down?.isDown || wasd.down?.isDown || joy.down?.isDown;
+        if (x <= bounds.x + padding && leftInput) isPushing = true;
+        else if (x >= bounds.width - padding && rightInput) isPushing = true;
+        else if (y <= bounds.y + padding && upInput) isPushing = true;
+        else if (y >= bounds.height - padding && downInput) isPushing = true;
+        if (isPushing) {
+            this.retreatTimer += delta;
+            if (this.retreatTimer > 1000) {
+                this.triggerRetreat();
+                this.retreatTimer = 0; 
             }
         } else {
-            this.touchingNpc = null;
-            this.npcTouchTimer = 0;
-            this.npcInteractionTriggered = false;
-        }
-        this.currentFrameTouchingNpc = null;
-    }
-
-    triggerNpcEvent(npc) {
-        if (!npc.scriptData) return;
-        console.log("🗣️ NPC Event Triggered:", npc.texture.key);
-        this.slowMotionForModal(true);
-
-        npc.scriptData.forEach(script => {
-            if (script.type === 'dialog_confirm') {
-                let dialogText = script.text;
-                let dialogOptions = script.options;
-
-                const costOption = script.options.find(opt => 
-                    opt.action && opt.action.includes('remove_coins')
-                );
-
-                if (costOption) {
-                    const idx = costOption.action.indexOf('remove_coins');
-                    const cost = costOption.action[idx + 1];
-                    
-                    if (this.playerCoins < cost) {
-                        dialogText = "코인이 부족합니다!";
-                        dialogOptions = [
-                            { text: "닫기", action: ["close"] }
-                        ];
-                    }
-                }
-
-                this.uiManager.showDialogConfirm(
-                    dialogText, 
-                    dialogOptions, 
-                    (actionArray) => this.executeScriptAction(actionArray)
-                );
-            }
-        });
-    }
-
-    executeScriptAction(actions) {
-        if (!Array.isArray(actions)) return;
-        let i = 0;
-        while (i < actions.length) {
-            const command = actions[i];
-            i++;
-            switch (command) {
-                case 'restore_fatigue':
-                    const fatigueAmount = actions[i]; 
-                    i++;
-                    this.restoreFatigue(fatigueAmount);
-                    break;
-                case 'restore_energy': 
-                    const energyAmount = actions[i];
-                    i++;
-                    this.restoreEnergy(energyAmount);
-                    break;
-                case 'remove_coins':
-                    const cost = actions[i]; 
-                    i++;
-                    this.removeCoins(cost);
-                    break;
-                case 'close':
-                    this.slowMotionForModal(false);
-                    break;
-                default:
-                    console.warn(`Unknown script command: ${command}`);
-                    break;
-            }
+            this.retreatTimer = 0;
         }
     }
-
-    restoreFatigue(amount) {
-        const squad = this.registry.get('playerSquad') || [];
-        let recoveredCount = 0;
-        squad.forEach(member => {
-            if (member.fatigue > 0) {
-                member.fatigue = Math.max(0, member.fatigue - amount);
-                recoveredCount++;
+    triggerRetreat() {
+        this.isRetreatModalOpen = true;
+        this.physics.pause(); 
+        this.playerUnit.setVelocity(0, 0);
+        const bounds = this.physics.world.bounds;
+        const centerX = bounds.x + bounds.width / 2;
+        const centerY = bounds.y + bounds.height / 2;
+        const angle = Phaser.Math.Angle.Between(this.playerUnit.x, this.playerUnit.y, centerX, centerY);
+        const pushBackDist = 30;
+        this.playerUnit.setPosition(
+            this.playerUnit.x + Math.cos(angle) * pushBackDist,
+            this.playerUnit.y + Math.sin(angle) * pushBackDist
+        );
+        this.uiManager.createRetreatConfirmModal(
+            () => { 
+                this.isRetreatModalOpen = false;
+                this.finishGame("작전상 후퇴!", "#ffaa00", false, 2);
+            },
+            () => { 
+                this.isRetreatModalOpen = false;
+                this.physics.resume();
             }
-        });
-        this.registry.set('playerSquad', squad);
-        
-        this.blueTeam.getChildren().forEach(unit => {
-            if (unit.active && !unit.isDying) {
-                if (unit.showEmote) {
-                    unit.showEmote(`피로도 -${amount}`, '#44ff44'); 
-                }
-            }
-        });
-        
-        console.log(`💪 Fatigue restored by ${amount} for active units.`);
+        );
     }
-
-    restoreEnergy(amount) {
-        console.log(`%c[restoreEnergy/HP] Called with amount: ${amount}`, 'color: cyan; font-weight: bold;');
-        const numericAmount = Number(amount);
-
-        const squad = this.registry.get('playerSquad') || [];
-        squad.forEach((member, i) => {
-            let maxHp = member.maxHp;
-            const activeUnit = this.blueTeam.getChildren().find(u => u.squadIndex === i);
-            if (activeUnit && activeUnit.maxHp) {
-                maxHp = activeUnit.maxHp;
-            } 
-            if (maxHp === undefined) {
-                 const baseStats = ROLE_BASE_STATS[member.role] || {};
-                 maxHp = member.hp || baseStats.hp || 100; 
-            }
-
-            const curHp = (member.hp !== undefined) ? member.hp : maxHp;
-            const nextHp = Math.min(maxHp, curHp + numericAmount);
-            member.hp = nextHp;
-        });
-        this.registry.set('playerSquad', squad);
-
-        this.blueTeam.getChildren().forEach((unit, i) => {
-            if (unit.active && !unit.isDying) {
-                if (unit.maxHp === undefined) {
-                    console.warn(`[Unit ${i}] maxHp is undefined! Defaulting to 100.`);
-                    unit.maxHp = 100;
-                }
-                const prevHp = unit.hp;
-                unit.hp = Math.min(unit.maxHp, unit.hp + numericAmount);
-                unit.redrawHpBar();
-                
-                if (unit.showEmote) {
-                    if(numericAmount > 999) unit.showEmote(`완전 회복!`, '#030e9eff'); 
-                    else unit.showEmote(`체력 +${numericAmount}`, '#030e9eff'); 
-                }
-            }
-        });
-        
-        console.log(`⚡ HP restored by ${numericAmount} for active units and registry.`);
-    }
-
-    removeCoins(amount) {
-        if (this.playerCoins >= amount) {
-            this.playerCoins -= amount;
-            this.uiManager.updateCoins(this.playerCoins);
-            console.log(`💰 Coins removed: ${amount}. Current: ${this.playerCoins}`);
-        } else {
-            console.log("💸 Not enough coins!");
-        }
-    }
-
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
@@ -1284,6 +1026,8 @@ export default class BattleScene extends BaseScene {
         }
         this.updateCameraBounds(gameSize.width, gameSize.height);
     }
+    
+    // [Fix] finishGame이 누락되지 않도록 주의
     finishGame(message, color, isWin, fatiguePenalty = 1) {
         if (this.isGameOver) return; 
 
@@ -1357,6 +1101,7 @@ export default class BattleScene extends BaseScene {
         };
         this.uiManager.createGameOverUI(uiData, callback);
     }
+
     processBattleOutcome(isWin, fatiguePenalty) {
         const killedEnemies = Math.max(0, this.initialRedCount - this.redTeam.countActive());
         const xpGained = killedEnemies * 10;
@@ -1449,57 +1194,7 @@ export default class BattleScene extends BaseScene {
             capturedUnits
         };
     }
-    checkRetreatCondition(delta) {
-        if (!this.playerUnit || !this.playerUnit.active) return;
-        const bounds = this.physics.world.bounds;
-        const padding = this.playerUnit.baseSize / 2 + 10; 
-        const { x, y } = this.playerUnit;
-        let isPushing = false;
-        const cursors = this.cursors || {};
-        const wasd = this.wasd || {};
-        const joy = this.joystickCursors || {};
-        const leftInput = cursors.left?.isDown || wasd.left?.isDown || joy.left?.isDown;
-        const rightInput = cursors.right?.isDown || wasd.right?.isDown || joy.right?.isDown;
-        const upInput = cursors.up?.isDown || wasd.up?.isDown || joy.up?.isDown;
-        const downInput = cursors.down?.isDown || wasd.down?.isDown || joy.down?.isDown;
-        if (x <= bounds.x + padding && leftInput) isPushing = true;
-        else if (x >= bounds.width - padding && rightInput) isPushing = true;
-        else if (y <= bounds.y + padding && upInput) isPushing = true;
-        else if (y >= bounds.height - padding && downInput) isPushing = true;
-        if (isPushing) {
-            this.retreatTimer += delta;
-            if (this.retreatTimer > 1000) {
-                this.triggerRetreat();
-                this.retreatTimer = 0; 
-            }
-        } else {
-            this.retreatTimer = 0;
-        }
-    }
-    triggerRetreat() {
-        this.isRetreatModalOpen = true;
-        this.physics.pause(); 
-        this.playerUnit.setVelocity(0, 0);
-        const bounds = this.physics.world.bounds;
-        const centerX = bounds.x + bounds.width / 2;
-        const centerY = bounds.y + bounds.height / 2;
-        const angle = Phaser.Math.Angle.Between(this.playerUnit.x, this.playerUnit.y, centerX, centerY);
-        const pushBackDist = 30;
-        this.playerUnit.setPosition(
-            this.playerUnit.x + Math.cos(angle) * pushBackDist,
-            this.playerUnit.y + Math.sin(angle) * pushBackDist
-        );
-        this.uiManager.createRetreatConfirmModal(
-            () => { 
-                this.isRetreatModalOpen = false;
-                this.finishGame("작전상 후퇴!", "#ffaa00", false, 2);
-            },
-            () => { 
-                this.isRetreatModalOpen = false;
-                this.physics.resume();
-            }
-        );
-    }
+
     nextLevel(score) {
         const nextIndex = this.currentLevelIndex + 1;
         const bonusCoins = Math.floor(score / 1000);

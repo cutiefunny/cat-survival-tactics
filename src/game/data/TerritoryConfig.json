@@ -143,19 +143,19 @@
       "mapId": "level2",
       "name": "공원",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level3"
     },
     "13": {
       "mapId": "level7",
       "name": "큰 길",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level3"
     },
     "14": {
       "mapId": "level8",
       "name": "빌라촌",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level3"
     },
     "15": {
       "mapId": "level4",
