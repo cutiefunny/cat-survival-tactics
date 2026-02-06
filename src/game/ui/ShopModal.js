@@ -385,7 +385,7 @@ export default class ShopModal {
                 this.scene.uiManager.updateCoinText(newCoins);
             }
             
-            const squad = this.scene.registry.get('playerSquad');
+            const squad = this.scene.registry.get('playerSquad') || [];
             
             const randomName = getRandomUnitName(unitConfig.role);
 
@@ -402,7 +402,9 @@ export default class ShopModal {
             console.log(`✨ 고용 완료: ${unitConfig.role} (이름: ${randomName})`);
 
             this.refreshSquadDisplay();
-            this.scene.saveProgress();
+            if (this.scene.stateManager && this.scene.stateManager.saveProgress) {
+                this.scene.stateManager.saveProgress();
+            }
             
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
@@ -421,7 +423,9 @@ export default class ShopModal {
             squad.splice(squadIndex, 1);
             this.scene.registry.set('playerSquad', squad);
             this.refreshSquadDisplay();
-            this.scene.saveProgress();
+            if (this.scene.stateManager && this.scene.stateManager.saveProgress) {
+                this.scene.stateManager.saveProgress();
+            }
             if (this.unitDetailPopup) {
                 this.unitDetailPopup.destroy();
                 this.unitDetailPopup = null;

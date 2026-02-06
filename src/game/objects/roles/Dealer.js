@@ -1,5 +1,4 @@
 import Unit from '../Unit';
-import Phaser from 'phaser';
 
 export default class Dealer extends Unit {
     constructor(scene, x, y, texture, team, targetGroup, stats, isLeader) {

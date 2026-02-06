@@ -1,12 +1,6 @@
 import Phaser from 'phaser';
 import BaseScene from './BaseScene'; 
 
-// [Data & Config]
-import { DEFAULT_AI_SETTINGS } from '../data/UnitData'; 
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../firebaseConfig";
-import { LEVEL_KEYS } from '../managers/LevelManager'; 
-
 // [Managers]
 import MapAssetManager from '../managers/MapAssetManager'; 
 import BattleUIManager from '../managers/BattleUIManager';
@@ -19,16 +13,11 @@ import BattleAudioManager from '../managers/BattleAudioManager';
 import BattleAssetLoader from '../managers/BattleAssetLoader';
 import BattleUnitSpawner from '../managers/BattleUnitSpawner';
 import BattleLifecycleManager from '../managers/BattleLifecycleManager';
+import BattleSceneInitializer from '../managers/BattleSceneInitializer';
+import BattleSceneCameraManager from '../managers/BattleSceneCameraManager';
 
-const DEFAULT_CONFIG = {
-    showDebugStats: false, 
-    gameSettings: { blueCount: 1, redCount: 6, spawnGap: 90, startY: 250, mapSelection: 'level1', initialCoins: 50 },
-    aiSettings: DEFAULT_AI_SETTINGS, 
-    redTeamRoles: [{ role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 }],
-    redTeamStats: { role: 'NormalDog', hp: 140, attackPower: 15, moveSpeed: 70 },
-    blueTeamRoles: [], 
-    unitCosts: {} 
-};
+// [Data]
+import { DEFAULT_AI_SETTINGS } from '../data/UnitData';
 
 export default class BattleScene extends BaseScene {
     constructor() {
@@ -92,6 +81,8 @@ export default class BattleScene extends BaseScene {
         this.pathfindingManager = new PathfindingManager(this); 
         this.objectManager = new BattleObjectManager(this);
         this.interactionManager = new BattleInteractionManager(this);
+        this.initializer = new BattleSceneInitializer(this);
+        this.cameraManager = new BattleSceneCameraManager(this);
         
         // BGM 재생
         if (!this.initData || !this.initData.debugConfig) {
@@ -109,7 +100,6 @@ export default class BattleScene extends BaseScene {
         this.blocksDebugGraphics = null;
         this.gameConfig = null; 
 
-        this.uiManager.createLoadingText();
         this.inputManager.setupControls();
         this.inputManager.checkMobileAndSetup();
 
@@ -124,7 +114,7 @@ export default class BattleScene extends BaseScene {
 
         this.uiManager.create();
 
-        this.fetchConfigAndStart();
+        this.initializer.fetchConfigAndStart();
     }
 
     handleResume(scene, data) {
@@ -135,9 +125,8 @@ export default class BattleScene extends BaseScene {
             const storageKey = `map_script_played_${this.currentMapKey}`;
             localStorage.setItem(storageKey, 'true');
 
-            if(this.playerUnit && this.playerUnit.active && !this.sys.game.device.os.desktop) {
-                this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-                this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
+            if(this.playerUnit?.active && !this.sys.game.device.os.desktop) {
+                this.cameraManager.followPlayer(this.playerUnit);
             }
         }
         else if (this.postBattleScriptPlayed && this.pendingFinishArgs) {
@@ -187,178 +176,6 @@ export default class BattleScene extends BaseScene {
         }
     }
 
-    async fetchConfigAndStart() {
-        if (this.initData && this.initData.debugConfig) {
-            this.gameConfig = this.initData.debugConfig;
-            const mapKey = LEVEL_KEYS[this.currentLevelIndex] || 'level1';
-            this.uiManager.destroyLoadingText();
-            if (this.passedCoins !== null) {
-                this.playerCoins = this.passedCoins;
-            } else {
-                this.playerCoins = this.gameConfig.gameSettings.initialCoins ?? 50;
-            }
-            this.levelInitialCoins = this.playerCoins;
-            this.startGame(this.gameConfig, mapKey);
-            return;
-        }
-
-        let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-        try {
-            const docRef = doc(db, "settings", "tacticsConfig");
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const dbData = docSnap.data();
-                if (dbData.showDebugStats !== undefined) config.showDebugStats = dbData.showDebugStats;
-                if (dbData.gameSettings) config.gameSettings = { ...config.gameSettings, ...dbData.gameSettings };
-                if (dbData.unitCosts) config.unitCosts = { ...config.unitCosts, ...dbData.unitCosts };
-                if (dbData.aiSettings) {
-                      config.aiSettings = { ...DEFAULT_CONFIG.aiSettings, ...dbData.aiSettings };
-                      if (dbData.aiSettings.common) {
-                          config.aiSettings.common = { ...DEFAULT_CONFIG.aiSettings.common, ...dbData.aiSettings.common };
-                      }
-                }
-                if (dbData.roleDefinitions) config.roleDefinitions = dbData.roleDefinitions;
-                if (!this.hasLevelIndexPassed && dbData.gameSettings && dbData.gameSettings.startLevelIndex !== undefined) {
-                    this.currentLevelIndex = dbData.gameSettings.startLevelIndex;
-                }
-                if (dbData.redTeamRoles) config.redTeamRoles = dbData.redTeamRoles;
-            }
-        } catch (error) { console.error("❌ Config Error:", error); }
-
-        this.uiManager.destroyLoadingText();
-        this.gameConfig = config; 
-
-        if (this.passedCoins !== null) {
-            this.playerCoins = this.passedCoins;
-        } else {
-            this.playerCoins = config.gameSettings.initialCoins ?? 50;
-        }
-        this.levelInitialCoins = this.playerCoins;
-
-        if (this.currentLevelIndex === -1) {
-            this.startGame(config, null); 
-            return;
-        }
-        if (this.currentLevelIndex >= LEVEL_KEYS.length) this.currentLevelIndex = 0;
-        
-        const targetMapKey = LEVEL_KEYS[this.currentLevelIndex];
-        const mapKey = this.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
-        this.startGame(config, mapKey);
-    }
-
-    startGame(config, mapKey) {
-        this.currentMapKey = mapKey; 
-        
-        let scriptData = this.levelScript;
-
-        if (!mapKey) {
-            this.mapWidth = 2000; this.mapHeight = 2000; const tileSize = 32;
-            this.physics.world.setBounds(0, 0, this.mapWidth, this.mapHeight);
-            const gridGraphics = this.add.graphics();
-            gridGraphics.lineStyle(1, 0x333333, 0.5);
-            gridGraphics.fillStyle(0x111111, 1);
-            gridGraphics.fillRect(0, 0, this.mapWidth, this.mapHeight);
-            gridGraphics.strokeRect(0, 0, this.mapWidth, this.mapHeight);
-
-            const virtualMap = { width: Math.ceil(this.mapWidth / tileSize), height: Math.ceil(this.mapHeight / tileSize), tileWidth: tileSize };
-            this.blockObjectGroup = this.physics.add.staticGroup();
-            this.pathfindingManager.setup(virtualMap, []);
-            this.updateCameraBounds(this.scale.width, this.scale.height);
-            this.initializeGameVariables(config);
-            this.spawnUnits(config, null); 
-            this.setupPhysicsColliders(null, null);
-        } else {
-            if (this.cache.tilemap.exists(mapKey)) {
-                const mapData = this.cache.tilemap.get(mapKey).data;
-                if (!scriptData && mapData && mapData.script) {
-                    scriptData = mapData.script;
-                    if (mapData.script_condition) {
-                        this.levelScriptCondition = mapData.script_condition;
-                    }
-                }
-            }
-
-            const mapDataObj = this.mapManager.createMap(mapKey);
-            
-            const map = mapDataObj.map;
-            this.currentMap = map;
-            this.wallLayer = mapDataObj.layers.wallLayer;
-            this.blockLayer = mapDataObj.layers.blockLayer;
-            this.blockObjectGroup = mapDataObj.blockObjectGroup;
-            this.npcGroup = mapDataObj.npcGroup;
-
-            this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-
-            const obstacleLayers = [this.wallLayer, this.blockLayer].filter(l => l !== null);
-            this.pathfindingManager.setup(map, obstacleLayers);
-            this.mapWidth = map.widthInPixels; this.mapHeight = map.heightInPixels;
-            
-            this.fitCameraToMap(); 
-            this.initializeGameVariables(config);
-
-            this.spawnUnits(config, map);
-            
-            // [Modified] 매니저를 통해 쥐 소환
-            this.objectManager.spawnMice();
-
-            this.setupPhysicsColliders(this.wallLayer, this.blockLayer, this.npcGroup);
-
-            const scriptPlayedKey = `map_script_played_${mapKey}`;
-            const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';
-            const isWinCondition = (this.levelScriptCondition === 'win');
-
-            if (scriptData && !alreadyPlayed && !isWinCondition) {
-                console.log(`📜 [BattleScene] Playing Intro Script.`);
-                
-                this.isWaitingForIntro = true;
-                this.pendingConfig = config; 
-                
-                this.scene.pause(); 
-                this.scene.launch('EventScene', { 
-                    mode: 'overlay', 
-                    script: scriptData, 
-                    parentScene: 'BattleScene' 
-                });
-            }
-        }
-        
-        if(this.playerUnit && this.playerUnit.active && !this.isSetupPhase && !this.sys.game.device.os.desktop) {
-            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-            this.cameras.main.setDeadzone(this.cameras.main.width * 0.4, this.cameras.main.height * 0.4);
-        }
-    }
-
-    fitCameraToMap() {
-        if (!this.mapWidth || !this.mapHeight) return;
-
-        const isPC = this.sys.game.device.os.desktop;
-
-        if (isPC) {
-            this.cameras.main.setZoom(1);
-            this.cameras.main.centerOn(this.mapWidth / 2, this.mapHeight / 2);
-            return;
-        }
-
-        const { width, height } = this.scale;
-        const footerHeight = 80;
-        const availableHeight = height - footerHeight;
-        const zoomX = width / this.mapWidth;
-        const zoomY = availableHeight / this.mapHeight;
-        const targetZoom = Math.max(zoomX, zoomY);
-
-        this.cameras.main.setZoom(targetZoom);
-        this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
-        
-        const mapCenterX = this.mapWidth / 2;
-        const mapCenterY = this.mapHeight / 2;
-        this.cameras.main.centerOn(mapCenterX, mapCenterY);
-
-        const screenCenterY = height / 2;
-        const safeCenterY = availableHeight / 2;
-        const offset = (screenCenterY - safeCenterY) / targetZoom; 
-        this.cameras.main.scrollY -= offset;
-    }
-
     initializeGameVariables(config) {
         this.isGameOver = false;
         this.battleStarted = false;
@@ -377,11 +194,7 @@ export default class BattleScene extends BaseScene {
         
         if (config.showDebugStats) this.uiManager.createDebugStats();
         this.uiManager.createStartButton(() => this.handleStartBattle());
-        this.uiManager.createGameMessages();
-        this.uiManager.createAutoBattleButton(() => this.toggleAutoBattle());
         this.uiManager.updateAutoButton(this.isAutoBattle);
-        this.uiManager.createSquadButton(() => this.toggleSquadState());
-        this.uiManager.createSpeedButton(() => this.toggleGameSpeed());
         this.createStandardAnimations();
         this.blueTeam = this.physics.add.group({ runChildUpdate: true });
         this.redTeam = this.physics.add.group({ runChildUpdate: true });
@@ -398,11 +211,6 @@ export default class BattleScene extends BaseScene {
                 this.blocksDebugGraphics.strokeRect(x - width/2, y - height/2, width, height);
             });
         }
-    }
-    
-    updateCameraBounds(w, h) { 
-        if (!this.mapWidth) return;
-        this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
     }
     
     createStandardAnimations() {
@@ -424,13 +232,7 @@ export default class BattleScene extends BaseScene {
     }
     
     getCameraTarget(speaker) {
-        if (speaker === '들개' && this.dogsArea) {
-            return { x: this.dogsArea.centerX, y: this.dogsArea.centerY };
-        }
-        if (speaker === '김냐냐' && this.catsArea) {
-            return { x: this.catsArea.centerX, y: this.catsArea.centerY };
-        }
-        return null; 
+        return this.initializer.getCameraTarget(speaker);
     }
 
     animateCoinDrop(startX, startY, amount) {
@@ -517,10 +319,8 @@ export default class BattleScene extends BaseScene {
         this.saveInitialFormation(); 
         this.isSetupPhase = false;
         if (this.zoneGraphics) { this.zoneGraphics.destroy(); this.zoneGraphics = null; }
-        this.uiManager.cleanupBeforeBattle();
         if (this.playerUnit?.active && !this.sys.game.device.os.desktop) {
-            this.cameras.main.startFollow(this.playerUnit, true, 0.1, 0.1);
-            this.cameras.main.setDeadzone(this.scale.width * 0.4, this.scale.height * 0.4);
+            this.cameraManager.followPlayer(this.playerUnit);
         }
         this.startBattle();
     }
@@ -538,7 +338,7 @@ export default class BattleScene extends BaseScene {
         this.playerUnit = newUnit; newUnit.isLeader = true;
         if (newUnit.active && !newUnit.isDying) newUnit.resetVisuals();
         if (!this.sys.game.device.os.desktop) {
-            this.cameras.main.startFollow(newUnit, true, 0.1, 0.1);
+            this.cameraManager.followPlayer(newUnit);
         }
         this.updateFormationOffsets();
     }
@@ -596,7 +396,7 @@ export default class BattleScene extends BaseScene {
     
     update(time, delta) {
         if (this.inputManager.isOrientationBad) return;
-        this.uiManager.updateDebugStats(this.game.loop);
+        this.uiManager.updateDebugStats(this.game.loop, delta);
         
         if (this.uiManager.isDebugEnabled) {
             if (!this.blocksDebugGraphics) this.createBlocksDebug();
@@ -631,8 +431,7 @@ export default class BattleScene extends BaseScene {
             const blueCount = this.blueTeam.countActive();
             const redCount = this.redTeam.countActive();
             if (blueCount === 0) { this.finishGame("패배!", '#ff4444', false); } 
-            else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); } 
-            else { this.uiManager.updateScore(blueCount, redCount); }
+            else if (redCount === 0) { this.finishGame("승리!", '#4488ff', true); }
         }
     }
 
@@ -690,10 +489,7 @@ export default class BattleScene extends BaseScene {
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
-        if (this.cameras.main.deadzone) {
-             this.cameras.main.setDeadzone(gameSize.width * 0.4, gameSize.height * 0.4);
-        }
-        this.updateCameraBounds(gameSize.width, gameSize.height);
+        this.cameraManager.handleResize(gameSize.width, gameSize.height);
     }
     
     finishGame(message, color, isWin, fatiguePenalty = 1) {

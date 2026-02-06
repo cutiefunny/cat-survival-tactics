@@ -169,7 +169,7 @@ export default class SystemModal {
         if (mode === 'save') {
             const confirmMsg = slotInfo.empty ? `슬롯 ${slotIndex + 1}에 저장하시겠습니까?` : `슬롯 ${slotIndex + 1}의 데이터(${slotInfo.name})를 덮어쓰시겠습니까?`;
             if (confirm(confirmMsg)) {
-                const data = this.scene.getCurrentGameData();
+                const data = this.scene.stateManager.getCurrentGameData();
                 SaveManager.saveToSlot(slotIndex, data);
                 SaveManager.saveGame(data);
                 this.closeSlotModal();

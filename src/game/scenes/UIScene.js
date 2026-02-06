@@ -17,11 +17,13 @@ export default class UIScene extends Phaser.Scene {
         this.startBtn = null;
         this.msgText = null;
         this.debugStats = null;
+        this._battleSceneCache = null; // BattleScene 캐시
         
         this.gameOverModal = new GameOverModal(this);
 
         // BattleScene으로부터 UI 업데이트 이벤트 수신 설정
         const battleScene = this.scene.get('BattleScene');
+        this._battleSceneCache = battleScene; // 캐시 저장
         if (battleScene) {
             battleScene.events.off('updateUI'); 
             battleScene.events.on('updateUI', this.handleUIUpdate, this);
@@ -34,6 +36,13 @@ export default class UIScene extends Phaser.Scene {
         // 리사이즈 이벤트 대응
         this.scale.on('resize', this.handleResize, this);
         this.handleResize(this.scale.gameSize);
+    }
+
+    getBattleScene() {
+        if (!this._battleSceneCache || !this._battleSceneCache.scene.isActive()) {
+            this._battleSceneCache = this.scene.get('BattleScene');
+        }
+        return this._battleSceneCache;
     }
 
     createFooter() {
@@ -52,7 +61,7 @@ export default class UIScene extends Phaser.Scene {
             .setTint(0x808080);
         
         this.autoBtn.on('pointerdown', () => {
-            const battleScene = this.scene.get('BattleScene');
+            const battleScene = this.getBattleScene();
             if (battleScene) {
                 this.addClickEffect(this.autoBtn);
                 battleScene.toggleAutoBattle();
@@ -64,7 +73,7 @@ export default class UIScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         
         this.squadBtn.on('pointerdown', () => {
-            const battleScene = this.scene.get('BattleScene');
+            const battleScene = this.getBattleScene();
             if (battleScene) {
                 this.addClickEffect(this.squadBtn);
                 battleScene.toggleSquadState();
@@ -76,7 +85,7 @@ export default class UIScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         
         this.itemBtn.on('pointerdown', () => {
-            const battleScene = this.scene.get('BattleScene');
+            const battleScene = this.getBattleScene();
             if (battleScene && battleScene.uiManager && battleScene.uiManager.itemModal) {
                 this.addClickEffect(this.itemBtn);
                 battleScene.uiManager.itemModal.toggle();
@@ -88,7 +97,7 @@ export default class UIScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         
         this.speedBtn.on('pointerdown', () => {
-            const battleScene = this.scene.get('BattleScene');
+            const battleScene = this.getBattleScene();
             if (battleScene) {
                 this.addClickEffect(this.speedBtn);
                 battleScene.toggleGameSpeed();
@@ -169,16 +178,26 @@ export default class UIScene extends Phaser.Scene {
     }
 
     showStartButton(callback) {
+        if (!this.add || !this.scale || !this.tweens) {
+            console.warn('UIScene not ready for showStartButton');
+            return;
+        }
         if (this.startBtn) this.startBtn.destroy();
         const { width, height } = this.scale;
         this.startBtn = this.add.container(width / 2, height / 2).setDepth(2000);
+        if (!this.startBtn) return;
         const bg = this.add.rectangle(0, 0, 220, 80, 0xffffff).setStrokeStyle(4, 0xffffff).setInteractive({ useHandCursor: true });
         const text = this.add.text(0, 0, 'BATTLE START', { fontSize: '28px', fontStyle: 'bold', fill: '#000000' }).setOrigin(0.5);
+        if (!bg || !text) return;
         this.startBtn.add([bg, text]);
         bg.on('pointerdown', () => {
+            if (!this.tweens || !this.startBtn) return;
             this.tweens.add({
                 targets: this.startBtn, scale: 0.9, duration: 100, yoyo: true,
-                onComplete: () => { this.startBtn.setVisible(false); if (callback) callback(); }
+                onComplete: () => { 
+                    if (this.startBtn) this.startBtn.setVisible(false); 
+                    if (callback) callback(); 
+                }
             });
         });
     }

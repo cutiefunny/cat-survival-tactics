@@ -9,13 +9,9 @@ export default class BattleUIManager {
         this.isDebugEnabled = false; 
         this.itemModal = null; 
         this.dialogContainer = null;
-
-        // UI 요소 참조 저장을 위한 객체 (UIScene의 객체를 논리적으로 연결)
-        this.uiButtons = {
-            auto: null,
-            squad: null,
-            speed: null
-        };
+        this._uiSceneCache = null; // UIScene 캐시
+        this._debugUpdateTimer = 0; // 디버그 업데이트 타이머
+        this._debugUpdateInterval = 500; // 디버그 업데이트 간격 (ms)
 
         // UIScene 실행 확인 및 실행
         if (!this.scene.scene.isActive('UIScene')) {
@@ -23,17 +19,21 @@ export default class BattleUIManager {
         }
     }
 
+    // UIScene 캐시 및 조회 최적화
+    getUIScene() {
+        if (!this._uiSceneCache || !this._uiSceneCache.scene.isActive()) {
+            this._uiSceneCache = this.scene.scene.get('UIScene');
+        }
+        return this._uiSceneCache;
+    }
+
     create() {
-        // UIScene이 확실히 로드된 후 실행하기 위해 약간의 딜레이
-        this.scene.time.delayedCall(100, () => {
-            const uiScene = this.scene.scene.get('UIScene');
-            if (uiScene) {
-                // UI Scene에 모달 초기화 (버튼 생성 로직은 제거됨)
-                this.itemModal = new BattleItemModal(uiScene, this.scene);
-            } else {
-                console.error("❌ UIScene not found!");
-            }
-        });
+        const uiScene = this.getUIScene();
+        if (uiScene) {
+            this.itemModal = new BattleItemModal(uiScene, this.scene);
+        } else {
+            console.error("❌ UIScene not found!");
+        }
     }
 
     // [제거] createInventoryButton 메서드를 삭제했습니다.
@@ -41,24 +41,24 @@ export default class BattleUIManager {
 
     // Bridge Methods: UIScene의 메서드를 호출하도록 데이터 흐름 연결
     updateAutoButton(isAuto) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.updateAutoButton) {
+        const ui = this.getUIScene();
+        if (ui?.updateAutoButton) {
             ui.updateAutoButton(isAuto);
         }
         this.emitUIEvent('auto', isAuto);
     }
 
     updateSquadButton(state) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.updateSquadButton) {
+        const ui = this.getUIScene();
+        if (ui?.updateSquadButton) {
             ui.updateSquadButton(state);
         }
         this.emitUIEvent('squad', state);
     }
 
     updateSpeedButton(speed) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.updateSpeedButton) {
+        const ui = this.getUIScene();
+        if (ui?.updateSpeedButton) {
             ui.updateSpeedButton(speed);
         }
         this.emitUIEvent('speed', speed);
@@ -68,15 +68,6 @@ export default class BattleUIManager {
         this.scene.events.emit('updateUI', { type, value });
     }
 
-    // --- 시스템 기능 유지를 위한 나머지 메서드 ---
-    createFooter() { }
-    createAutoBattleButton() { }
-    createSquadButton() { }
-    createSpeedButton() { }
-    createGameMessages() { }
-    createLoadingText() { }
-    destroyLoadingText() { }
-
     createDebugStats() { 
         this.isDebugEnabled = true;
         this.updateDebugStatsVisibility();
@@ -84,42 +75,45 @@ export default class BattleUIManager {
     
     destroyDebugStats() {
         this.isDebugEnabled = false;
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.debugStats) {
+        const ui = this.getUIScene();
+        if (ui?.debugStats) {
             ui.debugStats.setVisible(false);
         }
     }
 
     updateDebugStatsVisibility() {
         if (!this.isDebugEnabled) return;
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.debugStats && !ui.debugStats.visible) {
+        const ui = this.getUIScene();
+        if (ui?.debugStats && !ui.debugStats.visible) {
             ui.showDebugStats();
         }
     }
 
     createStartButton(callback) {
+        // UIScene이 완전히 준비될 때까지 약간 대기
         this.scene.time.delayedCall(100, () => {
-            const ui = this.scene.scene.get('UIScene');
-            if (ui && ui.showStartButton) {
+            const ui = this.getUIScene();
+            if (ui?.showStartButton) {
                 ui.showStartButton(callback);
+            } else {
+                console.warn('❌ UIScene not ready for createStartButton');
             }
         });
     }
     
     updateCoins(amount) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.updateCoins) ui.updateCoins(amount);
+        const ui = this.getUIScene();
+        if (ui?.updateCoins) ui.updateCoins(amount);
     }
 
     showStartAnimation() {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.showStartAnimation) ui.showStartAnimation();
+        const ui = this.getUIScene();
+        if (ui?.showStartAnimation) ui.showStartAnimation();
     }
 
     playCoinAnimation(startX, startY, amount, onComplete) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.playCoinAnimation) {
+        const ui = this.getUIScene();
+        if (ui?.playCoinAnimation) {
             ui.playCoinAnimation(startX, startY, amount, onComplete);
         } else {
             if (onComplete) onComplete();
@@ -127,27 +121,33 @@ export default class BattleUIManager {
     }
 
     createGameOverUI(message, color, btnText, callback) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.createGameOverUI) {
+        const ui = this.getUIScene();
+        if (ui?.createGameOverUI) {
             ui.createGameOverUI(message, color, btnText, callback);
         }
     }
 
     createRetreatConfirmModal(onConfirm, onCancel) {
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.showRetreatModal) {
+        const ui = this.getUIScene();
+        if (ui?.showRetreatModal) {
             ui.showRetreatModal(onConfirm, onCancel);
         }
     }
 
-    updateDebugStats(loop) {
+    updateDebugStats(loop, delta) {
         if (!this.isDebugEnabled) return;
-        const ui = this.scene.scene.get('UIScene');
-        if (ui && ui.debugStats) {
+        
+        // Throttle: 500ms마다만 업데이트
+        this._debugUpdateTimer += delta || 16;
+        if (this._debugUpdateTimer < this._debugUpdateInterval) return;
+        this._debugUpdateTimer = 0;
+        
+        const ui = this.getUIScene();
+        if (ui?.debugStats) {
             if (!ui.debugStats.visible) ui.showDebugStats();
             if (ui.updateDebugStats) {
                 let memInfo = null;
-                if (window.performance && window.performance.memory) {
+                if (window.performance?.memory) {
                     memInfo = Math.round(window.performance.memory.usedJSHeapSize / 1024 / 1024);
                 }
                 ui.updateDebugStats(loop.actualFps, memInfo);
@@ -156,7 +156,7 @@ export default class BattleUIManager {
     }
 
     showDialogConfirm(text, options, onAction) {
-        const uiScene = this.scene.scene.get('UIScene');
+        const uiScene = this.getUIScene();
         if (!uiScene) return;
 
         if (this.dialogContainer) this.dialogContainer.destroy();
@@ -210,8 +210,16 @@ export default class BattleUIManager {
             this.dialogContainer = null;
         }
     }
-    
-    updateScore(blue, red) {}
-    cleanupBeforeBattle() {} 
-    handleResize(w, h) {} 
+
+    // 정리 메서드 추가 (메모리 누수 방지)
+    destroy() {
+        if (this.dialogContainer) {
+            this.dialogContainer.destroy();
+            this.dialogContainer = null;
+        }
+        if (this.itemModal) {
+            this.itemModal = null;
+        }
+        this._uiSceneCache = null;
+    }
 }

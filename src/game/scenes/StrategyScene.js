@@ -23,6 +23,11 @@ import SaveManager from '../managers/SaveManager';
 import StrategyUIManager from '../managers/StrategyUIManager'; 
 import StrategyMapManager from '../managers/StrategyMapManager'; 
 import StrategyTokenManager from '../managers/StrategyTokenManager'; 
+import StrategyStateManager from '../managers/StrategyStateManager';
+import StrategyBattleCoordinator from '../managers/StrategyBattleCoordinator';
+import StrategyTurnManager from '../managers/StrategyTurnManager';
+import StrategyEnemyAI from '../managers/StrategyEnemyAI';
+import StrategyCameraManager from '../managers/StrategyCameraManager'; 
 
 export default class StrategyScene extends BaseScene {
     constructor() {
@@ -30,69 +35,8 @@ export default class StrategyScene extends BaseScene {
     }
 
     init(data) {
-        this.isManualLoad = false;
-        this.isProcessingTurn = false;
-
-        if (data && data.battleResult) {
-            this.battleResultData = data.battleResult;
-        }
-
-        if (data && data.manualLoadData) {
-            console.log("📂 [StrategyScene] Manual Load Data Applied", data.manualLoadData);
-            const loadData = data.manualLoadData;
-
-            this.registry.set('playerInventory', loadData.playerInventory || {});
-            
-            this.isManualLoad = true;
-
-            const keysToReset = ['playerCoins', 'playerSquad', 'unlockedRoles', 'worldMapData', 'leaderPosition', 'turnCount', 'lastSafeNodeId'];
-            keysToReset.forEach(key => this.registry.remove(key));
-
-            this.registry.set('playerCoins', loadData.playerCoins);
-            this.registry.set('playerSquad', loadData.playerSquad);
-            this.registry.set('unlockedRoles', loadData.unlockedRoles);
-            this.registry.set('worldMapData', loadData.worldMapData);
-            this.registry.set('leaderPosition', loadData.leaderPosition);
-            this.registry.set('turnCount', loadData.turnCount || 1);
-            this.registry.set('lastSafeNodeId', loadData.lastSafeNodeId);
-            
-            this.battleResultData = null;
-        }
-
-        if (!this.isManualLoad) {
-            const savedData = SaveManager.loadGame();
-
-            if (savedData) {
-                if (this.registry.get('playerCoins') === undefined) {
-                    this.registry.set('playerCoins', savedData.playerCoins ?? 10);
-                }
-                if (!this.registry.get('playerSquad')) {
-                    this.registry.set('playerSquad', savedData.playerSquad || [{ role: 'Leader', level: 1, xp: 0 }]);
-                }
-                if (!this.registry.get('unlockedRoles')) {
-                    this.registry.set('unlockedRoles', savedData.unlockedRoles || ['Normal']);
-                }
-                if (!this.registry.get('worldMapData') && savedData.worldMapData) {
-                    this.registry.set('worldMapData', savedData.worldMapData);
-                }
-                if (this.registry.get('leaderPosition') === undefined && savedData.leaderPosition) {
-                    this.registry.set('leaderPosition', savedData.leaderPosition);
-                }
-                if (this.registry.get('turnCount') === undefined) {
-                    this.registry.set('turnCount', savedData.turnCount ?? 1);
-                }
-                if (!this.registry.get('playerInventory')) {
-                    this.registry.set('playerInventory', savedData.playerInventory || {});
-                }
-            }
-        }
-
-        if (this.registry.get('playerInventory') === undefined) {
-            this.registry.set('playerInventory', {});
-        }
-
-        const hasRegistryData = this.registry.get('playerCoins') !== undefined;
-        this.isNewGame = !this.isManualLoad && !hasRegistryData; 
+        this.stateManager = new StrategyStateManager(this);
+        this.stateManager.initializeState(data);
     }
 
     preload() {
@@ -119,6 +63,10 @@ export default class StrategyScene extends BaseScene {
         this.uiManager = new StrategyUIManager(this);
         this.mapManager = new StrategyMapManager(this); 
         this.tokenManager = new StrategyTokenManager(this);
+        this.battleCoordinator = new StrategyBattleCoordinator(this);
+        this.turnManager = new StrategyTurnManager(this);
+        this.enemyAI = new StrategyEnemyAI(this);
+        this.cameraManager = new StrategyCameraManager(this);
 
         this.scene.stop('UIScene');
         this.cameras.main.setBackgroundColor('#111');
@@ -146,25 +94,6 @@ export default class StrategyScene extends BaseScene {
         });
 
         this.fetchStrategyConfig(map);
-    }
-
-    getCurrentGameData() {
-        return {
-            playerCoins: this.registry.get('playerCoins'),
-            playerSquad: this.registry.get('playerSquad'),
-            playerInventory: this.registry.get('playerInventory'),
-            unlockedRoles: this.registry.get('unlockedRoles'),
-            worldMapData: this.registry.get('worldMapData'),
-            leaderPosition: this.registry.get('leaderPosition'),
-            lastSafeNodeId: this.registry.get('lastSafeNodeId'),
-            turnCount: this.registry.get('turnCount')
-        };
-    }
-
-    saveProgress() {
-        const data = this.getCurrentGameData();
-        SaveManager.saveGame(data);
-        console.log("💾 [StrategyScene] Progress Saved (Auto)");
     }
 
     async fetchStrategyConfig(map) {
@@ -195,29 +124,7 @@ export default class StrategyScene extends BaseScene {
             console.error("❌ Failed to load strategy config:", e);
         }
         
-        if (!this.isManualLoad) {
-            const initialCoins = this.strategySettings?.gameSettings?.initialCoins ?? 50; 
-            
-            if (this.registry.get('playerCoins') === undefined) {
-                 this.registry.set('playerCoins', initialCoins);
-            }
-            
-            if (!this.registry.get('playerSquad')) {
-                 this.registry.set('playerSquad', [{ role: 'Leader', level: 1, xp: 0 }]);
-            }
-            
-            if (!this.registry.get('unlockedRoles')) {
-                 this.registry.set('unlockedRoles', ['Normal']);
-            }
-            
-            if (this.registry.get('turnCount') === undefined) {
-                 this.registry.set('turnCount', 1);
-            }
-
-            if (!this.registry.get('playerInventory')) {
-                this.registry.set('playerInventory', {});
-            }
-        }
+        this.stateManager.applyInitialDefaults(this.strategySettings);
 
         this.initializeGameWorld(map, armyData);
     }
@@ -232,50 +139,10 @@ export default class StrategyScene extends BaseScene {
         this.mapManager.initialize(map, dbArmyData);
         const mapNodes = this.mapManager.mapNodes;
 
-        let battleResultMessage = null;
-        let postBattleScript = null; // [New] 전투 후 재생할 스크립트 저장소
-
-        if (this.battleResultData) {
-            const { targetNodeId, isWin, remainingCoins } = this.battleResultData;
-            
-            this.registry.set('playerCoins', remainingCoins);
-
-            if (isWin) {
-                const node = mapNodes.find(n => n.id === targetNodeId);
-                if (node) {
-                    // [New] 승리 시 실행할 스크립트가 있는지 확인 (condition: 'win')
-                    // 노드 데이터를 초기화(null)하기 전에 미리 가져옵니다.
-                    if (node.script && node.script_condition === 'win') {
-                        postBattleScript = node.script;
-                    }
-
-                    node.owner = 'player';
-                    node.army = null; 
-                    node.script = null; // 초기화 (재실행 방지)
-                    this.registry.set('worldMapData', mapNodes);
-                    this.registry.set('leaderPosition', targetNodeId);
-                    
-                    this.mapManager.setNodeColor(targetNodeId, 0x4488ff);
-                }
-                battleResultMessage = "🏆 승리! 영토를 점령했습니다!";
-                this.handleStoryUnlocks(targetNodeId);
-            } else {
-                const lastSafeId = this.registry.get('lastSafeNodeId');
-                if (lastSafeId) {
-                    this.registry.set('leaderPosition', lastSafeId);
-                    const safeNode = mapNodes.find(n => n.id === lastSafeId);
-                    const retreatName = safeNode ? safeNode.name : "본부";
-                    battleResultMessage = `🏳️ 패배... ${retreatName}(으)로 후퇴합니다.`;
-                } else {
-                    const base = mapNodes.find(n => n.owner === 'player') || mapNodes[0];
-                    if (base) this.registry.set('leaderPosition', base.id);
-                    battleResultMessage = "🏳️ 패배... 본부로 후퇴합니다.";
-                }
-            }
-            
-            this.saveProgress();
-            this.battleResultData = null;
-        }
+        // 전투 결과 처리
+        const result = this.battleCoordinator.processBattleResult(this.battleResultData, mapNodes);
+        const battleResultMessage = result.message;
+        const postBattleScript = result.postBattleScript;
 
         this.tokenManager.createEnemyTokens(mapNodes);
         this.createPlayerToken(); 
@@ -288,14 +155,12 @@ export default class StrategyScene extends BaseScene {
         
         this.uiManager.updateState();
 
-        this.updateCameraLayout();
-        this.setupCameraControls();
-        this.prevPinchDistance = 0;
+        this.cameraManager.updateLayout();
+        this.cameraManager.setupControls();
 
-        // [New] 전투 승리 스크립트가 있다면 재생
+        // 전투 승리 스크립트 재생
         if (postBattleScript) {
             console.log("📜 Playing Post-Battle Script (Win Condition)");
-            // UI 초기화가 끝난 뒤 약간의 딜레이 후 재생
             this.time.delayedCall(500, () => {
                 this.scene.pause();
                 this.scene.launch('EventScene', { 
@@ -316,12 +181,12 @@ export default class StrategyScene extends BaseScene {
             this.registry.set('unlockedRoles', unlocked);
             this.uiManager.setStatusText(`🎉 새로운 동료 해금: ${roleName}!`);
             this.cameras.main.flash(500, 255, 255, 0); 
-            this.saveProgress();
+            this.stateManager.saveProgress();
         }
     }
 
     handleResize(gameSize) {
-        this.updateCameraLayout();
+        this.cameraManager.handleResize();
         this.uiManager.resize(gameSize);
     }
 
@@ -345,23 +210,13 @@ export default class StrategyScene extends BaseScene {
         this.tokenManager.moveLeaderToken(targetNode, () => {
             this.registry.set('leaderPosition', targetNode.id);
             this.input.enabled = true;
-            this.saveProgress();
+            this.stateManager.saveProgress();
             if (onCompleteCallback) onCompleteCallback();
         });
     }
 
     undoMove() {
-        if (!this.hasMoved || this.previousLeaderId === null) return;
-        const prevNode = this.mapManager.getNodeById(this.previousLeaderId);
-        if (!prevNode) return;
-        this.uiManager.setStatusText("↩️ 원래 위치로 복귀 중...");
-        this.moveLeaderToken(prevNode, () => {
-            this.hasMoved = false; this.previousLeaderId = null; this.selectedTargetId = null; 
-            this.uiManager.setStatusText(`📍 복귀 완료: ${prevNode.name}`);
-            this.uiManager.updateState();
-            if (this.selectionTween) { this.selectionTween.stop(); this.selectionTween = null; }
-            this.mapManager.resetNodesVisual(); 
-        });
+        this.turnManager.undoMove();
     }
 
     selectTerritory(circleObj) {
@@ -420,114 +275,15 @@ export default class StrategyScene extends BaseScene {
     }
 
     handleNodeArrival(node) {
-        if (node.owner === 'neutral') {
-            this.handleNeutralEvent(node);
-            return; 
-        }
-
-        let enemyCount = 0;
-        if (node.army) {
-            if (Array.isArray(node.army)) {
-                enemyCount = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
-            } else {
-                enemyCount = node.army.count || 1;
-            }
-        }
-
-        if (node.owner !== 'player' && enemyCount <= 0) {
-            console.log(`🚩 [StrategyScene] 빈 영토 자동 점령: ${node.name}`);
-
-            node.owner = 'player';
-            node.army = null;
-            
-            this.selectedTargetId = null;
-
-            this.registry.set('worldMapData', this.mapManager.mapNodes);
-            this.saveProgress();
-
-            this.mapManager.setNodeColor(node.id, 0x4488ff);
-
-            this.uiManager.setStatusText(`🚩 ${node.name} 무혈 입성! 적군 없이 점령했습니다.`);
-            this.uiManager.updateState();
-            return;
-        }
-
-        if (this.selectedTargetId) {
-            let infoText = ""; 
-            if (enemyCount > 0) {
-                infoText = ` (적군: ${enemyCount}마리)`;
-            }
-            const battleMsg = `⚔️ ${node.name} 진입!${infoText} 전투하려면 [전투 시작]`;
-            const finalMsg = node.text ? `${node.text}\n${battleMsg}` : battleMsg;
-            this.uiManager.setStatusText(finalMsg);
-        } else { 
-            this.uiManager.setStatusText(`✅ ${node.name} 도착. (취소 가능)`); 
-        }
-        
-        this.uiManager.updateState();
+        this.battleCoordinator.handleNodeArrival(node);
     }
 
     handleNeutralEvent(node) {
-        let unlockedUnits = [];
-
-        if (node.script && Array.isArray(node.script)) {
-            const unlockCommand = node.script.find(cmd => cmd.type === 'unlock_unit');
-
-            if (unlockCommand && Array.isArray(unlockCommand.unit)) {
-                console.log(`🎁 [StrategyScene] 유닛 해금 이벤트 발생:`, unlockCommand.unit);
-
-                unlockCommand.unit.forEach(roleName => {
-                    this.unlockUnit(roleName); 
-                    unlockedUnits.push(roleName);
-                });
-            }
-        }
-
-        node.owner = 'player';
-        node.script = null; 
-        node.army = null;   
-
-        this.registry.set('worldMapData', this.mapManager.mapNodes);
-        
-        const token = this.tokenManager.getTokenAt(node.x, node.y);
-        if (token) {
-            token.destroy();
-            this.tokenManager.enemyTokens = this.tokenManager.enemyTokens.filter(t => t !== token);
-        }
-
-        this.mapManager.setNodeColor(node.id, 0x4488ff);
-
-        this.saveProgress();
-        this.uiManager.updateState();
-        this.input.enabled = true;
+        this.battleCoordinator.handleNeutralEvent(node);
     }
 
     handleEventResult(result, node) {
-        if (result === 'recruit') {
-            if (node.army) {
-                let firstUnit = Array.isArray(node.army) ? node.army[0] : node.army;
-                if (firstUnit && firstUnit.type) {
-                    const roleName = firstUnit.type.charAt(0).toUpperCase() + firstUnit.type.slice(1);
-                    this.unlockUnit(roleName);
-                    this.uiManager.setStatusText(`🤝 ${roleName} 영입 성공!`);
-                    node.owner = 'player';
-                    node.script = null; 
-                    
-                    const token = this.tokenManager.getTokenAt(node.x, node.y);
-                    if (token) token.destroy();
-                    
-                    this.registry.set('worldMapData', this.mapManager.mapNodes);
-                    this.saveProgress();
-                    
-                    this.mapManager.setNodeColor(node.id, 0x4488ff);
-                }
-            }
-        } else {
-            this.uiManager.setStatusText(`✅ ${node.name}에서 잠시 휴식을 취했습니다.`);
-        }
-        
-        this.uiManager.updateState();
-        this.input.enabled = true;
+        this.battleCoordinator.handleEventResult(result, node);
     }
 
     getCameraTarget(speaker) {
@@ -539,252 +295,12 @@ export default class StrategyScene extends BaseScene {
 
     shakeNode(target) { this.tweens.add({ targets: target, x: target.x + 5, duration: 50, yoyo: true, repeat: 3 }); this.cameras.main.shake(100, 0.005); }
 
-    moveEnemies(onComplete) {
-        const playerPosId = this.registry.get('leaderPosition');
-        const enemyNodes = this.mapManager.getNodesByOwner('enemy')
-            .filter(n => n.army && n.army.isReinforcement);
-
-        if (enemyNodes.length === 0) {
-            if (onComplete) onComplete(0);
-            return 0;
-        }
-
-        const moves = [];
-
-        enemyNodes.forEach(node => {
-            const path = this.mapManager.findPath(node.id, playerPosId);
-            if (path && path.length > 1) {
-                const nextNodeId = path[1];
-                const targetNode = this.mapManager.getNodeById(nextNodeId);
-                const isBlocked = targetNode.army !== null && targetNode.army !== undefined;
-                
-                if (!isBlocked) {
-                    moves.push({ fromNode: node, toNode: targetNode });
-                }
-            }
-        });
-
-        if (moves.length === 0) {
-            if (onComplete) onComplete(0);
-            return 0;
-        }
-
-        this.tokenManager.moveEnemies(
-            moves, 
-            (move) => {
-                move.toNode.army = move.fromNode.army;
-                move.toNode.owner = 'enemy';
-                move.fromNode.army = null;
-                
-                this.mapManager.setNodeColor(move.toNode.id, 0xff4444);
-            },
-            () => {
-                if (onComplete) onComplete(moves.length);
-            }
-        );
-        
-        return moves.length;
-    }
-
     handleTurnEnd() {
-        if (this.isProcessingTurn) return;
-        this.isProcessingTurn = true; 
-
-        const squad = this.registry.get('playerSquad') || [];
-        const recoveryAmount = this.hasMoved ? 1 : 3;
-        
-        let recoveredCount = 0;
-        let totalMaintenanceCost = 0;
-
-        const registryRoleDefs = this.registry.get('roleDefinitions') || {};
-        const roleDefs = { ...ROLE_BASE_STATS, ...registryRoleDefs };
-
-        squad.forEach(unit => {
-            if (unit.fatigue > 0) {
-                unit.fatigue = Math.max(0, unit.fatigue - recoveryAmount);
-                recoveredCount++;
-            }
-            let maintenance = 0;
-            if (roleDefs[unit.role] && roleDefs[unit.role].maintenance !== undefined) {
-                maintenance = roleDefs[unit.role].maintenance;
-            } else {
-                if (unit.role === 'Leader') maintenance = 3;
-                else {
-                    const shopInfo = UNIT_COSTS.find(u => u.role === unit.role);
-                    const baseCost = shopInfo ? shopInfo.cost : 100;
-                    maintenance = Math.floor(baseCost * 0.2);
-                }
-            }
-            totalMaintenanceCost += maintenance;
-        });
-        
-        const mapNodes = this.mapManager.mapNodes;
-        const ownedTerritories = mapNodes ? mapNodes.filter(n => n.owner === 'player').length : 0;
-        const incomePerTerritory = this.strategySettings?.gameSettings?.territoryIncome ?? 2;
-        const totalIncome = ownedTerritories * incomePerTerritory;
-
-        let currentCoins = this.registry.get('playerCoins');
-        let isBankrupt = false;
-        
-        currentCoins = currentCoins + totalIncome - totalMaintenanceCost;
-        
-        console.log(`💰 [Turn End] Income: +${totalIncome} (Terr: ${ownedTerritories}), Cost: -${totalMaintenanceCost}, Result: ${currentCoins}`);
-
-        if (currentCoins < 0) {
-            isBankrupt = true;
-            currentCoins = 0;
-            const leaderOnly = squad.filter(u => u.role === 'Leader');
-            this.registry.set('playerSquad', leaderOnly);
-            console.warn("⚠️ [Bankruptcy] Mercenaries dismissed.");
-        } else {
-            this.registry.set('playerSquad', squad);
-        }
-
-        this.registry.set('playerCoins', currentCoins);
-        this.uiManager.updateCoinText(currentCoins);
-
-        this.hasMoved = false; 
-        this.previousLeaderId = null; 
-        this.selectedTargetId = null; 
-        
-        if (this.selectionTween) { 
-            this.selectionTween.stop(); 
-            this.selectionTween = null; 
-        }
-        
-        this.mapManager.resetNodesVisual();
-
-        let turnCount = this.registry.get('turnCount') || 0;
-        turnCount++;
-        this.registry.set('turnCount', turnCount);
-
-        if (isBankrupt) {
-            this.uiManager.setStatusText(`💸 급식비 부족! 용병들이 모두 떠났습니다...`, '#ff4444');
-        } else {
-            const incomeMsg = totalIncome > 0 ? ` (+${totalIncome})` : "";
-            const maintenanceMsg = totalMaintenanceCost > 0 ? ` (-${totalMaintenanceCost})` : "";
-            this.uiManager.setStatusText(`🌙 턴 종료${incomeMsg}${maintenanceMsg}`, '#ffffff');
-            
-            if (totalIncome > 0) {
-                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2 - 80, `+${totalIncome}냥 (영토)`, '#44ff44');
-            }
-            if (totalMaintenanceCost > 0) {
-                this.uiManager.showFloatingText(this.scale.width / 2, this.scale.height / 2, `-${totalMaintenanceCost}냥 (유지비)`, '#ff4444');
-            }
-        }
-        this.saveProgress();
-
-        this.moveEnemies((movedCount) => {
-             if (movedCount > 0) {
-                 this.registry.set('worldMapData', this.mapManager.mapNodes);
-                 this.tokenManager.createEnemyTokens(this.mapManager.mapNodes); 
-                 
-                 const currentText = (this.uiManager.statusText && this.uiManager.statusText.text) ? this.uiManager.statusText.text : "";
-                 this.uiManager.setStatusText(currentText + `\n⚔️ 적군 ${movedCount}부대가 이동했습니다!`, '#ffaaaa');
-
-                 const leaderPos = this.registry.get('leaderPosition');
-                 const playerNode = this.mapManager.getNodeById(leaderPos);
-                 
-                 if (playerNode && playerNode.owner === 'enemy') {
-                     console.log("⚔️ Enemy caught the player! Starting Battle...");
-                     this.selectedTargetId = leaderPos;
-                     
-                     this.cameras.main.flash(500, 255, 0, 0);
-                     this.time.delayedCall(500, () => {
-                         this.startBattle();
-                     });
-                     return; 
-                 }
-                 
-                 this.time.delayedCall(1000, () => {
-                     this.handleInvasion(turnCount);
-                 });
-             } else {
-                 this.handleInvasion(turnCount);
-             }
-        });
-    }
-
-    handleInvasion(turnCount) {
-        const reinforceInterval = this.strategySettings?.gameSettings?.reinforcementInterval || 3;
-        let invasionHappened = false;
-        let warningMsg = "";
-
-        if (turnCount % reinforceInterval === 0) {
-            const playerNodes = this.mapManager.getNodesByOwner('player');
-            
-            if (playerNodes.length > 0) {
-                playerNodes.sort((a, b) => b.id - a.id);
-                
-                let targetNode = playerNodes[0];
-                const leaderPos = this.registry.get('leaderPosition');
-
-                if (targetNode.id === leaderPos) {
-                    if (playerNodes.length > 1) {
-                        targetNode = playerNodes[1];
-                        console.log(`⚠️ [Invasion] Leader detected at Node ${leaderPos}. Targeting next node: ${targetNode.id}`);
-                    } else {
-                        targetNode = null;
-                        console.log("⚠️ [Invasion] Skipped: Player is defending the only territory.");
-                    }
-                }
-
-                if (targetNode) {
-                    const spawnCount = 5 + Math.floor(turnCount / 10);
-                    console.log(`⚠️ [Invasion] Node ${targetNode.id} (${targetNode.name}) taken by Enemy! Spawn: ${spawnCount}`);
-
-                    targetNode.owner = 'enemy';
-                    targetNode.army = { type: 'normalDog', count: spawnCount, isReinforcement: true };
-
-                    this.registry.set('worldMapData', this.mapManager.mapNodes);
-
-                    this.mapManager.setNodeColor(targetNode.id, 0xff4444);
-
-                    const token = this.tokenManager.createSingleEnemyToken(targetNode);
-                    if (token) {
-                        this.tokenManager.animateSpawn(token);
-                    }
-
-                    warningMsg = `\n⚠️ [경고] 영토 침공! ${targetNode.name}을(를) 뺏겼습니다!`;
-                    this.cameras.main.flash(500, 255, 0, 0); 
-                    
-                    invasionHappened = true;
-                }
-            }
-        }
-
-        if (invasionHappened) {
-            const currentText = (this.uiManager.statusText && this.uiManager.statusText.text) ? this.uiManager.statusText.text : "";
-            this.uiManager.setStatusText(currentText + warningMsg, '#ffaaaa');
-        }
-
-        this.isProcessingTurn = false;
-        this.uiManager.updateState();
-        this.saveProgress();
+        this.turnManager.handleTurnEnd();
     }
 
     startBattle() {
-        const targetNode = this.mapManager.getNodeById(this.selectedTargetId);
-        if (!targetNode) return;
-        const selectedLevelIndex = targetNode ? (targetNode.levelIndex || 0) : 0;
-        
-        const currentCoins = this.registry.get('playerCoins') ?? 0;
-
-        const battleData = {
-            isStrategyMode: true, 
-            targetNodeId: this.selectedTargetId, 
-            levelIndex: selectedLevelIndex,
-            currentCoins: currentCoins, 
-            armyConfig: targetNode.army || null, 
-            bgmKey: targetNode.bgm,
-            // [Modified] script, script_condition 전달 삭제!
-            // 이렇게 해야 BattleScene이 맵 파일(level6.json)의 스크립트를 우선 로드합니다.
-        };
-
-        this.scene.start('LoadingScene', {
-            targetScene: 'BattleScene',
-            targetData: battleData
-        });
+        this.battleCoordinator.startBattle();
     }
 
     createPlayerToken() {
@@ -799,48 +315,6 @@ export default class StrategyScene extends BaseScene {
     }
 
     update(time, delta) {
-        if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
-            const distance = Phaser.Math.Distance.Between(this.input.pointer1.x, this.input.pointer1.y, this.input.pointer2.x, this.input.pointer2.y);
-            if (this.prevPinchDistance > 0) {
-                const distanceDiff = (distance - this.prevPinchDistance) * 0.005; 
-                const newZoom = this.cameras.main.zoom + distanceDiff;
-                const clampedZoom = Phaser.Math.Clamp(newZoom, this.minZoom, 3);
-                this.cameras.main.setZoom(clampedZoom);
-                this.updateCameraLayout(); 
-            }
-            this.prevPinchDistance = distance;
-        } else { this.prevPinchDistance = 0; }
-    }
-
-    updateCameraLayout() {
-        const screenWidth = this.scale.width; const screenHeight = this.scale.height;
-        const isPC = this.sys.game.device.os.desktop;
-        const mapWidth = this.mapManager.mapWidth || 1024;
-        const mapHeight = this.mapManager.mapHeight || 1024;
-
-        const zoomFitWidth = screenWidth / mapWidth; const zoomFitHeight = screenHeight / mapHeight;
-        this.minZoom = isPC ? zoomFitHeight : zoomFitWidth;
-        if (this.cameras.main.zoom < this.minZoom || this.cameras.main.zoom === 1) { this.cameras.main.setZoom(this.minZoom); }
-        const currentZoom = this.cameras.main.zoom;
-        const displayWidth = screenWidth / currentZoom; const displayHeight = screenHeight / currentZoom;
-        const offsetX = Math.max(0, (displayWidth - mapWidth) / 2);
-        const offsetY = Math.max(0, (displayHeight - mapHeight) / 2);
-        this.cameras.main.setBounds(-offsetX, -offsetY, Math.max(mapWidth, displayWidth), Math.max(mapHeight, displayHeight));
-    }
-
-    setupCameraControls() {
-        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
-            const newZoom = this.cameras.main.zoom - deltaY * 0.001;
-            const clampedZoom = Phaser.Math.Clamp(newZoom, this.minZoom, 3);
-            this.cameras.main.setZoom(clampedZoom);
-            this.updateCameraLayout(); 
-        });
-        this.input.on('pointermove', (pointer) => {
-            if (this.input.pointer1.isDown && this.input.pointer2.isDown) return;
-            if (pointer.isDown) {
-                this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom;
-                this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
-            }
-        });
+        this.cameraManager.handlePinchZoom();
     }
 }
