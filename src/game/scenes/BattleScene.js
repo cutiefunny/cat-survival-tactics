@@ -303,8 +303,9 @@ export default class BattleScene extends BaseScene {
             );
         }
 
-        // [Modified] 쥐 섭취 핸들러 연결
+        // [Modified] 쥐 섭취 및 충돌 핸들러 연결
         if (miceGroup) {
+            // 아군과 쥐 - overlap으로 먹기
             this.physics.add.overlap(
                 this.blueTeam, 
                 miceGroup, 
@@ -312,6 +313,14 @@ export default class BattleScene extends BaseScene {
                 null, 
                 this
             );
+            
+            // 적군과 쥐 - collider로 물리적 충돌 (밀어내기)
+            this.physics.add.collider(this.redTeam, miceGroup);
+            
+            // NPC와 쥐 - collider로 물리적 충돌 (밀어내기)
+            if (this.npcGroup) {
+                this.physics.add.collider(this.npcGroup, miceGroup);
+            }
         }
     }
 
