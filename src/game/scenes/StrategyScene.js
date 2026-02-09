@@ -15,6 +15,12 @@ import bossImg from '../../assets/units/boss.png';
 
 import sangsuTilesImg from '../../assets/tilesets/sangsu_map.jpg';
 import openingBgm from '../../assets/sounds/opening.mp3';
+
+// [New] Daiso 아이템 아이콘 Import
+import catnipIcon from '../../assets/items/catnip.png';
+import ciaoIcon from '../../assets/items/ciao.png';
+import partyMixIcon from '../../assets/items/partyMix.png';
+
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { ROLE_BASE_STATS, UNIT_COSTS } from '../data/UnitData'; 
@@ -53,6 +59,11 @@ export default class StrategyScene extends BaseScene {
         this.load.spritesheet('raccoon_token', raccoonImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('normal_token', normalImg, { frameWidth: 100, frameHeight: 100 });
         this.load.spritesheet('boss_token', bossImg, { frameWidth: 100, frameHeight: 100 });
+
+        // [New] Daiso 아이템 아이콘 로드
+        this.load.image('icon_catnip', catnipIcon);
+        this.load.image('icon_ciao', ciaoIcon);
+        this.load.image('icon_partyMix', partyMixIcon);
 
         this.load.audio('opening_bgm', openingBgm);
     }

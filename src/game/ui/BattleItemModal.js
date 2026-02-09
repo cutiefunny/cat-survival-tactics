@@ -7,6 +7,13 @@ export default class BattleItemModal {
         this.battleScene = battleScene; 
         this.container = null;
         this.isOpen = false;
+        
+        // 아이콘 매핑 (BattleScene에서 preload된 텍스처 키)
+        this.iconMap = {
+            'catnip': 'icon_catnip',
+            'ciao': 'icon_ciao',
+            'partyMix': 'icon_partyMix'
+        };
     }
 
     toggle() {
@@ -59,7 +66,7 @@ export default class BattleItemModal {
             const y = index * 70;
             const itemGroup = this.scene.add.container(0, y);
             const btnBg = this.scene.add.rectangle(0, 0, 360, 60, 0x333333).setInteractive();
-            const icon = this.scene.add.text(-160, 0, itemData.icon, { fontSize: '30px' }).setOrigin(0.5);
+            const icon = this.scene.add.image(-160, 0, this.iconMap[itemData.icon]).setScale(0.5).setOrigin(0.5);
             const name = this.scene.add.text(-130, -10, itemData.name, { fontSize: '18px', color: '#ffffff' }).setOrigin(0, 0.5);
             const desc = this.scene.add.text(-130, 15, itemData.desc, { fontSize: '12px', color: '#aaaaaa' }).setOrigin(0, 0.5);
             const countText = this.scene.add.text(150, 0, `x${count}`, { fontSize: '20px', fontStyle: 'bold', color: '#ffff00' }).setOrigin(0.5);

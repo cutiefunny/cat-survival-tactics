@@ -17,6 +17,11 @@ import healerSheet from '../../assets/units/healer.png';
 import normalSheet from '../../assets/units/normal.png';
 import bossSheet from '../../assets/units/boss.png';
 
+// [New] Daiso 아이템 아이콘 import
+import catnipIcon from '../../assets/items/catnip.png';
+import ciaoIcon from '../../assets/items/ciao.png';
+import partyMixIcon from '../../assets/items/partyMix.png';
+
 export default class BattleAssetLoader {
     constructor(scene) {
         this.scene = scene;
@@ -54,11 +59,21 @@ export default class BattleAssetLoader {
     }
 
     /**
+     * Daiso 아이템 아이콘 로드
+     */
+    loadDaisoItemIcons() {
+        this.scene.load.image('icon_catnip', catnipIcon);
+        this.scene.load.image('icon_ciao', ciaoIcon);
+        this.scene.load.image('icon_partyMix', partyMixIcon);
+    }
+
+    /**
      * 모든 필요한 에셋 로드
      */
     preloadAll() {
         this.loadUnitSprites();
         this.loadObjectSprites();
+        this.loadDaisoItemIcons();
     }
 
     /**

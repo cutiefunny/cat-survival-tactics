@@ -8,6 +8,13 @@ export default class DaisoModal {
         this.container = null;
         this.isOpen = false;
         this.items = daisoItems;
+        
+        // 아이콘 매핑 (StrategyScene에서 preload된 텍스처 키)
+        this.iconMap = {
+            'catnip': 'icon_catnip',
+            'ciao': 'icon_ciao',
+            'partyMix': 'icon_partyMix'
+        };
     }
 
     toggle() {
@@ -82,7 +89,7 @@ export default class DaisoModal {
             
             // 아이콘
             const iconBg = this.scene.add.circle(-w/2 + 70, 0, 35, 0xf0f0f0);
-            const icon = this.scene.add.text(-w/2 + 70, 0, item.icon, { fontSize: '40px' }).setOrigin(0.5);
+            const icon = this.scene.add.image(-w/2 + 70, 0, this.iconMap[item.icon]).setScale(0.7).setOrigin(0.5);
             
             // 텍스트 정보
             const name = this.scene.add.text(-w/2 + 120, -25, item.name, { fontSize: '22px', color: '#000', fontStyle: 'bold' }).setOrigin(0, 0.5);

@@ -47,18 +47,21 @@ export default class Healer extends Unit {
         this.ai.thinkTimer -= delta;
         const isFormationMode = (this.team === 'blue' && this.scene.squadState === 'FORMATION');
 
-        // 2. [타겟 선정] 가장 위급한 아군 찾기
+        // 2. [타겟 선정] 주변 범위 내 아군을 최우선으로, 없으면 전체 중 체력 최하 아군
         let bestTarget = null;
-        if (isFormationMode) {
-            if (this.hp / this.maxHp <= 0.3) bestTarget = this; 
-            else bestTarget = this.findLowestHpAllyInRange(this.skillRange);
+        
+        // 자신의 체력이 심각하면 자신을 치료
+        if (this.hp / this.maxHp <= 0.3) {
+            bestTarget = this; 
         } else {
-            if (this.hp / this.maxHp <= 0.3) bestTarget = this; 
-            // [Fix] this.ai.findLowestHpAlly() -> this.findLowestHpAlly()
-            else bestTarget = this.findLowestHpAlly(); 
+            // 먼저 주변 범위 내 치료할 아군 찾기 (가까운 것 우선)
+            bestTarget = this.findLowestHpAllyInRange(this.skillRange);
+            
+            // 주변에 없으면 전체 팀에서 가장 체력 낮은 아군 찾기
+            if (!bestTarget) {
+                bestTarget = this.findLowestHpAlly();
+            }
         }
-
-        if (!bestTarget && !isFormationMode) bestTarget = this.findLowestHpAlly();
 
         // 3. [Sticky Targeting] 타겟 교체 로직
         const current = this.ai.currentTarget;
@@ -252,6 +255,7 @@ export default class Healer extends Unit {
         const diffX = target.x - this.x;
         if (Math.abs(diffX) > 10) this.setFlipX(diffX > 0);
         
+        // [Modified] 회복량 = 힐러의 공격력(ATK)
         const healAmount = this.attackPower; 
         target.hp = Math.min(target.hp + healAmount, target.maxHp);
         target.redrawHpBar();
