@@ -126,6 +126,13 @@ export default class BattleUnitSpawner {
                 roleConfig.name = getRandomUnitName(roleConfig.role);
             }
 
+            // Cats이 핀만 있는 경우, 리더가 아닌 다른 유닛은 스폰되지 않음
+            const isLeader = (member.role === 'Leader');
+            if (this.scene.catsPointOnly && !isLeader) {
+                console.log(`⏭️ [Spawner] Skipping non-Leader unit (${member.role}) in point-only Cats zone`);
+                return;
+            }
+
             let spawnX, spawnY;
 
             // NPC를 유닛으로 변환
@@ -144,14 +151,19 @@ export default class BattleUnitSpawner {
                 matchedNpc.destroy();
                 console.log(`✨ [Spawner] NPC Transformed: ${member.role} at (${spawnX}, ${spawnY})`);
             } else if (spawnZone) {
-                spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
-                spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
+                // 핀만 있는 경우 리더는 정확한 위치에, 그 외는 랜덤
+                if (this.scene.catsPointOnly && isLeader) {
+                    spawnX = this.scene.catsPoint.x;
+                    spawnY = this.scene.catsPoint.y;
+                } else {
+                    spawnX = Phaser.Math.Between(spawnZone.x + 20, spawnZone.right - 20);
+                    spawnY = Phaser.Math.Between(spawnZone.y + 20, spawnZone.bottom - 20);
+                }
             } else {
                 spawnX = 300;
                 spawnY = startY + (i * spawnGap);
             }
 
-            const isLeader = (member.role === 'Leader');
             const unit = this.createUnitInstance(
                 spawnX, spawnY, 'blue', 
                 this.scene.redTeam, roleConfig, isLeader
@@ -297,11 +309,29 @@ export default class BattleUnitSpawner {
 
         // 스폰 존 확인
         let spawnZone = null;
+        this.scene.catsPointOnly = false;
+        this.scene.catsPoint = null;
+
         if (map) {
             const catsLayer = map.getObjectLayer('Cats');
             if (catsLayer && catsLayer.objects.length > 0) {
                 const obj = catsLayer.objects[0];
-                spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
+                
+                // Cats이 핀만 있는 경우 (width: 0, height: 0)
+                if (obj.width === 0 && obj.height === 0) {
+                    this.scene.catsPointOnly = true;
+                    this.scene.catsPoint = { x: obj.x, y: obj.y };
+                    console.log(`📍 [Spawner] Cats is point-only at (${obj.x}, ${obj.y}) - only Leader will spawn`);
+                    
+                    // 핀 위치를 중심으로 작은 사각형 생성 (시각화용)
+                    spawnZone = new Phaser.Geom.Rectangle(obj.x - 10, obj.y - 10, 20, 20);
+                } else {
+                    // Cats이 영역인 경우
+                    this.scene.catsPointOnly = false;
+                    spawnZone = new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height);
+                    console.log(`📦 [Spawner] Cats is area-based - all units can spawn in zone`);
+                }
+                
                 this.scene.placementZone = spawnZone;
                 
                 // 스폰 존 시각화

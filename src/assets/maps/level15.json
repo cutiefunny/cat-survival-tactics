@@ -1,0 +1,201 @@
+{ "compressionlevel":-1,
+ "height":10,
+ "infinite":false,
+ "layers":[
+        {
+         "data":[204, 205, 206, 207, 208, 209, 210, 211, 212, 213,
+            236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
+            268, 269, 270, 271, 272, 273, 274, 275, 276, 277,
+            300, 301, 302, 303, 304, 305, 306, 307, 308, 309,
+            332, 333, 334, 335, 336, 337, 338, 339, 340, 341,
+            364, 365, 366, 367, 368, 369, 370, 371, 372, 373,
+            396, 397, 398, 399, 400, 401, 402, 403, 404, 405,
+            428, 429, 430, 431, 432, 433, 434, 435, 436, 437,
+            460, 461, 462, 463, 464, 465, 466, 467, 468, 469,
+            491, 492, 493, 494, 495, 496, 497, 498, 499, 500],
+         "height":10,
+         "id":1,
+         "name":"Ground",
+         "opacity":1,
+         "type":"tilelayer",
+         "visible":true,
+         "width":10,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":2,
+         "name":"Dogs",
+         "objects":[
+                {
+                 "height":0,
+                 "id":1,
+                 "name":"",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":161,
+                 "y":69
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":3,
+         "name":"Cats",
+         "objects":[
+                {
+                 "height":0,
+                 "id":7,
+                 "name":"",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":161,
+                 "y":253
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":4,
+         "name":"Blocks",
+         "objects":[
+                {
+                 "height":135,
+                 "id":2,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":56,
+                 "x":0,
+                 "y":1
+                }, 
+                {
+                 "height":135,
+                 "id":3,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":45,
+                 "x":273,
+                 "y":0
+                }, 
+                {
+                 "height":26,
+                 "id":4,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":21,
+                 "x":299,
+                 "y":136
+                }, 
+                {
+                 "height":22,
+                 "id":5,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":72,
+                 "x":30,
+                 "y":297
+                }, 
+                {
+                 "height":12,
+                 "id":6,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":59,
+                 "x":105,
+                 "y":307
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }],
+ "nextlayerid":5,
+ "nextobjectid":8,
+ "orientation":"orthogonal",
+ "renderorder":"right-down",
+ "tiledversion":"1.11.2",
+ "tileheight":32,
+ "tilesets":[
+        {
+         "columns":32,
+         "firstgid":1,
+         "image":"..\/tilesets\/street1.jpg",
+         "imageheight":1028,
+         "imagewidth":1028,
+         "margin":0,
+         "name":"street1",
+         "spacing":0,
+         "tilecount":1024,
+         "tileheight":32,
+         "tilewidth":32,
+         "transparentcolor":"#8e8985"
+        }],
+ "tilewidth":32,
+ "type":"map",
+ "version":"1.10",
+ "width":10,
+ "script": [
+       {
+              "type": "dialog",
+              "speaker": "너굴맨",
+              "avatar": "raccoon",
+              "text": "김냐냐... 이 구역의 왕이라지? 기다리고 있었따"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "너굴맨! 나는 도움을 청하러 온거다냐!" 
+       },
+       {
+              "type": "dialog",
+              "speaker": "너굴맨",
+              "avatar": "raccoon",
+              "text": "흥, 그 동안 겁이 나서 내 구역은 건드리지도 못하지 않았나?\n내가 도와줄만한 녀석이긴 한거냐굴?"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "...겁이 나서 였다고 생각하나?"
+       },
+       {
+              "type": "dialog",
+              "speaker": "너굴맨",
+              "avatar": "raccoon",
+              "text": "그건 두고 보면 알겠지! 봐준건지 못 건드린건지!"
+       },
+       {
+              "type": "dialog",
+              "speaker": "김냐냐",
+              "avatar": "leader",
+              "text": "좋아, 무슨 말인지 알겠군! 어차피\n다들 몇 대 맞아 보면 알게 되더라냥!"
+       }
+  ]
+}

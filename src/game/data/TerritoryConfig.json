@@ -158,13 +158,12 @@
       "bgm": "level3"
     },
     "15": {
-      "mapId": "level4",
-      "name": "한강파 근거지",
+      "mapId": "level15",
+      "name": "너구리굴",
       "difficulty": 2,
-      "bgm": "level2",
-      "neutral": true,
+      "bgm": "level3",
       "unit": "Raccoon",
-      "text": "이 곳은 한강파의 영역이다냥!"
+      "text": "이 곳은 너구리들의 근거지다!"
     },
     "16": {
       "mapId": "level4",

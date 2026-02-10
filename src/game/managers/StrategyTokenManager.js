@@ -80,9 +80,11 @@ export default class StrategyTokenManager {
         if (Array.isArray(node.army)) {
             const bossUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'boss');
             const tankerUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'tanker');
+            const raccoonUnit = node.army.find(u => u.type && u.type.toLowerCase() === 'raccoon');
             
             if (bossUnit) topUnitType = 'boss';
             else if (tankerUnit) topUnitType = 'tanker';
+            else if (raccoonUnit) topUnitType = 'raccoon';
             else if (node.army.length > 0 && node.army[0].type) topUnitType = node.army[0].type.toLowerCase();
 
             totalCount = node.army.reduce((sum, u) => sum + (u.count || 1), 0);
@@ -113,6 +115,7 @@ export default class StrategyTokenManager {
         else { 
             if (topUnitType === 'tanker') finalSize = 70; 
             else if (topUnitType === 'boss') finalSize = 100; 
+            else if (topUnitType === 'raccoon') finalSize = 60;
             else { 
                 finalSize = 40 + (totalCount - 1) * 3; 
                 finalSize = Phaser.Math.Clamp(finalSize, 35, 75); 
