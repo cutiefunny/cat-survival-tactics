@@ -259,7 +259,7 @@ export default class BattleUnitSpawner {
             const bossStats = {
                 role: bossUnitRole,
                 name: `Boss ${bossUnitRole}`,
-                level: 10
+                level: bossUnitRole === 'Tanker' ? 10 : (bossUnitRole === 'Raccoon' ? 3 : 10)
             };
 
             const bossUnit = this.createUnitInstance(

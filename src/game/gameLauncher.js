@@ -6,9 +6,9 @@ import LoadingScene from './scenes/LoadingScene'; // [New]
 import EventScene from './scenes/EventScene'; // [New]
 
 export function launchGame(containerId, mockData = null) {
-    // [Modified] LoadingScene 추가
+    // [Modified] EventScene를 항상 포함하도록 수정 (Mock 모드에서 스크립트 실행을 위해)
     const sceneList = mockData 
-        ? [LoadingScene, BattleScene, UIScene] 
+        ? [EventScene, LoadingScene, BattleScene, UIScene] 
         : [EventScene, StrategyScene, LoadingScene, BattleScene, UIScene];
 
     const config = {
@@ -35,12 +35,26 @@ export function launchGame(containerId, mockData = null) {
                     game.registry.set('playerSquad', mockData.squad);
                     game.registry.set('playerCoins', mockData.config.gameSettings.initialCoins);
 
-                    const startSceneKey = 'BattleScene';
-                    game.scene.stop(startSceneKey);
-                    game.scene.start(startSceneKey, {
-                        levelIndex: mockData.config.gameSettings.startLevelIndex,
-                        debugConfig: mockData.config 
-                    });
+                    // [Modified] 스크립트가 있으면 EventScene을 시작, 없으면 바로 BattleScene으로
+                    if (mockData.script && mockData.script.length > 0) {
+                        const startSceneKey = 'EventScene';
+                        game.scene.stop(startSceneKey);
+                        game.scene.start(startSceneKey, {
+                            script: mockData.script,
+                            nextScene: 'BattleScene',
+                            nextSceneData: {
+                                levelIndex: mockData.config.gameSettings.startLevelIndex,
+                                debugConfig: mockData.config 
+                            }
+                        });
+                    } else {
+                        const startSceneKey = 'BattleScene';
+                        game.scene.stop(startSceneKey);
+                        game.scene.start(startSceneKey, {
+                            levelIndex: mockData.config.gameSettings.startLevelIndex,
+                            debugConfig: mockData.config 
+                        });
+                    }
                 }
             }
         }

@@ -163,7 +163,33 @@
       "difficulty": 2,
       "bgm": "level3",
       "unit": "Raccoon",
-      "text": "이 곳은 너구리들의 근거지다!"
+      "text": "이 곳은 너구리들의 근거지다!",
+      "script_condition": "win",
+      "script": [
+        {
+          "type": "dialog",
+          "speaker": "너굴맨",
+          "avatar": "raccoon",
+          "text": "역시 강하다는 소문은 거짓이 아니었굴!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "그렇다고 너희들의 영역을 차지할 생각은 없다냥!\n다만 이번 전쟁에 도움이 필요할 뿐이다냥!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "너굴맨",
+          "avatar": "raccoon",
+          "text": "안 그래도 들개놈들은 너무 시끄럽고 거슬렸다굴..\n이제부터 너구리들은 너를 도울거다굴!"
+        },
+        {
+          "type": "unlock_unit",
+          "unit": ["Raccoon"],
+          "text": "이제 너구리를 동료로 영입할 수 있다!"
+        }
+      ]
     },
     "16": {
       "mapId": "level4",
@@ -172,7 +198,56 @@
       "bgm": "level2",
       "neutral": true,
       "unit": "Healer",
-      "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!"
+      "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!",
+      "script": [
+        {
+          "type": "dialog",
+          "speaker": "냐이팅게일",
+          "avatar": "healer",
+          "text": "김냐냐? 여긴 좀처럼 오지 않더니.\n상수동의 왕이 빈민가에는 왠일로?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "그 동안 신경 못 써서 미안하다냥..\n어미 잃은 새끼들과 아픈 고양이들을 돌보고 있다고 들었따."
+        },
+        {
+          "type": "dialog",
+          "speaker": "냐이팅게일",
+          "avatar": "healer",
+          "text": "알면서 이제야 오신거군.\n상수동의 왕은 왕이 뭔지 모르냥?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "입이 백 개라도 할 말이 없구냥.\n영역을 순찰하면서 일부러 이 구역을 외면했던 것, 인정한다냥."
+        },
+        {
+          "type": "dialog",
+          "speaker": "김냐냐",
+          "avatar": "leader",
+          "text": "어떤 이유가 있든 변명은 하지 않겠다냥!\n너는 이 전쟁에서 상수동의 왕을 도와줄테냥?"
+        },
+        {
+          "type": "dialog",
+          "speaker": "냐이팅게일",
+          "avatar": "healer",
+          "text": "물론. 아픈 고양이들을 괴롭히는 들개보다는\n우리를 내버려두기라도 한 당신이 나으니까!"
+        },
+        {
+          "type": "dialog",
+          "speaker": "냐이팅게일",
+          "avatar": "healer",
+          "text": "이번 전쟁에서는 돕겠다냥. 하지만 전쟁이 끝나면\n다시는 이 구역에 오지 말라냥!"
+        },
+        {
+          "type": "unlock_unit",
+          "unit": ["Healer"],
+          "text": "이제 힐러를 동료로 영입할 수 있다!"
+        }
+      ]
     },
     "20": {
       "mapId": "level4",

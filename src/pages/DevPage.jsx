@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, deleteDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import { useNavigate } from "@solidjs/router";
-import { LEVEL_KEYS } from "../game/managers/LevelManager";
+import { LEVEL_KEYS, LEVEL_DATA } from "../game/managers/LevelManager";
 import PhaserGame from "../components/PhaserGame"; 
 
 // [설정] 역할별 기본 스탯 정의
@@ -261,7 +261,20 @@ const DevPage = () => {
   const handleStartMockBattle = () => {
       const currentConfig = JSON.parse(JSON.stringify(config));
       const squad = JSON.parse(JSON.stringify(config.blueTeamRoles));
-      setMockData({ isMock: true, config: currentConfig, squad: squad });
+      
+      // [Modified] 선택된 레벨의 스크립트를 로드
+      const selectedLevelIndex = currentConfig.gameSettings.startLevelIndex;
+      let script = null;
+      
+      if (selectedLevelIndex >= 0 && selectedLevelIndex < LEVEL_KEYS.length) {
+          const levelKey = LEVEL_KEYS[selectedLevelIndex];
+          const levelData = LEVEL_DATA[levelKey];
+          if (levelData && levelData.script) {
+              script = levelData.script;
+          }
+      }
+      
+      setMockData({ isMock: true, config: currentConfig, squad: squad, script: script });
       setShowMockBattle(true);
   };
 
