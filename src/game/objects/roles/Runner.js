@@ -297,8 +297,31 @@ export default class Runner extends Unit {
         const originalScale = this.scale;
         const defaultOriginY = this.displayOriginY;
 
+        // 점프 종료 처리 함수 (재사용)
+        const endJump = () => {
+            console.log('[SMOKE] Jump END - frame reset, depth restored');
+            
+            // Jump 완료 시 Runner body collision 복원
+            if (this.body && typeof this.body.setCollisionCategory === 'function') {
+                this.body.setCollisionCategory(this.originalCollisionCategory || 0x0001);
+                console.log('[SMOKE] Runner body collision category restored after jump');
+            } else if (this.body && this.body._originalEnable !== undefined) {
+                this.body.enable = this.body._originalEnable;
+                console.log('[SMOKE] Runner body re-enabled after jump');
+            }
+            
+            this.isJumping = false;
+            this.setScale(originalScale);
+            this.setOrigin(0.5, 0.5);
+            this.setDrag(500);
+            this.setDepth(originalDepth);
+            this.setVelocity(0, 0);
+            this.setFrame(0);
+            this.checkLandingCollision();
+        };
+
         // Tween 애니메이션 - duration과 높이 증가
-        this.scene.tweens.add({
+        const jumpTween = this.scene.tweens.add({
             targets: this,
             displayOriginY: defaultOriginY + 50,
             scaleX: originalScale * 1.2,
@@ -306,26 +329,29 @@ export default class Runner extends Unit {
             duration: jumpDuration,
             yoyo: true,
             ease: 'Sine.easeInOut',
-            onComplete: () => {
-                console.log('[SMOKE] Jump END - frame reset, depth restored');
-                
-                // [New] Jump 완료 시 Runner body collision 복원
-                if (this.body && typeof this.body.setCollisionCategory === 'function') {
-                    this.body.setCollisionCategory(this.originalCollisionCategory || 0x0001);
-                    console.log('[SMOKE] Runner body collision category restored after jump');
-                } else if (this.body && this.body._originalEnable !== undefined) {
-                    this.body.enable = this.body._originalEnable;
-                    console.log('[SMOKE] Runner body re-enabled after jump');
+            onUpdate: () => {
+                // 매 프레임마다 Blocks object와 충돌 체크
+                if (this.scene.blockObjectGroup) {
+                    const blocks = this.scene.blockObjectGroup.getChildren();
+                    for (const block of blocks) {
+                        if (block.active && this.body) {
+                            // 충돌 체크 - overlap 사용
+                            const bounds = this.getBounds();
+                            const blockBounds = block.getBounds ? block.getBounds() : new Phaser.Geom.Rectangle(block.x - block.width/2, block.y - block.height/2, block.width, block.height);
+                            
+                            if (Phaser.Geom.Intersects.RectangleToRectangle(bounds, blockBounds)) {
+                                console.log('[SMOKE] Jump interrupted - hit block object');
+                                // 충돌 시 즉시 점프 중단
+                                jumpTween.stop();
+                                endJump();
+                                return;
+                            }
+                        }
+                    }
                 }
-                
-                this.isJumping = false;
-                this.setScale(originalScale);
-                this.setOrigin(0.5, 0.5);
-                this.setDrag(500);
-                this.setDepth(originalDepth);
-                this.setVelocity(0, 0);
-                this.setFrame(0);
-                this.checkLandingCollision();
+            },
+            onComplete: () => {
+                endJump();
             }
         });
     }
