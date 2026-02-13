@@ -310,6 +310,9 @@ export default class Runner extends Unit {
                 console.log('[SMOKE] Runner body re-enabled after jump');
             }
             
+            // 착지 위치가 벽/블록과 겹치는지 체크하고 밀어내기
+            this.pushOutOfWalls();
+            
             this.isJumping = false;
             this.setScale(originalScale);
             this.setOrigin(0.5, 0.5);
@@ -376,6 +379,144 @@ export default class Runner extends Unit {
                     break;
                 }
             }
+        }
+    }
+
+    // 벽/블록에 겹쳐 있으면 밖으로 밀어내기
+    pushOutOfWalls() {
+        // 유닛의 바디 반경 가져오기
+        const bodyRadius = this.body ? (this.body.halfWidth || this.baseSize / 2) : (this.baseSize / 2);
+        
+        const isInWall = (x, y) => {
+            // 유닛의 바디 전체가 안전한지 체크 (중심점 + 반경 고려)
+            // 4방향 끝점 체크
+            const checkPoints = [
+                { x: x, y: y },                    // 중심
+                { x: x + bodyRadius, y: y },       // 오른쪽
+                { x: x - bodyRadius, y: y },       // 왼쪽
+                { x: x, y: y + bodyRadius },       // 아래
+                { x: x, y: y - bodyRadius }        // 위
+            ];
+
+            for (const point of checkPoints) {
+                // 1. 타일 레이어 체크 (wallLayer, blockLayer)
+                if (this.scene.wallLayer) {
+                    const tile = this.scene.wallLayer.getTileAtWorldXY(point.x, point.y);
+                    if (tile && tile.canCollide) return true;
+                }
+                if (this.scene.blockLayer) {
+                    const tile = this.scene.blockLayer.getTileAtWorldXY(point.x, point.y);
+                    if (tile && tile.canCollide) return true;
+                }
+
+                // 2. Block Object 체크
+                if (this.scene.blockObjectGroup) {
+                    const blocks = this.scene.blockObjectGroup.getChildren();
+                    for (const block of blocks) {
+                        if (!block.active) continue;
+                        const blockBounds = block.getBounds ? block.getBounds() : 
+                            new Phaser.Geom.Rectangle(block.x - block.width/2, block.y - block.height/2, block.width, block.height);
+                        
+                        if (blockBounds.contains(point.x, point.y)) return true;
+                    }
+                }
+
+                // 3. Wall Object 체크
+                if (this.scene.wallObjectGroup) {
+                    const walls = this.scene.wallObjectGroup.getChildren();
+                    for (const wall of walls) {
+                        if (!wall.active) continue;
+                        const wallBounds = wall.getBounds ? wall.getBounds() : 
+                            new Phaser.Geom.Rectangle(wall.x - wall.width/2, wall.y - wall.height/2, wall.width, wall.height);
+                        
+                        if (wallBounds.contains(point.x, point.y)) return true;
+                    }
+                }
+            }
+
+            return false;
+        };
+
+        // 현재 위치가 벽/블록과 겹치는지 체크
+        if (!isInWall(this.x, this.y)) {
+            console.log('[SMOKE] Landing position is clear');
+            return; // 안전한 위치
+        }
+
+        console.log('[SMOKE] Landing in wall - finding safe position');
+
+        // 나선형으로 주변 위치 탐색 (더 넓은 범위, 더 작은 간격)
+        const searchRadius = 200; // 최대 탐색 반경 증가
+        const step = 10; // 탐색 간격 감소 (더 세밀하게)
+
+        for (let radius = step; radius <= searchRadius; radius += step) {
+            // 8방향 탐색
+            const directions = [
+                { x: 0, y: -1 },   // 북
+                { x: 1, y: -1 },   // 북동
+                { x: 1, y: 0 },    // 동
+                { x: 1, y: 1 },    // 남동
+                { x: 0, y: 1 },    // 남
+                { x: -1, y: 1 },   // 남서
+                { x: -1, y: 0 },   // 서
+                { x: -1, y: -1 }   // 북서
+            ];
+
+            for (const dir of directions) {
+                const testX = this.x + dir.x * radius;
+                const testY = this.y + dir.y * radius;
+
+                if (!isInWall(testX, testY)) {
+                    console.log(`[SMOKE] Safe position found at (${testX}, ${testY}), distance: ${radius}`);
+                    
+                    // 즉시 이동 대신 자연스럽게 미끄러지듯이 이동 (Tween 사용)
+                    const distance = Phaser.Math.Distance.Between(this.x, this.y, testX, testY);
+                    const duration = Math.min(300, distance * 2); // 거리에 비례, 최대 300ms
+                    
+                    this.scene.tweens.add({
+                        targets: this,
+                        x: testX,
+                        y: testY,
+                        duration: duration,
+                        ease: 'Cubic.easeOut',
+                        onUpdate: () => {
+                            // Tween 진행 중에도 body 위치 동기화
+                            if (this.body) {
+                                this.body.updateFromGameObject();
+                            }
+                        },
+                        onComplete: () => {
+                            console.log(`[SMOKE] Slide to safe position completed`);
+                            if (this.body) {
+                                this.body.updateFromGameObject();
+                            }
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+
+        console.log('[SMOKE] WARNING: No safe position found within 200px radius');
+        // 최후의 수단: 원래 시작 위치로 복귀 (lastValidPosition 사용)
+        if (this.lastValidPosition) {
+            console.log(`[SMOKE] Returning to last valid position: (${this.lastValidPosition.x}, ${this.lastValidPosition.y})`);
+            
+            const distance = Phaser.Math.Distance.Between(this.x, this.y, this.lastValidPosition.x, this.lastValidPosition.y);
+            const duration = Math.min(400, distance * 2);
+            
+            this.scene.tweens.add({
+                targets: this,
+                x: this.lastValidPosition.x,
+                y: this.lastValidPosition.y,
+                duration: duration,
+                ease: 'Cubic.easeOut',
+                onUpdate: () => {
+                    if (this.body) {
+                        this.body.updateFromGameObject();
+                    }
+                }
+            });
         }
     }
 
