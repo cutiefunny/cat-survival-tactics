@@ -6,7 +6,18 @@ export default class CombatManager {
     }
 
     setupColliders(group1, group2) {
-        this.scene.physics.add.collider(group1, group2, this.handleCombat, null, this);
+        console.log(`[SMOKE] Combat collider setup - blueTeam vs redTeam, with jump-aware processCallback`);
+        this.scene.physics.add.collider(
+            group1, 
+            group2, 
+            this.handleCombat, 
+            (unit1, unit2) => {
+                // 둘 중 하나라도 점프 중이면 충돌 무시
+                if (unit1.isJumping || unit2.isJumping) return false;
+                return true;
+            }, 
+            this
+        );
     }
 
     checkBattleDistance(blueTeam, redTeam) {

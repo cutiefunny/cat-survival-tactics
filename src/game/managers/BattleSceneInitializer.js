@@ -154,7 +154,22 @@ export default class BattleSceneInitializer {
             tileWidth: tileSize
         };
 
+        this.scene.wallObjectGroup = this.scene.physics.add.staticGroup();
         this.scene.blockObjectGroup = this.scene.physics.add.staticGroup();
+        
+        // [Test Walls] 점프 테스트용 벽 추가
+        const testWalls = [
+            { x: 300, y: 600, width: 100, height: 30 },  // 좌측 벽
+            { x: 800, y: 600, width: 100, height: 30 },  // 우측 벽
+            { x: 550, y: 750, width: 100, height: 30 }   // 중앙 벽
+        ];
+        testWalls.forEach(wallData => {
+            const rect = this.scene.add.rectangle(wallData.x, wallData.y, wallData.width, wallData.height);
+            this.scene.physics.add.existing(rect, true);
+            this.scene.wallObjectGroup.add(rect);
+        });
+        console.log(`[SMOKE] Mock Battle - Added ${testWalls.length} test walls to wallObjectGroup`);
+        
         this.scene.pathfindingManager.setup(virtualMap, []);
         
         this.scene.cameraManager.updateBounds(this.scene.scale.width, this.scene.scale.height);
@@ -173,6 +188,7 @@ export default class BattleSceneInitializer {
         this.scene.currentMap = map;
         this.scene.wallLayer = mapDataObj.layers.wallLayer;
         this.scene.blockLayer = mapDataObj.layers.blockLayer;
+        this.scene.wallObjectGroup = mapDataObj.wallObjectGroup;
         this.scene.blockObjectGroup = mapDataObj.blockObjectGroup;
         this.scene.npcGroup = mapDataObj.npcGroup;
 
@@ -218,6 +234,12 @@ export default class BattleSceneInitializer {
      */
     handleIntroScript(config, scriptData) {
         if (!scriptData) return;
+
+        // [New] Mock Battle에서는 인트로 스크립트 스킵
+        if (this.scene.initData && this.scene.initData.debugConfig) {
+            console.log('🚀 [BattleScene] Mock Battle - Intro Script Skipped');
+            return;
+        }
 
         const scriptPlayedKey = `map_script_played_${this.scene.currentMapKey}`;
         const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';

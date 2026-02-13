@@ -90,6 +90,20 @@ export default class MapAssetManager {
         if (wallLayer) wallLayer.setCollisionByExclusion([-1]);
         if (blockLayer) blockLayer.setCollisionByExclusion([-1]);
 
+        // Walls 오브젝트 그룹 생성
+        const wallObjectGroup = this.scene.physics.add.staticGroup();
+        const wallObjectLayer = map.getObjectLayer('Walls');
+        
+        if (wallObjectLayer) {
+            wallObjectLayer.objects.forEach(obj => {
+                const rect = this.scene.add.rectangle(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width, obj.height);
+                this.scene.physics.add.existing(rect, true); 
+                rect.setVisible(false); 
+                wallObjectGroup.add(rect); 
+            });
+        }
+
+        // Blocks 오브젝트 그룹 생성
         const blockObjectGroup = this.scene.physics.add.staticGroup();
         const blockObjectLayer = map.getObjectLayer('Blocks');
         
@@ -163,6 +177,6 @@ export default class MapAssetManager {
             });
         }
 
-        return { map, layers: { groundLayer, wallLayer, blockLayer }, blockObjectGroup, npcGroup };
+        return { map, layers: { groundLayer, wallLayer, blockLayer }, wallObjectGroup, blockObjectGroup, npcGroup };
     }
 }

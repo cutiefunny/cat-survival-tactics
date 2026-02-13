@@ -77,6 +77,15 @@ export default class BattleObjectManager {
                         }
                     }
                 }
+                if (validPosition && this.scene.wallObjectGroup) {
+                    const walls = this.scene.wallObjectGroup.getChildren();
+                    for (const wall of walls) {
+                        if (wall.getBounds().contains(x, y)) {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+                }
             }
 
             const mouse = this.miceGroup.create(x, y, 'mouse');

@@ -265,25 +265,108 @@ export default class BattleScene extends BaseScene {
         // [Modified] 매니저로부터 miceGroup 가져오기
         const miceGroup = this.objectManager.getGroup();
 
-        if (wallLayer) { 
-            this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision); 
-            this.physics.add.collider(this.redTeam, wallLayer, onWallCollision); 
+        if (wallLayer) {
+            const ignoreJumpCollision = (unit, tile) => {
+                if (unit && unit.isJumping) return false;
+                return true;
+            };
+
+            this.physics.add.collider(this.blueTeam, wallLayer, onWallCollision, ignoreJumpCollision, this);
+            this.physics.add.collider(this.redTeam, wallLayer, onWallCollision, ignoreJumpCollision, this);
             if (miceGroup) this.physics.add.collider(miceGroup, wallLayer);
+            console.log('[SMOKE] Wall TILE layer colliders setup - jumping units bypass wallLayer');
+        } else {
+            console.log('[SMOKE] Wall TILE layer NOT initialized (null/undefined)');
         }
         if (blockLayer) { 
             this.physics.add.collider(this.blueTeam, blockLayer, onWallCollision); 
             this.physics.add.collider(this.redTeam, blockLayer, onWallCollision); 
             if (miceGroup) this.physics.add.collider(miceGroup, blockLayer);
+            console.log('[SMOKE] Block TILE layer colliders setup');
+        } else {
+            console.log('[SMOKE] Block TILE layer NOT initialized (null/undefined)');
+        }
+        if (this.wallObjectGroup) {
+            const wallCount = this.wallObjectGroup.getChildren().length;
+            console.log(`[SMOKE] wallObjectGroup found with ${wallCount} objects`);
+            
+            // Wall collider references 저장 (Jump 중 disable/enable용)
+            this.wallObjectColliders = [];
+            
+            this.wallObjectColliders.push(
+                this.physics.add.collider(
+                    this.blueTeam, 
+                    this.wallObjectGroup, 
+                    onWallCollision,
+                    (unit, wall) => {
+                        // 점프 중이면 충돌 무시
+                        if (unit.isJumping) {
+                            console.log(`[SMOKE] Wall collision IGNORED (unit ${unit.role} is jumping)`);
+                            return false;
+                        }
+                        console.log(`[SMOKE] Wall collision ALLOWED (unit ${unit.role} not jumping)`);
+                        return true;
+                    },
+                    this
+                )
+            );
+            
+            this.wallObjectColliders.push(
+                this.physics.add.collider(
+                    this.redTeam, 
+                    this.wallObjectGroup, 
+                    onWallCollision,
+                    (unit, wall) => {
+                        // 점프 중이면 충돌 무시
+                        if (unit.isJumping) {
+                            console.log(`[SMOKE] Wall collision IGNORED (unit ${unit.role} is jumping)`);
+                            return false;
+                        }
+                        console.log(`[SMOKE] Wall collision ALLOWED (unit ${unit.role} not jumping)`);
+                        return true;
+                    },
+                    this
+                )
+            );
+            
+            if (miceGroup) this.physics.add.collider(miceGroup, this.wallObjectGroup);
+            console.log('[SMOKE] Wall OBJECT group colliders setup - jumping units bypass wallObjectGroup');
+        } else {
+            console.log('[SMOKE] wallObjectGroup is NULL or undefined - no wall collisions possible');
         }
         if (this.blockObjectGroup) { 
             this.physics.add.collider(this.blueTeam, this.blockObjectGroup, onWallCollision); 
             this.physics.add.collider(this.redTeam, this.blockObjectGroup, onWallCollision); 
             if (miceGroup) this.physics.add.collider(miceGroup, this.blockObjectGroup);
+            console.log('[SMOKE] Block OBJECT group colliders setup');
         }
         
         this.combatManager.setupColliders(this.blueTeam, this.redTeam);
-        this.physics.add.collider(this.blueTeam, this.blueTeam);
-        this.physics.add.collider(this.redTeam, this.redTeam);
+        
+        // [Modified] 점프 중 유닛 충돌 무시
+        this.physics.add.collider(
+            this.blueTeam, 
+            this.blueTeam,
+            null,
+            (unit1, unit2) => {
+                // 둘 중 하나라도 점프 중이면 충돌 무시
+                if (unit1.isJumping || unit2.isJumping) return false;
+                return true;
+            },
+            this
+        );
+        this.physics.add.collider(
+            this.redTeam, 
+            this.redTeam,
+            null,
+            (unit1, unit2) => {
+                // 둘 중 하나라도 점프 중이면 충돌 무시
+                if (unit1.isJumping || unit2.isJumping) return false;
+                return true;
+            },
+            this
+        );
+        console.log('[SMOKE] Team self-colliders setup - jumping units bypass blue/red team collisions');
         
         if (this.npcGroup) {
             // [Modified] InteractionManager 콜백 사용
@@ -415,7 +498,26 @@ export default class BattleScene extends BaseScene {
         }
         
         if (this.battleStarted && this.playerUnit && this.playerUnit.active && !this.playerUnit.isDying) {
-            if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { this.playerUnit.tryUseSkill(); }
+            if (this.inputManager.spaceKey && Phaser.Input.Keyboard.JustDown(this.inputManager.spaceKey)) { 
+                console.log('[BattleScene] Space bar 눌림!', {
+                    playerUnit: this.playerUnit?.role,
+                    isActive: this.playerUnit?.active
+                });
+                
+                // playerUnit(리더)가 Runner면 점프
+                if (this.playerUnit.role === 'Runner') {
+                    console.log('[BattleScene] Runner playerUnit 점프 시도');
+                    this.playerUnit.tryUseSkill();
+                }
+                
+                // 추가: 모든 아군 Runner 유닛도 점프
+                this.blueTeam.getChildren().forEach(unit => {
+                    if (unit.active && !unit.isDying && unit.role === 'Runner') {
+                        console.log('[BattleScene] 아군 Runner 점프 시도', unit);
+                        unit.tryUseSkill();
+                    }
+                });
+            }
             if (!this.isGameOver && !this.isRetreatModalOpen) {
                 this.checkRetreatCondition(delta);
             }

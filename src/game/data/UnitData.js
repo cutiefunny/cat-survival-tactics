@@ -120,6 +120,8 @@ export const ROLE_BASE_STATS = {
         hp: 120, attackPower: 18, moveSpeed: 120, 
         defense: 0, 
         attackRange: 50,
+        jumpDistance: 200,
+        jumpDuration: 420,
         killReward: 15,
         missChance: 0.02 
     },

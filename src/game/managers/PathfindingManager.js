@@ -43,6 +43,23 @@ export default class PathfindingManager {
                 }
             });
         }
+
+        // 4. Object Group (Walls Object) 분석
+        if (this.scene.wallObjectGroup) {
+            this.scene.wallObjectGroup.getChildren().forEach(obj => {
+                const bounds = obj.getBounds();
+                const startX = Math.max(0, Math.floor(bounds.x / this.tileSize));
+                const startY = Math.max(0, Math.floor(bounds.y / this.tileSize));
+                const endX = Math.min(this.mapWidth - 1, Math.floor(bounds.right / this.tileSize));
+                const endY = Math.min(this.mapHeight - 1, Math.floor(bounds.bottom / this.tileSize));
+
+                for (let y = startY; y <= endY; y++) {
+                    for (let x = startX; x <= endX; x++) {
+                        this.grid[y][x] = 1;
+                    }
+                }
+            });
+        }
         
         console.log(`🧩 Pathfinding Grid Reset: ${this.mapWidth}x${this.mapHeight}`);
     }

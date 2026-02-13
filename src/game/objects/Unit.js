@@ -194,6 +194,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
         if (!isInvalid && this.scene.blockObjectGroup) {
             if (this.scene.physics.overlap(this, this.scene.blockObjectGroup)) isInvalid = true;
         }
+        if (!isInvalid && this.scene.wallObjectGroup) {
+            if (this.scene.physics.overlap(this, this.scene.wallObjectGroup)) isInvalid = true;
+        }
         if (isInvalid) {
             this.x = this.lastValidPosition.x;
             this.y = this.lastValidPosition.y;

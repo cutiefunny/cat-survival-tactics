@@ -6,9 +6,9 @@ import LoadingScene from './scenes/LoadingScene'; // [New]
 import EventScene from './scenes/EventScene'; // [New]
 
 export function launchGame(containerId, mockData = null) {
-    // [Modified] EventScene를 항상 포함하도록 수정 (Mock 모드에서 스크립트 실행을 위해)
+    // [Modified] Mock 모드에서는 BattleScene을 첫 씬으로 시작 (EventScene 자동 재생 방지)
     const sceneList = mockData 
-        ? [EventScene, LoadingScene, BattleScene, UIScene] 
+        ? [BattleScene, UIScene, EventScene, LoadingScene] 
         : [EventScene, StrategyScene, LoadingScene, BattleScene, UIScene];
 
     const config = {
@@ -35,26 +35,14 @@ export function launchGame(containerId, mockData = null) {
                     game.registry.set('playerSquad', mockData.squad);
                     game.registry.set('playerCoins', mockData.config.gameSettings.initialCoins);
 
-                    // [Modified] 스크립트가 있으면 EventScene을 시작, 없으면 바로 BattleScene으로
-                    if (mockData.script && mockData.script.length > 0) {
-                        const startSceneKey = 'EventScene';
-                        game.scene.stop(startSceneKey);
-                        game.scene.start(startSceneKey, {
-                            script: mockData.script,
-                            nextScene: 'BattleScene',
-                            nextSceneData: {
-                                levelIndex: mockData.config.gameSettings.startLevelIndex,
-                                debugConfig: mockData.config 
-                            }
-                        });
-                    } else {
-                        const startSceneKey = 'BattleScene';
-                        game.scene.stop(startSceneKey);
-                        game.scene.start(startSceneKey, {
-                            levelIndex: mockData.config.gameSettings.startLevelIndex,
-                            debugConfig: mockData.config 
-                        });
-                    }
+                    // [Modified] Mock 모드는 항상 BattleScene으로 시작하되, 스크립트 데이터는 전달 유지
+                    const startSceneKey = 'BattleScene';
+                    game.scene.stop(startSceneKey);
+                    game.scene.start(startSceneKey, {
+                        levelIndex: mockData.config.gameSettings.startLevelIndex,
+                        debugConfig: mockData.config,
+                        script: mockData.script || null
+                    });
                 }
             }
         }

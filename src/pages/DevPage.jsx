@@ -9,7 +9,7 @@ import PhaserGame from "../components/PhaserGame";
 // [설정] 역할별 기본 스탯 정의
 const DEFAULT_ROLE_DEFS = {
   Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3, missChance: 0.02 },
-  Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2, missChance: 0.02 },
+    Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2, missChance: 0.02, jumpDistance: 200, jumpDuration: 420 },
   Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20, maintenance: 2, missChance: 0.02 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30, maintenance: 2, missChance: 0.02 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4, missChance: 0.02 },
@@ -262,7 +262,7 @@ const DevPage = () => {
       const currentConfig = JSON.parse(JSON.stringify(config));
       const squad = JSON.parse(JSON.stringify(config.blueTeamRoles));
       
-      // [Modified] 선택된 레벨의 스크립트를 로드
+      // [Modified] 레벨 스크립트 로드 (승리/패배 조건 스크립트)
       const selectedLevelIndex = currentConfig.gameSettings.startLevelIndex;
       let script = null;
       
@@ -564,6 +564,30 @@ const DevPage = () => {
 
                             {config.roleDefinitions[role].attackRange !== undefined && (
                                 <label style={{...statLabelStyle, color: "#d8f", gridColumn: "span 2", marginTop: "5px"}}>Range<input type="number" value={config.roleDefinitions[role].attackRange} onInput={(e) => handleStatChange(role, "attackRange", parseInt(e.target.value))} style={{ ...statInputStyle, background: "#220022", borderColor: "#848", color: "#f8f" }} /></label>
+                            )}
+
+                            {role === 'Runner' && (
+                                <>
+                                    <div style={{gridColumn: "span 2", height: "1px", background: "#555", margin: "5px 0"}}></div>
+                                    <label style={{...statLabelStyle, color: "#88ddff"}}>
+                                        Jump Dist
+                                        <input
+                                            type="number"
+                                            value={config.roleDefinitions[role].jumpDistance ?? 200}
+                                            onInput={(e) => handleStatChange(role, "jumpDistance", parseInt(e.target.value))}
+                                            style={{ ...statInputStyle, background: "#001a22", borderColor: "#468", color: "#8df" }}
+                                        />
+                                    </label>
+                                    <label style={{...statLabelStyle, color: "#88ddff"}}>
+                                        Jump Dur(ms)
+                                        <input
+                                            type="number"
+                                            value={config.roleDefinitions[role].jumpDuration ?? 420}
+                                            onInput={(e) => handleStatChange(role, "jumpDuration", parseInt(e.target.value))}
+                                            style={{ ...statInputStyle, background: "#001a22", borderColor: "#468", color: "#8df" }}
+                                        />
+                                    </label>
+                                </>
                             )}
                         </div>
                     </div>
