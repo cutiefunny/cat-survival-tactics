@@ -253,7 +253,10 @@ export default class Runner extends Unit {
             console.log('[SMOKE] Runner body disabled for jump');
         }
         
-        // 점프 스프라이트 (frame 5)
+        // 진행 중인 모든 애니메이션을 멈추고 점프 스프라이트 (frame 5)로 고정
+        if (this.anims.isPlaying) {
+            this.anims.stop();
+        }
         this.setFrame(5);
 
         // 점프 중에는 항상 위에 그리기 (적/아군보다 앞)
@@ -348,5 +351,35 @@ export default class Runner extends Unit {
                 }
             }
         }
+    }
+
+    // 점프 중에는 프레임 유지 및 방향전환/이동 방지
+    updatePlayerMovement() {
+        if (this.isJumping) {
+            // 점프 중에는 입력 처리 무시 (방향키 입력 무시)
+            return;
+        }
+        // 점프 중이 아니면 부모 클래스의 updatePlayerMovement 호출
+        super.updatePlayerMovement();
+    }
+
+    // 점프 중에는 방향전환 금지
+    updateFlipX() {
+        if (this.isJumping) {
+            // 점프 중에는 방향전환 무시
+            return;
+        }
+        // 점프 중이 아니면 부모 클래스의 updateFlipX 호출
+        super.updateFlipX();
+    }
+
+    // 점프 중에는 프레임 유지
+    updateAnimation() {
+        if (this.isJumping) {
+            // 점프 중에는 애니메이션 업데이트 무시 (프레임 5 유지)
+            return;
+        }
+        // 점프 중이 아니면 부모 클래스의 updateAnimation 호출
+        super.updateAnimation();
     }
 }
