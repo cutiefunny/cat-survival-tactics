@@ -11,6 +11,7 @@ export default class EventScene extends Phaser.Scene {
         const isSkipEnabled = localStorage.getItem('setting_skip_cutscenes') === 'true';
         
         this.eventConfig = data || {};
+        this.mapKey = data?.mapKey || null;  // [New] 맵 키 저장 (컷씬 완료 시 played 표시용)
         
         // 데이터에 스크립트가 있으면 사용하고, 없으면 오프닝으로 간주
         if (data && data.script && data.script.length > 0) {
@@ -58,6 +59,8 @@ export default class EventScene extends Phaser.Scene {
     create() {
         if (this.shouldSkipImmediately) {
             console.log("⏩ [EventScene] Skipping due to user setting.");
+            // [Modified] 스킵 시에도 unlock_unit은 처리
+            this.processAllUnlocks();
             this.endEvent();
             return;
         }
@@ -137,7 +140,11 @@ export default class EventScene extends Phaser.Scene {
         .setScrollFactor(0)
         .setDepth(200);
 
-        this.skipBtn.on('pointerdown', () => this.endEvent());
+        // [Modified] 스킵 버튼 클릭 시에도 unlock_unit은 처리
+        this.skipBtn.on('pointerdown', () => {
+            this.processAllUnlocks();
+            this.endEvent();
+        });
     }
 
     createVideoElements() {
@@ -454,6 +461,17 @@ export default class EventScene extends Phaser.Scene {
         }
     }
 
+    // [New] 스크립트의 모든 unlock_unit 이벤트 처리 (스킵할 때도 실행되도록)
+    processAllUnlocks() {
+        if (!this.currentScript || !Array.isArray(this.currentScript)) return;
+        
+        this.currentScript.forEach(step => {
+            if (step.type === 'unlock_unit') {
+                this.unlockUnit(step);
+            }
+        });
+    }
+
     createChoices(choices) {
         this.choiceContainer.setVisible(true);
         let yOffset = 0;
@@ -566,6 +584,14 @@ export default class EventScene extends Phaser.Scene {
         console.log("🎬 [EventScene] Finished.");
         this.scale.off('resize', this.updateLayout, this);
         if (this.videoObject) this.videoObject.stop();
+
+        // [New] 맵 컷씬 완료 표시 (registry에 저장)
+        if (this.mapKey) {
+            const mapScriptPlayed = this.registry.get('mapScriptPlayed') || {};
+            mapScriptPlayed[this.mapKey] = true;
+            this.registry.set('mapScriptPlayed', mapScriptPlayed);
+            console.log(`✅ [EventScene] Marked map '${this.mapKey}' script as played`);
+        }
 
         if (this.viewMode === 'overlay') {
             if (this.parentSceneKey) this.scene.resume(this.parentSceneKey);

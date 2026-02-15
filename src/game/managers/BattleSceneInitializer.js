@@ -241,8 +241,9 @@ export default class BattleSceneInitializer {
             return;
         }
 
-        const scriptPlayedKey = `map_script_played_${this.scene.currentMapKey}`;
-        const alreadyPlayed = localStorage.getItem(scriptPlayedKey) === 'true';
+        // [Modified] registry에서 played 상태 확인
+        const mapScriptPlayed = this.scene.registry.get('mapScriptPlayed') || {};
+        const alreadyPlayed = mapScriptPlayed[this.scene.currentMapKey];
         const isWinCondition = (this.scene.levelScriptCondition === 'win');
 
         if (alreadyPlayed || isWinCondition) return;
@@ -256,7 +257,8 @@ export default class BattleSceneInitializer {
         this.scene.scene.launch('EventScene', {
             mode: 'overlay',
             script: scriptData,
-            parentScene: 'BattleScene'
+            parentScene: 'BattleScene',
+            mapKey: this.scene.currentMapKey  // [New] 맵 키 전달
         });
     }
 

@@ -10,7 +10,7 @@ import PhaserGame from "../components/PhaserGame";
 const DEFAULT_ROLE_DEFS = {
   Leader: { hp: 200, attackPower: 25, moveSpeed: 90, defense: 2, attackCooldown: 500, skillCooldown: 30000, skillRange: 300, skillDuration: 10000, skillEffect: 10, killReward: 100, maintenance: 3, missChance: 0.02 },
     Runner: { hp: 100, attackPower: 12, moveSpeed: 140, defense: 0, attackCooldown: 400, killReward: 15, maintenance: 2, missChance: 0.02, jumpDistance: 200, jumpDuration: 420 },
-  Dealer: { hp: 90, attackPower: 40, moveSpeed: 70, defense: 0, attackCooldown: 600, killReward: 20, maintenance: 2, missChance: 0.02 },
+  EliteDog: { hp: 180, attackPower: 19, moveSpeed: 70, defense: 2, attackCooldown: 500, killReward: 20, maintenance: 2, missChance: 0.02 },
   Tanker: { hp: 400, attackPower: 10, moveSpeed: 40, defense: 5, attackCooldown: 800, skillCooldown: 10000, skillRange: 200, killReward: 30, maintenance: 2, missChance: 0.02 },
   Shooter: { hp: 80, attackPower: 30, moveSpeed: 110, defense: 0, attackRange: 250, attackCooldown: 500, killReward: 20, maintenance: 4, missChance: 0.02 },
   Healer: { hp: 100, attackPower: 15, moveSpeed: 110, defense: 0, attackCooldown: 2000, skillCooldown: 3000, skillRange: 200, aggroStackLimit: 10, killReward: 25, maintenance: 5, missChance: 0.02 },
@@ -39,7 +39,7 @@ const DEFAULT_CONFIG = {
   aiSettings: {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
-    dealer: { safeDistance: 150, followDistance: 50 },
+    eliteDog: { safeDistance: 150, followDistance: 50 },
     shooter: { attackRange: 250, kiteDistance: 200 } 
   },
   roleDefinitions: DEFAULT_ROLE_DEFS,

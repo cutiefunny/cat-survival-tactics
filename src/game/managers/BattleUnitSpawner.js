@@ -10,7 +10,7 @@ import Unit from '../objects/Unit';
 import Shooter from '../objects/roles/Shooter';
 import Runner from '../objects/roles/Runner';
 import Tanker from '../objects/roles/Tanker';
-import Dealer from '../objects/roles/Dealer';
+import EliteDog from '../objects/roles/EliteDog';
 import Normal from '../objects/roles/Normal';
 import Leader from '../objects/roles/Leader';
 import Healer from '../objects/roles/Healer';
@@ -22,7 +22,7 @@ const UnitClasses = {
     'Shooter': Shooter,
     'Runner': Runner,
     'Tanker': Tanker,
-    'Dealer': Dealer,
+    'EliteDog': EliteDog,
     'Normal': Normal,
     'Leader': Leader,
     'Healer': Healer,

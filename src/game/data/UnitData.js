@@ -4,7 +4,7 @@ export const ROLE_TEXTURES = {
     'Tanker': 'tanker',
     'Shooter': 'shooter',
     'Runner': 'runner',
-    'Dealer': 'leader',
+    'EliteDog': 'dog',
     'Leader': 'leader',
     'Normal': 'normal',
     'Healer': 'healer',
@@ -138,13 +138,21 @@ export const ROLE_BASE_STATS = {
         attackRange: 50,
         killReward: 10,
         missChance: 0.02 
+    },
+    // [New] EliteDog 스탯 (일반 들개 레벨5 기반)
+    'EliteDog': { 
+        hp: 180, attackPower: 19, moveSpeed: 70, 
+        defense: 2, 
+        attackRange: 50,
+        killReward: 20,
+        missChance: 0.02 
     }
 };
 
 export const DEFAULT_AI_SETTINGS = {
     common: { thinkTimeMin: 150, thinkTimeVar: 100, fleeHpThreshold: 0.2, hpRegenRate: 0.01 },
     runner: { ambushDistance: 60, fleeDuration: 1500 },
-    dealer: { safeDistance: 150, followDistance: 50 },
+    eliteDog: { safeDistance: 150, followDistance: 50 },
     shooter: { attackRange: 250, kiteDistance: 200 } 
 };
 

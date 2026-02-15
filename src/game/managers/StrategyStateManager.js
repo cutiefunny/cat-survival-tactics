@@ -55,7 +55,8 @@ export default class StrategyStateManager {
             'worldMapData',
             'leaderPosition',
             'turnCount',
-            'lastSafeNodeId'
+            'lastSafeNodeId',
+            'mapScriptPlayed'  // [New] 맵 컷씬 재생 상태 초기화
         ];
         keysToReset.forEach(key => this.scene.registry.remove(key));
 

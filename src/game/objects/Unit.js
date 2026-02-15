@@ -22,6 +22,9 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
 
         this.role = roleKey;
         let size = (this.role === 'Tanker') ? 60 : 50;
+        if (this.role === 'EliteDog') {
+            size *= 1.2; // [New] EliteDog는 NormalDog의 1.2배 크기
+        }
         if (this.isLeader) {
             size *= 1.15; 
         }
