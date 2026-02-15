@@ -8,6 +8,8 @@ export default class Runner extends Unit {
         this.jumpDistance = stats.jumpDistance || 200;
         this.jumpDuration = stats.jumpDuration || 420;
         this.isJumping = false; // 초기화
+        this.provokeRadius = stats.provokeRadius || 150;
+        this.provokeDuration = stats.provokeDuration || 3000;
     }
 
     updateAI(delta) {
@@ -235,13 +237,6 @@ export default class Runner extends Unit {
         
         // [New] Jump 시 Runner body의 collision category 비활성화 (벽과 충돌 방지)
         // onCollide category 0으로 설정 → 충돌 무시, ARCADE physics optimized
-        if (this.body && this.body.setCollideCallback) {
-            this.body.setCollideCallback((data) => {
-                // Jump 중에는 이 callback이 무시됨
-                return !this.isJumping;
-            });
-        }
-        // 더 확실한 방법: category를 0x0000으로 설정
         if (this.body && typeof this.body.setCollisionCategory === 'function') {
             this.originalCollisionCategory = this.body.collisionCategory || 0x0001;
             this.body.setCollisionCategory(0x0000);
@@ -344,10 +339,10 @@ export default class Runner extends Unit {
                             
                             if (Phaser.Geom.Intersects.RectangleToRectangle(bounds, blockBounds)) {
                                 console.log('[SMOKE] Jump interrupted - hit block object');
-                                // 충돌 시 즉시 점프 중단
-                                jumpTween.stop();
-                                endJump();
-                                return;
+                                // 충돌 시 방향 반대로 튕겨나가기 (간단한 반사 효과)
+                                const angle = Phaser.Math.Angle.Between(block.x, block.y, this.x, this.y);
+                                const bounceSpeed = 200;
+                                this.setVelocity(Math.cos(angle) * bounceSpeed, Math.sin(angle) * bounceSpeed);
                             }
                         }
                     }
@@ -380,6 +375,9 @@ export default class Runner extends Unit {
                 }
             }
         }
+
+        // 착지 시 도발 효과 실행
+        this.triggerLandingProvoke();
     }
 
     // 벽/블록에 겹쳐 있으면 밖으로 밀어내기
@@ -548,5 +546,19 @@ export default class Runner extends Unit {
         }
         // 점프 중이 아니면 부모 클래스의 updateAnimation 호출
         super.updateAnimation();
+    }
+
+    triggerLandingProvoke() {
+        if (!this.active || this.isDying) return;
+        // const circle = this.scene.add.circle(this.x, this.y, 10, 0xff0000, 0.5);
+        // this.scene.tweens.add({ targets: circle, radius: this.provokeRadius, alpha: 0, duration: 400, onComplete: () => circle.destroy() });
+        const enemies = this.targetGroup.getChildren();
+        for (let enemy of enemies) {
+            if (enemy.active && !enemy.isDying && enemy.ai && enemy.ai.provoke) {
+                if (Phaser.Math.Distance.Between(this.x, this.y, enemy.x, enemy.y) <= this.provokeRadius) {
+                    enemy.ai.provoke(this, this.provokeDuration);
+                }
+            }
+        }
     }
 }

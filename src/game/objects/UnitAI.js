@@ -515,6 +515,37 @@ export default class UnitAI {
         return this.provokedTimer > 0 && this.currentTarget && this.currentTarget.active && !this.currentTarget.isDying;
     }
 
+    /**
+     * [New] 유닛을 도발 상태로 만듭니다.
+     * @param {Unit} attacker 도발을 건 주체 (예: 점프해서 착지한 Runner)
+     * @param {number} duration 도발 지속 시간 (ms)
+     */
+    provoke(attacker, duration) {
+        if (!attacker || !attacker.active || attacker.isDying) return;
+
+        // 1. 도발 타이머 설정
+        this.provokedTimer = duration;
+
+        // 2. 타겟 강제 고정
+        this.currentTarget = attacker;
+
+        // 3. 전투 모드 강제 진입 (배회 중이었다면 즉시 공격 모드로)
+        if (!this.isCombatMode) {
+            this.engageCombat(attacker);
+        }
+
+        // 4. 경로 초기화 (새로운 타겟인 Runner에게 즉시 가기 위함)
+        this.currentPath = [];
+        this.pathUpdateTimer = 0;
+
+        // 시각적 피드백 (필요 시 UnitAI 수준에서 처리)
+        if (this.unit.showEmote) {
+            this.unit.showEmote("💢", "#ff0000"); // 화난 이모티콘
+        }
+
+        console.log(`[UnitAI] Provoked by ${attacker.role} for ${duration}ms`);
+    }
+
     onWallCollision(obstacle) {
         this.currentPath = []; 
         this.pathUpdateTimer = 0;
