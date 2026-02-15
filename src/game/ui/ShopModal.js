@@ -20,6 +20,13 @@ export default class ShopModal {
             'Normal': 'normal_token',
             'Leader': 'leader_token'
         };
+
+        // [New] 아이템 아이콘 매핑 (항목 ID -> 텍스처 키)
+        this.iconMap = {
+            'coffee': 'icon_catnip',
+            'chur': 'icon_ciao',
+            'helmet': 'icon_partyMix'
+        };
     }
 
     toggle() {
@@ -135,7 +142,12 @@ export default class ShopModal {
             // 터치 영역 (투명 사각형)
             const hitArea = this.scene.add.rectangle(0, 0, 50, 50, 0x000000, 0).setInteractive({ useHandCursor: true });
             
-            const icon = this.scene.add.text(0, 0, itemData.icon, { fontSize: '24px' }).setOrigin(0.5);
+            // [Fixed] 텍스처 키를 사용하여 스프라이트 이미지 표시
+            const textureKey = this.iconMap[itemId];
+            const icon = textureKey 
+                ? this.scene.add.sprite(0, 0, textureKey).setDisplaySize(40, 40)
+                : this.scene.add.text(0, 0, itemData.icon, { fontSize: '24px' }).setOrigin(0.5);
+            
             const countText = this.scene.add.text(20, 10, `x${count}`, { fontSize: '12px', color: '#ffff00', stroke: '#000', strokeThickness: 2 }).setOrigin(0, 0.5);
             
             hitArea.on('pointerdown', () => this.openItemDetailPopup(itemData));
@@ -163,7 +175,11 @@ export default class ShopModal {
             color: '#ffffff' 
         }).setOrigin(0.5);
         
-        const iconText = this.scene.add.text(0, -popupH / 2 + 80, itemData.icon, { fontSize: '50px' }).setOrigin(0.5);
+        // [Fixed] 텍스처 키를 사용하여 스프라이트 이미지 표시
+        const textureKey = this.iconMap[itemData.id];
+        const iconSprite = textureKey
+            ? this.scene.add.sprite(0, -popupH / 2 + 80, textureKey).setDisplaySize(60, 60)
+            : this.scene.add.text(0, -popupH / 2 + 80, itemData.icon, { fontSize: '50px' }).setOrigin(0.5);
         
         const descText = this.scene.add.text(0, -popupH / 2 + 140, itemData.desc, { 
             fontSize: '16px', 
@@ -179,7 +195,7 @@ export default class ShopModal {
             }
         });
 
-        this.unitDetailPopup.add([bg, titleText, iconText, descText, closeBtn]);
+        this.unitDetailPopup.add([bg, titleText, iconSprite, descText, closeBtn]);
         this.parentContainer.add(this.unitDetailPopup);
     }
 
