@@ -76,6 +76,8 @@ export default class ShopModal {
         const startY = -popupH / 2 + 90;
 
         const unlockedRoles = this.scene.registry.get('unlockedRoles') || ['Normal'];
+        // [Modified] 레지스트리에서 unitCosts 가져오기 (DevPage 설정값)
+        const registryUnitCosts = this.scene.registry.get('unitCosts') || {};
 
         UNIT_COSTS.forEach((unit, index) => {
             const row = Math.floor(index / cols);
@@ -90,10 +92,14 @@ export default class ShopModal {
                 const btnBg = this.scene.add.rectangle(0, 0, 100, 80, 0x444444).setInteractive();
                 const textureKey = this.roleToTexture[unit.role] || 'leader_token';
                 const unitSprite = this.scene.add.sprite(0, -10, textureKey, 1).setDisplaySize(50, 50);
-                const costTxt = this.scene.add.text(0, 25, `💰 ${unit.cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
+                // [Fixed] 레지스트리 unitCosts를 사용하고 없으면 기본값 사용
+                const cost = registryUnitCosts[unit.role] ?? unit.cost;
+                const costTxt = this.scene.add.text(0, 25, `💰 ${cost}`, { fontSize: '14px', color: '#ffff00' }).setOrigin(0.5);
                 
                 btn.add([btnBg, unitSprite, costTxt]);
-                btnBg.on('pointerdown', () => this.openUnitDetailPopup(unit));
+                // [Fixed] cost를 포함한 unitData 객체 전달
+                const unitData = { ...unit, cost };
+                btnBg.on('pointerdown', () => this.openUnitDetailPopup(unitData));
             } else {
                 const btnBg = this.scene.add.rectangle(0, 0, 100, 80, 0x222222).setStrokeStyle(1, 0x555555);
                 const lockText = this.scene.add.text(0, 0, "🔒\n???", { align: 'center', fontSize: '18px', color: '#555555', fontStyle: 'bold' }).setOrigin(0.5);
@@ -250,8 +256,11 @@ export default class ShopModal {
         const { width, height } = this.scene.scale;
         
         const registryRoleDefs = this.scene.registry.get('roleDefinitions') || {};
+        const registryUnitCosts = this.scene.registry.get('unitCosts') || {};
         const defaultStats = ROLE_BASE_STATS[unitConfig.role] || ROLE_BASE_STATS['Normal'];
         const stats = { ...defaultStats, ...(registryRoleDefs[unitConfig.role] || {}) };
+        // [Modified] 레지스트리에서 가격 가져오기
+        const actualCost = registryUnitCosts[unitConfig.role] ?? unitConfig.cost;
 
         this.unitDetailPopup = this.scene.add.container(width / 2, height / 2).setDepth(2100);
         const popupW = 300;
@@ -269,10 +278,11 @@ export default class ShopModal {
         const buyBtnY = popupH / 2 - 50;
         const buyBtn = this.scene.add.container(0, buyBtnY);
         const buyBtnBg = this.scene.add.rectangle(0, 0, 140, 40, 0x00aa00).setInteractive();
-        const buyBtnText = this.scene.add.text(0, 0, `구매 (${unitConfig.cost}냥)`, { fontSize: '18px', fontStyle: 'bold' }).setOrigin(0.5);
+        // [Modified] 최신 가격으로 버튼 텍스트 업데이트
+        const buyBtnText = this.scene.add.text(0, 0, `구매 (${actualCost}냥)`, { fontSize: '18px', fontStyle: 'bold' }).setOrigin(0.5);
         
         buyBtn.add([buyBtnBg, buyBtnText]);
-        buyBtnBg.on('pointerdown', () => this.buyUnit(unitConfig));
+        buyBtnBg.on('pointerdown', () => this.buyUnit({ ...unitConfig, cost: actualCost }));
         
         const closeBtn = this.createCloseButton(popupW, popupH, () => {
             this.unitDetailPopup.destroy();
@@ -392,9 +402,13 @@ export default class ShopModal {
     }
 
     buyUnit(unitConfig) {
+        // [Modified] 레지스트리에서 unitCosts를 가져와서 최신 가격 적용
+        const registryUnitCosts = this.scene.registry.get('unitCosts') || {};
+        const actualCost = registryUnitCosts[unitConfig.role] ?? unitConfig.cost;
         const currentCoins = this.scene.registry.get('playerCoins');
-        if (currentCoins >= unitConfig.cost) {
-            const newCoins = currentCoins - unitConfig.cost;
+        
+        if (currentCoins >= actualCost) {
+            const newCoins = currentCoins - actualCost;
             this.scene.registry.set('playerCoins', newCoins);
             
             if (this.scene.uiManager && this.scene.uiManager.updateCoinText) {
@@ -415,7 +429,7 @@ export default class ShopModal {
 
             this.scene.registry.set('playerSquad', squad);
             
-            console.log(`✨ 고용 완료: ${unitConfig.role} (이름: ${randomName})`);
+            console.log(`✨ 고용 완료: ${unitConfig.role} (이름: ${randomName}, 비용: ${actualCost}냥)`);
 
             this.refreshSquadDisplay();
             if (this.scene.stateManager && this.scene.stateManager.saveProgress) {

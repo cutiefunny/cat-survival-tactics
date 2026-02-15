@@ -130,6 +130,11 @@ export default class StrategyScene extends BaseScene {
                 if (data.roleDefinitions) {
                     this.registry.set('roleDefinitions', data.roleDefinitions);
                 }
+
+                // [New] unitCosts를 레지스트리에 저장 (DevPage 설정값 적용)
+                if (data.unitCosts) {
+                    this.registry.set('unitCosts', data.unitCosts);
+                }
             }
         } catch (e) {
             console.error("❌ Failed to load strategy config:", e);
