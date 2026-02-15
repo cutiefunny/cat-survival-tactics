@@ -97,7 +97,9 @@ export default class StrategyUIManager {
         });
 
         // BGM 버튼
-        this.bgmBtn = this.scene.add.text(w - rightMargin - btnSpacing, contentY, "🔊", { fontSize: isMobile ? '20px' : '24px' })
+        // [Modified] registry 값을 확인해서 초기 상태 설정
+        const initialMuted = this.scene.registry.get('isBgmMuted') || false;
+        this.bgmBtn = this.scene.add.text(w - rightMargin - btnSpacing, contentY, initialMuted ? "🔇" : "🔊", { fontSize: isMobile ? '20px' : '24px' })
             .setOrigin(1, 0.5)
             .setInteractive();
         

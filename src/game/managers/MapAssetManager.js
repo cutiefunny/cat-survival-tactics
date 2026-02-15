@@ -29,6 +29,7 @@ const TILESET_MAPPING = {
     'level5': new URL('../../assets/tilesets/road.jpg', import.meta.url).href,
     'level5-2': new URL('../../assets/tilesets/street2.jpg', import.meta.url).href,
     'level6': new URL('../../assets/tilesets/parking.jpg', import.meta.url).href,
+    'level11': new URL('../../assets/tilesets/level11.jpg', import.meta.url).href,
 };
 
 export default class MapAssetManager {
