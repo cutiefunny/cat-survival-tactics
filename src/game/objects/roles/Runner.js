@@ -8,13 +8,20 @@ export default class Runner extends Unit {
         this.jumpDistance = stats.jumpDistance || 200;
         this.jumpDuration = stats.jumpDuration || 420;
         this.isJumping = false; // 초기화
-        this.provokeRadius = stats.provokeRadius || 150;
+        this.provokeRadius = stats.provokeRadius || 100;
         this.provokeDuration = stats.provokeDuration || 3000;
+        this.autoJumpCooldown = 0; // 자동 점프 쿨다운
+        this.autoJumpInterval = stats.autoJumpInterval || 1500; // 자동 점프 간격 (ms)
+        this.surroundedCheckRadius = stats.surroundedCheckRadius || 200; // 포위 감지 반경
+        this.surroundedEnemyThreshold = stats.surroundedEnemyThreshold || 3; // 포위 판정 적의 수
+        this.isSurrounded = false; // 포위 상태 플래그
     }
 
     updateAI(delta) {
         // 1. 도발 체크
         this.ai.processAggro(delta);
+        // 점프 중에는 AI가 이동/명령을 덮어쓰지 않도록 즉시 종료
+        if (this.isJumping) return;
         if (this.ai.isProvoked) {
             // 도발당하면 암살/회피 로직 무시하고 타겟에게 직진
             if (this.ai.currentTarget && this.ai.currentTarget.active) {
@@ -47,6 +54,23 @@ export default class Runner extends Unit {
         } else {
             this.ai.followLeader();
         }
+
+        // 5. 포위 감지 및 긴급 탈출 점프
+        this.isSurrounded = this.checkIfSurrounded();
+        if (this.isSurrounded && !this.isDying && !this.isJumping) {
+            // 포위 상태: 즉시 점프로 탈출
+            console.log('[Runner] 포위됨! 점프로 탈출 시도');
+            this.tryUseSkill();
+            this.autoJumpCooldown = this.autoJumpInterval * 0.6; // 쿨다운 재설정 (약간 단축)
+            return; // 다른 로직 스킵
+        }
+
+        // 6. 자동 점프 로직 (포위 아닐 때에만)
+        this.autoJumpCooldown -= delta;
+        if (this.autoJumpCooldown <= 0 && !this.isDying && !this.isJumping) {
+            this.tryUseSkill();
+            this.autoJumpCooldown = this.autoJumpInterval;
+        }
     }
 
     runTowardsSafety() {
@@ -58,6 +82,114 @@ export default class Runner extends Unit {
         } else {
             this.ai.followLeader();
         }
+    }
+
+    checkIfSurrounded() {
+        // 주변 적의 개수와 분포 확인
+        const enemies = this.targetGroup.getChildren();
+        const proximalEnemies = [];
+        const surroundedCheckRadiusSq = this.surroundedCheckRadius * this.surroundedCheckRadius;
+
+        for (let enemy of enemies) {
+            if (enemy.active && !enemy.isDying) {
+                const distSq = Phaser.Math.Distance.Squared(this.x, this.y, enemy.x, enemy.y);
+                if (distSq <= surroundedCheckRadiusSq) {
+                    const angle = Phaser.Math.Angle.Between(this.x, this.y, enemy.x, enemy.y);
+                    proximalEnemies.push({ enemy, angle });
+                }
+            }
+        }
+
+        // 주변 적이 충분히 많아야 함
+        if (proximalEnemies.length < this.surroundedEnemyThreshold) {
+            return false;
+        }
+
+        // 주변 적들이 여러 방향에서 분포하는지 확인 (포위 상태 판단)
+        // 8개 방향으로 나눠서, 적들이 3개 이상의 방향에 분포하면 포위 상태
+        const directions = new Set();
+        for (let item of proximalEnemies) {
+            const octant = Math.floor((item.angle + Math.PI) / (Math.PI / 4)) % 8; // 8각형 방향
+            directions.add(octant);
+        }
+
+        // 이동 가능성 확인: 주변에 벽/블록이 많으면 고립된 것으로 판단
+        const isStuck = this.checkIfStuck();
+
+        const isSurrounded = directions.size >= 3 && isStuck;
+        if (isSurrounded) {
+            console.log(`[Runner] 포위 감지: 적 ${proximalEnemies.length}명, 방향 ${directions.size}개, 고립=${isStuck}`);
+        }
+        return isSurrounded;
+    }
+
+    checkIfStuck() {
+        // 8방향으로 이동 가능 여부 확인
+        const testDistance = 50; // 테스트 거리
+        const directions = [
+            { x: 1, y: 0 },   // 동
+            { x: 1, y: -1 },  // 북동
+            { x: 0, y: -1 },  // 북
+            { x: -1, y: -1 }, // 북서
+            { x: -1, y: 0 },  // 서
+            { x: -1, y: 1 },  // 남서
+            { x: 0, y: 1 },   // 남
+            { x: 1, y: 1 }    // 남동
+        ];
+
+        let stuckDirections = 0;
+        for (let dir of directions) {
+            const testX = this.x + dir.x * testDistance;
+            const testY = this.y + dir.y * testDistance;
+
+            // 해당 방향이 벽/블록으로 막혀 있는지 확인
+            let isBlocked = false;
+
+            // 1. 타일 레이어 체크
+            if (this.scene.wallLayer) {
+                const tile = this.scene.wallLayer.getTileAtWorldXY(testX, testY);
+                if (tile && tile.canCollide) isBlocked = true;
+            }
+            if (!isBlocked && this.scene.blockLayer) {
+                const tile = this.scene.blockLayer.getTileAtWorldXY(testX, testY);
+                if (tile && tile.canCollide) isBlocked = true;
+            }
+
+            // 2. Block Object 체크
+            if (!isBlocked && this.scene.blockObjectGroup) {
+                const blocks = this.scene.blockObjectGroup.getChildren();
+                for (const block of blocks) {
+                    if (!block.active) continue;
+                    const blockBounds = block.getBounds ? block.getBounds() : 
+                        new Phaser.Geom.Rectangle(block.x - block.width/2, block.y - block.height/2, block.width, block.height);
+                    
+                    if (blockBounds.contains(testX, testY)) {
+                        isBlocked = true;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Wall Object 체크
+            if (!isBlocked && this.scene.wallObjectGroup) {
+                const walls = this.scene.wallObjectGroup.getChildren();
+                for (const wall of walls) {
+                    if (!wall.active) continue;
+                    const wallBounds = wall.getBounds ? wall.getBounds() : 
+                        new Phaser.Geom.Rectangle(wall.x - wall.width/2, wall.y - wall.height/2, wall.width, wall.height);
+                    
+                    if (wallBounds.contains(testX, testY)) {
+                        isBlocked = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isBlocked) stuckDirections++;
+        }
+
+        // 탈출 가능 방향이 2개 이하면 고립된 상태
+        return stuckDirections >= 6;
     }
 
     decideNextMove() {

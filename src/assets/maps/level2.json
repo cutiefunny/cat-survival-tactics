@@ -44,6 +44,50 @@
          "y":0
         }, 
         {
+         "draworder":"topdown",
+         "id":6,
+         "name":"Walls",
+         "objects":[
+                {
+                 "height":45.6956344349245,
+                 "id":19,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":41.7788657690739,
+                 "x":214.116687066503,
+                 "y":2.61117911056712
+                }, 
+                {
+                 "height":449.122807017544,
+                 "id":20,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":44.390044879641,
+                 "x":212.81109751122,
+                 "y":108.363933088535
+                }, 
+                {
+                 "height":334.230926152591,
+                 "id":21,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":44.390044879641,
+                 "x":212.81109751122,
+                 "y":621.460628314974
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
          "data":[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -252,48 +296,15 @@
          "draworder":"topdown",
          "id":2,
          "name":"Blocks",
-         "objects":[
-                {
-                 "height":407,
-                 "id":2,
-                 "name":"",
-                 "rotation":0,
-                 "type":"",
-                 "visible":true,
-                 "width":55,
-                 "x":208,
-                 "y":134
-                }, 
-                {
-                 "height":34,
-                 "id":4,
-                 "name":"",
-                 "rotation":0,
-                 "type":"",
-                 "visible":true,
-                 "width":54,
-                 "x":209,
-                 "y":2
-                }, 
-                {
-                 "height":305,
-                 "id":17,
-                 "name":"",
-                 "rotation":0,
-                 "type":"",
-                 "visible":true,
-                 "width":55,
-                 "x":207.5,
-                 "y":641.5
-                }],
+         "objects":[],
          "opacity":1,
          "type":"objectgroup",
          "visible":true,
          "x":0,
          "y":0
         }],
- "nextlayerid":6,
- "nextobjectid":19,
+ "nextlayerid":7,
+ "nextobjectid":22,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
