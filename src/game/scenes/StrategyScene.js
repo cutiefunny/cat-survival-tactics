@@ -215,6 +215,8 @@ export default class StrategyScene extends BaseScene {
     toggleBgmMute() {
         if (this.bgm) {
             this.bgm.setMute(!this.bgm.mute);
+            // [New] registry에 BGM 음소거 상태 저장 (전투맵에서도 적용되도록)
+            this.registry.set('isBgmMuted', this.bgm.mute);
             return this.bgm.mute;
         }
         return false;

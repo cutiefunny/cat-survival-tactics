@@ -145,6 +145,12 @@
       "difficulty": 2,
       "bgm": "level3"
     },
+    "11": {
+      "mapId": "level11",
+      "name": "상수 우물",
+      "difficulty": 2,
+      "bgm": "level3"
+    },
     "13": {
       "mapId": "level7",
       "name": "큰 길",
@@ -192,10 +198,10 @@
       ]
     },
     "16": {
-      "mapId": "level4",
+      "mapId": "level16",
       "name": "빈민가",
       "difficulty": 2,
-      "bgm": "level2",
+      "bgm": "level3",
       "neutral": true,
       "unit": "Healer",
       "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!",
