@@ -37,8 +37,8 @@ export default class Wawa extends Unit {
     activateBerserkMode() {
         this.isBerserk = true;
         
-        // 특수 능력 적용: 방어력 12, 공격 속도(CD) 100ms
-        this.defense = 16;
+        // 특수 능력 적용: 방어력 20, 공격 속도(CD) 100ms
+        this.defense = 20;
         this.attackCooldown = 100;
 
         // 시각 효과: 빨간색 변신 및 이모티콘
