@@ -38,7 +38,7 @@ export default class Raccoon extends Unit {
             color: '#ffff00',
             stroke: '#000000',
             strokeThickness: 3
-        }).setOrigin(0.5).setDepth(100);
+        }).setOrigin(0.5).setDepth(5000);
 
         this.scene.tweens.add({
             targets: text,
@@ -49,16 +49,16 @@ export default class Raccoon extends Unit {
         });
 
         // 시각 효과: 마법 원형 범위
-        // const circle = this.scene.add.circle(this.x, this.y, 10, 0xff00ff, 0.4);
-        // circle.setDepth(50);
-        // this.scene.tweens.add({
-        //     targets: circle,
-        //     radius: 120,
-        //     alpha: 0,
-        //     duration: 600,
-        //     ease: 'Quad.easeOut',
-        //     onComplete: () => circle.destroy()
-        // });
+        const circle = this.scene.add.circle(this.x, this.y, 10, 0xff00ff, 0.4);
+        circle.setDepth(4999);
+        this.scene.tweens.add({
+            targets: circle,
+            radius: 120,
+            alpha: 0,
+            duration: 600,
+            ease: 'Quad.easeOut',
+            onComplete: () => circle.destroy()
+        });
 
         // 소환 효과 음성 (선택사항)
         if (this.scene.playHitSound && typeof this.scene.playHitSound === 'function') {
@@ -79,10 +79,13 @@ export default class Raccoon extends Unit {
         }
 
         // 자신 주변의 2개 위치에 너구리 소환 (좌우 또는 위아래)
-        const spawnPositions = [
+        let spawnPositions = [
             { x: this.x - 70, y: this.y },
             { x: this.x + 70, y: this.y }
         ];
+
+        // 블록/벽 충돌 회피를 통한 위치 보정
+        spawnPositions = spawnPositions.map(pos => this.findValidSpawnPosition(pos.x, pos.y));
 
         spawnPositions.forEach((pos, index) => {
             // 기본 너구리 스탯 준비 (소환된 너구리는 약간 약하게 설정)
@@ -129,7 +132,7 @@ export default class Raccoon extends Unit {
                 color: '#00ff00',
                 stroke: '#000000',
                 strokeThickness: 2
-            }).setOrigin(0.5).setDepth(100);
+            }).setOrigin(0.5).setDepth(5000);
 
             this.scene.tweens.add({
                 targets: nameText,
@@ -140,6 +143,71 @@ export default class Raccoon extends Unit {
             });
         });
 
-        console.log(`[Raccoon] 2마리의 너구리 소환! (위치: ${spawnPositions.map(p => `(${p.x}, ${p.y})`).join(', ')})`);
+        console.log(`[Raccoon] 2마리의 너구리 소환! (위치: ${spawnPositions.map(p => `(${Math.floor(p.x)}, ${Math.floor(p.y)})`).join(', ')})`);
+    }
+
+    // 소환 위치가 Walls나 Blocks 영역에 있는지 확인
+    isPositionBlocked(x, y) {
+        const radius = 25; // 유닛 크기 고려
+        
+        // wallObjectGroup 확인
+        if (this.scene.wallObjectGroup) {
+            for (let wall of this.scene.wallObjectGroup.getChildren()) {
+                const bounds = wall.getBounds();
+                // 원-사각형 충돌: 거리 기반 확인
+                const closestX = Phaser.Math.Clamp(x, bounds.left, bounds.right);
+                const closestY = Phaser.Math.Clamp(y, bounds.top, bounds.bottom);
+                const distanceSq = (x - closestX) ** 2 + (y - closestY) ** 2;
+                
+                if (distanceSq < radius * radius) {
+                    return true;
+                }
+            }
+        }
+        
+        // blockObjectGroup 확인
+        if (this.scene.blockObjectGroup) {
+            for (let block of this.scene.blockObjectGroup.getChildren()) {
+                const bounds = block.getBounds();
+                const closestX = Phaser.Math.Clamp(x, bounds.left, bounds.right);
+                const closestY = Phaser.Math.Clamp(y, bounds.top, bounds.bottom);
+                const distanceSq = (x - closestX) ** 2 + (y - closestY) ** 2;
+                
+                if (distanceSq < radius * radius) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    // 유효한 소환 위치 찾기 (블록/벽 회피)
+    findValidSpawnPosition(originalX, originalY) {
+        // 원래 위치가 유효하면 그대로 반환
+        if (!this.isPositionBlocked(originalX, originalY)) {
+            return { x: originalX, y: originalY };
+        }
+        
+        // 주변을 나선형으로 탐색하여 유효한 위치 찾기
+        const maxDistance = 200;
+        const step = 20;
+        
+        for (let distance = step; distance <= maxDistance; distance += step) {
+            // 8방향 + 원형 탐색
+            for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+                const testX = originalX + Math.cos(angle) * distance;
+                const testY = originalY + Math.sin(angle) * distance;
+                
+                if (!this.isPositionBlocked(testX, testY)) {
+                    console.log(`[Raccoon] 소환 위치 보정됨: (${Math.floor(originalX)}, ${Math.floor(originalY)}) -> (${Math.floor(testX)}, ${Math.floor(testY)})`);
+                    return { x: testX, y: testY };
+                }
+            }
+        }
+        
+        // 찾지 못하면 원래 위치 반환
+        console.warn(`[Raccoon] 유효한 소환 위치를 찾지 못함. 원래 위치 사용: (${Math.floor(originalX)}, ${Math.floor(originalY)})`);
+        return { x: originalX, y: originalY };
     }
 }

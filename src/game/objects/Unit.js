@@ -492,7 +492,11 @@ export default class Unit extends Phaser.Physics.Arcade.Sprite {
     updateUI() {
         if (this.hpBar) {
             this.hpBar.setPosition(this.x, this.y - (this.baseSize / 2) + 20);
+            // 체력바는 항상 모든 유닛보다 앞쪽에 표시
+            this.hpBar.setDepth(10000);
         }
+        
+        this.setDepth(Math.floor(this.y));
     }
 
     // [New] 광선을 쏘아 장애물과의 교차점을 찾는 메서드

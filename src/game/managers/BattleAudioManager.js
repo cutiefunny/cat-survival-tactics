@@ -9,6 +9,7 @@ import stage1BgmFile from '../../assets/sounds/stage1_bgm.mp3';
 import level1 from '../../assets/sounds/level1.mp3';
 import level2 from '../../assets/sounds/level2.mp3';
 import level3 from '../../assets/sounds/level3.mp3';
+import level4 from '../../assets/sounds/level4.mp3';
 import level6 from '../../assets/sounds/level6.mp3';
 import hit1 from '../../assets/sounds/Hit1.wav';
 import hit2 from '../../assets/sounds/Hit2.wav';
@@ -21,6 +22,7 @@ const BGM_SOURCES = {
     'level1': level1,
     'level2': level2,
     'level3': level3,
+    'level4': level4,
     'level6': level6,
     'default': stage1BgmFile
 };
