@@ -45,39 +45,6 @@
         }, 
         {
          "draworder":"topdown",
-         "id":3,
-         "name":"OverLayer",
-         "objects":[
-                {
-                 "height":47.3333333333333,
-                 "id":1,
-                 "name":"",
-                 "rotation":0,
-                 "type":"",
-                 "visible":true,
-                 "width":122,
-                 "x":838,
-                 "y":622
-                }, 
-                {
-                 "height":52.6666666666667,
-                 "id":2,
-                 "name":"",
-                 "rotation":0,
-                 "type":"",
-                 "visible":true,
-                 "width":4.66666666666663,
-                 "x":868.666666666667,
-                 "y":669.333333333333
-                }],
-         "opacity":1,
-         "type":"objectgroup",
-         "visible":true,
-         "x":0,
-         "y":0
-        }, 
-        {
-         "draworder":"topdown",
          "id":4,
          "name":"Blocks",
          "objects":[
@@ -278,6 +245,17 @@
                  "width":35,
                  "x":723.5,
                  "y":829
+                }, 
+                {
+                 "height":46,
+                 "id":25,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":120,
+                 "x":839,
+                 "y":623
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -330,7 +308,7 @@
          "y":0
         }],
  "nextlayerid":7,
- "nextobjectid":25,
+ "nextobjectid":26,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",

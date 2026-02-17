@@ -151,6 +151,12 @@
       "difficulty": 2,
       "bgm": "level3"
     },
+    "12": {
+      "mapId": "level12",
+      "name": "오르막길",
+      "difficulty": 2,
+      "bgm": "level3"
+    },
     "13": {
       "mapId": "level7",
       "name": "큰 길",
