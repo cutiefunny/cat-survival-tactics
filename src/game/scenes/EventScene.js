@@ -210,7 +210,7 @@ export default class EventScene extends Phaser.Scene {
         
         this.baseTextX = boxX + padding;
         this.avatarTextX = boxX + padding + avatarSize + padding;
-        const textY = boxY + 25;
+        const textY = boxY + 10;
 
         if (isMobile) {
             this.speakerText.setFontSize('22px');
@@ -221,7 +221,7 @@ export default class EventScene extends Phaser.Scene {
         }
 
         this.speakerText.setPosition(this.baseTextX, textY); 
-        this.storyText.setPosition(this.baseTextX, textY + 40); 
+        this.storyText.setPosition(this.baseTextX, textY + 35); 
         
         // [Modified] 고정된 wordWrap 설정 제거 (아래에서 동적으로 설정)
         // this.storyText.setStyle({ wordWrap: { width: boxWidth - 100 } });
