@@ -41,7 +41,8 @@ export function launchGame(containerId, mockData = null) {
                     game.scene.start(startSceneKey, {
                         levelIndex: mockData.config.gameSettings.startLevelIndex,
                         debugConfig: mockData.config,
-                        script: mockData.script || null
+                        script: mockData.script || null,
+                        armyConfig: mockData.armyConfig || null
                     });
                 }
             }
