@@ -6,9 +6,9 @@ import LoadingScene from './scenes/LoadingScene'; // [New]
 import EventScene from './scenes/EventScene'; // [New]
 
 export function launchGame(containerId, mockData = null) {
-    // [Modified] Mock 모드에서는 BattleScene을 첫 씬으로 시작 (EventScene 자동 재생 방지)
+    // [Modified] mockData 없을 때만 LoadingScene 포함
     const sceneList = mockData 
-        ? [BattleScene, UIScene, EventScene, LoadingScene] 
+        ? [BattleScene, UIScene, EventScene] 
         : [EventScene, StrategyScene, LoadingScene, BattleScene, UIScene];
 
     const config = {
@@ -32,18 +32,27 @@ export function launchGame(containerId, mockData = null) {
         callbacks: {
             postBoot: (game) => {
                 if (mockData) {
+                    console.log('🎮 [GameLauncher] postBoot - mockData detected, starting BattleScene directly');
                     game.registry.set('playerSquad', mockData.squad);
                     game.registry.set('playerCoins', mockData.config.gameSettings.initialCoins);
 
-                    // [Modified] Mock 모드는 항상 BattleScene으로 시작하되, 스크립트 데이터는 전달 유지
-                    const startSceneKey = 'BattleScene';
-                    game.scene.stop(startSceneKey);
-                    game.scene.start(startSceneKey, {
-                        levelIndex: mockData.config.gameSettings.startLevelIndex,
-                        debugConfig: mockData.config,
-                        script: mockData.script || null,
-                        armyConfig: mockData.armyConfig || null
-                    });
+                    try {
+                        // [Modified] 아케이드 모드는 LoadingScene 없이 직접 BattleScene 시작
+                        console.log('🎮 [GameLauncher] Starting BattleScene directly...');
+                        game.scene.start('BattleScene', {
+                            levelIndex: mockData.config.gameSettings.startLevelIndex,
+                            debugConfig: mockData.config,
+                            script: mockData.script || null,
+                            armyConfig: mockData.armyConfig || null,
+                            // [Arcade Mode] 아케이드 모드 데이터 전달
+                            isArcadeMode: mockData.isArcadeMode || false,
+                            arcadeTerritoryId: mockData.arcadeTerritoryId || null,
+                            arcadeMapId: mockData.arcadeMapId || null,
+                            arcadeTerritoryName: mockData.arcadeTerritoryName || null
+                        });
+                    } catch (error) {
+                        console.error('❌ [GameLauncher] Error starting BattleScene:', error);
+                    }
                 }
             }
         }

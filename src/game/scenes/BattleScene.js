@@ -19,6 +19,10 @@ import BattleSceneCameraManager from '../managers/BattleSceneCameraManager';
 // [Data]
 import { DEFAULT_AI_SETTINGS } from '../data/UnitData';
 
+// [Firebase] 아케이드 모드에서 Firestore 접근용
+import { db } from '../../firebaseConfig';
+import { doc, getDoc } from 'firebase/firestore';
+
 export default class BattleScene extends BaseScene {
     constructor() {
         super('BattleScene');
@@ -55,7 +59,38 @@ export default class BattleScene extends BaseScene {
         this.hasScriptPlayed = false;
         this.isWaitingForIntro = false;
 
-        console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}`);
+        // [Arcade Mode] 아케이드 모드 감지 (data.isArcadeMode 또는 levelIndex === 2)
+        this.isArcadeMode = (data && data.isArcadeMode) || (this.currentLevelIndex === 2);
+        this.arcadeSpawnTimer = 5000; // 5초 후 첫 스폰
+        this.arcadeSpawnInterval = 5000; // 5초마다 스폰
+        this.arcadeUnitCount = 0;
+        this.arcadeEnemySpawnTimer = 10000; // 10초 후 첫 적군 스폰
+        this.arcadeEnemySpawnInterval = 10000; // 10초마다 적군 스폰
+        this.arcadeEnemyCount = 0;
+        this.arcadeTerritoryId = (data && data.arcadeTerritoryId) ? data.arcadeTerritoryId : 2;
+        this.arcadeMapId = (data && data.arcadeMapId) ? data.arcadeMapId : null;
+
+        // [Arcade Mode] armyConfig 초기화 (적군 스폰 타입/개수 정보)
+        this.arcadeArmyQueue = [];
+        this.arcadeArmyConfigIndex = 0;
+        if (this.armyConfig && Array.isArray(this.armyConfig)) {
+            // armyConfig: [{ type: 'NormalDog', count: 2 }, { type: 'EliteDog', count: 1 }]
+            // 이를 플랫한 큐로 변환: ['NormalDog', 'NormalDog', 'EliteDog']
+            this.armyConfig.forEach(config => {
+                const count = config.count || 1;
+                const type = config.type || 'NormalDog';
+                for (let i = 0; i < count; i++) {
+                    this.arcadeArmyQueue.push(type);
+                }
+            });
+            console.log(`🎮 [ArcadeMode] armyConfig loaded - Queue: [${this.arcadeArmyQueue.join(', ')}]`);
+        }
+
+        // 팀 그룹 사전 초기화 (scene restart 시 오류 방지)
+        this.blueTeam = null;
+        this.redTeam = null;
+
+        console.log(`🎮 [BattleScene] Init - StrategyMode: ${this.isStrategyMode}, BGM: ${this.bgmKey}, ArcadeMode: ${this.isArcadeMode}, Territory: ${this.arcadeTerritoryId}`);
     }
 
     preload() {
@@ -67,9 +102,20 @@ export default class BattleScene extends BaseScene {
 
         this.audioManager = new BattleAudioManager(this);
         this.audioManager.preload(this.bgmKey);
+        
+        // [Arcade Mode] 버튼 이미지 프리로드 (LoadingScene 없이 직접 시작할 때 필요)
+        this.load.image('item', 'buttons/item.png');
+        this.load.image('auto', 'buttons/auto.png');
+        this.load.image('attack', 'buttons/attack.png');
+        this.load.image('idle', 'buttons/idle.png');
+        this.load.image('stop', 'buttons/stop.png');
+        this.load.image('1x', 'buttons/1x.png');
+        this.load.image('2x', 'buttons/2x.png');
+        this.load.image('3x', 'buttons/3x.png');
     }
 
     create() {
+        console.log('🎮 [BattleScene] create() started');
         super.create();
         
         // Managers 초기화
@@ -112,9 +158,15 @@ export default class BattleScene extends BaseScene {
         
         this.events.on('resume', this.handleResume, this);
 
+        console.log('🎮 [BattleScene] create() - about to call uiManager.create()');
         this.uiManager.create();
 
-        this.initializer.fetchConfigAndStart();
+        console.log('🎮 [BattleScene] create() - about to call initializer.fetchConfigAndStart()');
+        try {
+            this.initializer.fetchConfigAndStart();
+        } catch (error) {
+            console.error('❌ [BattleScene] Error in fetchConfigAndStart:', error);
+        }
     }
 
     handleResume(scene, data) {
@@ -529,14 +581,19 @@ export default class BattleScene extends BaseScene {
         this.objectManager.updateMiceBehavior(time);
         this.interactionManager.update(delta);
 
-        if (!this.battleStarted && this.playerUnit?.active) {
+        // [Arcade Mode] 아군 유닛 주기적 스폰
+        if (this.isArcadeMode && this.battleStarted && !this.isGameOver) {
+            this.updateArcadeMode(delta);
+        }
+
+        if (!this.battleStarted && this.playerUnit?.active && this.blueTeam && this.redTeam) {
             this.checkBattleTimer -= delta;
             if (this.checkBattleTimer <= 0) {
                 this.checkBattleTimer = 100;
                 if (this.combatManager.checkBattleDistance(this.blueTeam, this.redTeam)) { }
             }
         }
-        if (this.battleStarted) {
+        if (this.battleStarted && this.blueTeam && this.redTeam) {
             if (!this.playerUnit || !this.playerUnit.active || this.playerUnit.isDying) { this.transferControlToNextUnit(); }
             this.combatManager.handleRangedAttacks([this.blueTeam, this.redTeam]);
             const blueCount = this.blueTeam.countActive();
@@ -597,6 +654,157 @@ export default class BattleScene extends BaseScene {
             }
         );
     }
+
+    /**
+     * [Arcade Mode] 아케이드 모드 업데이트
+     * - 5초마다 아군 Normal 유닛 스폰
+     * - 10초마다 적군 NormalDog 유닛 스폰
+     * - 적군 즉시 감지 및 진격
+     */
+    updateArcadeMode(delta) {
+        // 아군 스폰 타이머
+        this.arcadeSpawnTimer -= delta;
+        if (this.arcadeSpawnTimer <= 0) {
+            this.arcadeSpawnTimer = this.arcadeSpawnInterval;
+            this.spawnArcadeNormalUnit();
+        }
+
+        // 적군 스폰 타이머
+        this.arcadeEnemySpawnTimer -= delta;
+        if (this.arcadeEnemySpawnTimer <= 0) {
+            this.arcadeEnemySpawnTimer = this.arcadeEnemySpawnInterval;
+            this.spawnArcadeEnemyUnit();
+        }
+    }
+
+    /**
+     * [Arcade Mode] 일반 유닛 스폰
+     */
+    spawnArcadeNormalUnit() {
+        if (!this.blueTeam || this.isGameOver) return;
+
+        const blueTeamCount = this.blueTeam.countActive();
+        if (blueTeamCount === 0) return; // 아군이 모두 죽으면 스폰하지 않음
+
+        let spawnX, spawnY;
+
+        // CATS 영역 내에서만 스폰
+        if (this.catsArea) {
+            // CATS 영역 내 랜덤 위치에 스폰
+            spawnX = Phaser.Math.Between(this.catsArea.x + 10, this.catsArea.right - 10);
+            spawnY = Phaser.Math.Between(this.catsArea.y + 10, this.catsArea.bottom - 10);
+            console.log(`🎮 [ArcadeMode] Spawning unit in CATS area: (${this.catsArea.x}, ${this.catsArea.y}) ~ (${this.catsArea.right}, ${this.catsArea.bottom})`);
+        } else {
+            // CATS 영역이 없으면 기본 위치에 스폰
+            spawnX = 100;
+            spawnY = 250;
+            console.log(`⚠️ [ArcadeMode] CATS area not found, using fallback spawn position`);
+        }
+
+        // Normal 유닛 생성
+        const normalUnitStats = {
+            role: 'Normal',
+            name: `Normal #${++this.arcadeUnitCount}`
+        };
+
+        const unit = this.createUnitInstance(
+            spawnX, spawnY, 'blue',
+            this.redTeam, normalUnitStats, false
+        );
+
+        unit.squadIndex = 999 + this.arcadeUnitCount; // 아케이드 유닛 인덱스
+
+        this.blueTeam.add(unit);
+
+        console.log(`🎮 [ArcadeMode] Spawned Normal unit #${this.arcadeUnitCount} at (${Math.round(spawnX)}, ${Math.round(spawnY)})`);
+
+        // 즉시 적군 감지 및 진격
+        this.triggerEnemyDetection();
+    }
+
+    /**
+     * [Arcade Mode] 적군 유닛 스폰
+     */
+    spawnArcadeEnemyUnit() {
+        if (!this.redTeam || this.isGameOver) return;
+
+        const redTeamCount = this.redTeam.countActive();
+        if (redTeamCount === 0) return; // 적군이 모두 죽으면 스폰하지 않음
+
+        let spawnX, spawnY;
+
+        // DOGS 영역 내에서만 스폰
+        if (this.dogsArea) {
+            // DOGS 영역 내 랜덤 위치에 스폰
+            spawnX = Phaser.Math.Between(this.dogsArea.x + 10, this.dogsArea.right - 10);
+            spawnY = Phaser.Math.Between(this.dogsArea.y + 10, this.dogsArea.bottom - 10);
+            console.log(`🎮 [ArcadeMode] Spawning enemy in DOGS area: (${this.dogsArea.x}, ${this.dogsArea.y}) ~ (${this.dogsArea.right}, ${this.dogsArea.bottom})`);
+        } else {
+            // DOGS 영역이 없으면 기본 위치에 스폰
+            spawnX = 1200;
+            spawnY = 250;
+            console.log(`⚠️ [ArcadeMode] DOGS area not found, using fallback spawn position`);
+        }
+
+        // [Modified] armyConfig에서 다음 유닛 타입 가져오기
+        let enemyType = 'NormalDog';
+        if (this.arcadeArmyQueue && this.arcadeArmyQueue.length > 0) {
+            enemyType = this.arcadeArmyQueue[this.arcadeArmyConfigIndex % this.arcadeArmyQueue.length];
+            this.arcadeArmyConfigIndex++;
+        }
+
+        const enemyUnitStats = {
+            role: enemyType,
+            name: `Enemy #${++this.arcadeEnemyCount}`
+        };
+
+        const unit = this.createUnitInstance(
+            spawnX, spawnY, 'red',
+            this.blueTeam, enemyUnitStats, false
+        );
+
+        this.redTeam.add(unit);
+
+        console.log(`🎮 [ArcadeMode] Spawned ${enemyType} unit #${this.arcadeEnemyCount} at (${Math.round(spawnX)}, ${Math.round(spawnY)})`);
+
+        // 즉시 적군 감지 및 진격
+        this.triggerEnemyDetection();
+    }
+
+    /**
+     * [Arcade Mode] 적군 즉시 감지 및 진격
+     * 모든 적 유닛이 아군을 감지하고 진격하도록 강제
+     */
+    triggerEnemyDetection() {
+        const redTeamUnits = this.redTeam.getChildren();
+        const blueTeamUnits = this.blueTeam.getChildren();
+
+        redTeamUnits.forEach(enemy => {
+            if (!enemy.active || enemy.isDying || !enemy.ai) return;
+
+            // 가장 가까운 아군을 타겟으로 설정
+            let closestAlly = null;
+            let closestDistance = Infinity;
+
+            blueTeamUnits.forEach(ally => {
+                if (!ally.active || ally.isDying) return;
+
+                const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, ally.x, ally.y);
+                if (dist < closestDistance) {
+                    closestDistance = dist;
+                    closestAlly = ally;
+                }
+            });
+
+            // 타겟 설정 및 전투 모드 활성화
+            if (closestAlly && closestDistance < 1000) {
+                enemy.ai.currentTarget = closestAlly;
+                enemy.ai.engageCombat(closestAlly);
+                console.log(`🎮 [ArcadeMode] Enemy ${enemy.role} detected and targets ally at distance ${Math.round(closestDistance)}`);
+            }
+        });
+    }
+
     handleResize(gameSize) {
         this.inputManager.handleResize(gameSize);
         this.uiManager.handleResize(gameSize.width, gameSize.height);
@@ -604,9 +812,60 @@ export default class BattleScene extends BaseScene {
     }
     
     finishGame(message, color, isWin, fatiguePenalty = 1) {
+        // [Arcade Mode] 아케이드 모드 승리 처리
+        if (this.isArcadeMode && isWin) {
+            this.handleArcadeModeVictory();
+            return;
+        }
+
         if (this.lifecycleManager) {
             this.lifecycleManager.finishGame(message, color, isWin, fatiguePenalty);
         }
+    }
+
+    /**
+     * [Arcade Mode] 아케이드 모드 승리 처리
+     * 다음 영역으로 진행
+     */
+    async handleArcadeModeVictory() {
+        // 현재 영역 ID 가져오기 (기본값: 2)
+        let currentTerritoryId = parseInt(localStorage.getItem('arcadeCurrentTerritory') || '2');
+        
+        // 다음 영역 ID 계산
+        const nextTerritoryId = currentTerritoryId + 1;
+
+        console.log(`🎮 [ArcadeMode] Victory! Territory ${currentTerritoryId} cleared. Moving to Territory ${nextTerritoryId}...`);
+
+        // 다음 영역 ID 저장
+        localStorage.setItem('arcadeCurrentTerritory', nextTerritoryId.toString());
+
+        // [Modified] 다음 영역의 armyConfig를 Firestore에서 읽어오기
+        let nextArmyConfig = null;
+        try {
+            const docRef = doc(db, "settings", "tacticsConfig");
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists() && docSnap.data().territoryArmies) {
+                const fbArmies = docSnap.data().territoryArmies;
+                if (fbArmies[nextTerritoryId.toString()]) {
+                    nextArmyConfig = fbArmies[nextTerritoryId.toString()];
+                    console.log(`🎮 [ArcadeMode] Loaded armyConfig for Territory ${nextTerritoryId}:`, nextArmyConfig);
+                }
+            }
+        } catch (error) {
+            console.error(`⚠️ [ArcadeMode] Failed to load next armyConfig:`, error);
+        }
+
+        // 1.5초 후 다음 영역으로 재시작
+        this.time.delayedCall(1500, () => {
+            this.scene.restart({
+                isArcadeMode: true,
+                arcadeTerritoryId: nextTerritoryId,
+                levelIndex: 2, // 레벨 2 유지
+                fromArcadeMode: true,
+                armyConfig: nextArmyConfig // [New] 다음 armyConfig 전달
+            });
+        });
     }
 
     processBattleOutcome(isWin, fatiguePenalty) {

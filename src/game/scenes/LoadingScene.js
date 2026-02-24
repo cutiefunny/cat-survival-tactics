@@ -6,10 +6,14 @@ export default class LoadingScene extends Phaser.Scene {
     }
 
     init(data) {
-        this.targetScene = data.targetScene;
-        this.targetData = data.targetData;
+        this.targetScene = data?.targetScene;
+        this.targetData = data?.targetData;
         // [설정] 최소 유지 시간 1초 (컷씬 연출용 시간 확보)
-        this.minDuration = 1000; 
+        this.minDuration = 1000;
+        console.log('🎮 [LoadingScene] Init - targetScene:', this.targetScene);
+        if (!this.targetScene) {
+            console.error('❌ [LoadingScene] targetScene not provided!');
+        }
     }
 
     preload() {
@@ -88,10 +92,20 @@ export default class LoadingScene extends Phaser.Scene {
             ease: 'Linear'
         });
 
-        // [핵심] 최소 2초 대기 후 타겟 씬 시작
+        // [핵심] 최소 1초 대기 후 타겟 씬 시작
+        console.log('🎮 [LoadingScene] Create - targetScene:', this.targetScene, 'minDuration:', this.minDuration);
+        console.log('🎮 [LoadingScene] Setting up delayedCall...');
         this.time.delayedCall(this.minDuration, () => {
+            console.log('🎮 [LoadingScene] DelayedCall fired!');
             if (this.targetScene) {
-                this.scene.start(this.targetScene, this.targetData);
+                console.log('🎮 [LoadingScene] Starting scene:', this.targetScene);
+                try {
+                    this.scene.start(this.targetScene, this.targetData);
+                } catch (error) {
+                    console.error('❌ [LoadingScene] Error starting scene:', error);
+                }
+            } else {
+                console.error('❌ [LoadingScene] targetScene is undefined!');
             }
         });
     }

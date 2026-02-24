@@ -2,6 +2,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
 import { LEVEL_KEYS } from './LevelManager';
 import { DEFAULT_AI_SETTINGS } from '../data/UnitData';
+import territories from '../data/TerritoryConfig.json';
 
 const DEFAULT_CONFIG = {
     showDebugStats: false, 
@@ -22,8 +23,11 @@ export default class BattleSceneInitializer {
      * Firebase에서 설정을 가져오고 게임 시작
      */
     async fetchConfigAndStart() {
+        console.log('🎮 [BattleSceneInitializer] fetchConfigAndStart() called');
+        
         // 디버그 모드일 경우 즉시 시작
         if (this.scene.initData && this.scene.initData.debugConfig) {
+            console.log('🎮 [BattleSceneInitializer] debugConfig detected - starting immediately');
             this.scene.gameConfig = this.scene.initData.debugConfig;
             const mapKey = LEVEL_KEYS[this.scene.currentLevelIndex] || 'level1';
             
@@ -34,11 +38,13 @@ export default class BattleSceneInitializer {
             }
             this.scene.levelInitialCoins = this.scene.playerCoins;
             
+            console.log('🎮 [BattleSceneInitializer] Calling startGame with mapKey:', mapKey);
             this.startGame(this.scene.gameConfig, mapKey);
             return;
         }
 
         // Firebase에서 설정 로드
+        console.log('🎮 [BattleSceneInitializer] Fetching config from Firebase...');
         let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
         try {
             const docRef = doc(db, "settings", "tacticsConfig");
@@ -87,17 +93,43 @@ export default class BattleSceneInitializer {
         this.scene.levelInitialCoins = this.scene.playerCoins;
 
         // 맵 키 결정
+        // [Arcade Mode] 아케이드 모드를 먼저 확인 (levelIndex 무관)
+        let mapKey;
+        if (this.scene.isArcadeMode) {
+            // initData에서 arcadeMapId를 먼저 확인 (App.jsx에서 전달한 데이터)
+            if (this.scene.initData && this.scene.initData.arcadeMapId) {
+                mapKey = this.scene.initData.arcadeMapId;
+                console.log(`🎮 [ArcadeMode] Using arcade map from initData: Territory ${this.scene.arcadeTerritoryId} (${mapKey})`);
+            } else {
+                // localStorage에서 현재 영역 ID 읽기
+                const currentTerritoryId = parseInt(localStorage.getItem('arcadeCurrentTerritory') || '2');
+                const territoryData = territories.territories[currentTerritoryId.toString()];
+                
+                if (territoryData && territoryData.mapId) {
+                    mapKey = territoryData.mapId;
+                    console.log(`🎮 [ArcadeMode] Territory ${currentTerritoryId}: "${territoryData.name}" (${mapKey})`);
+                } else {
+                    // 기본 맵으로 폴백
+                    mapKey = 'level1';
+                    console.log(`⚠️ [ArcadeMode] Territory config not found, using fallback map: ${mapKey}`);
+                }
+            }
+            this.startGame(config, mapKey);
+            return;
+        }
+
+        // 일반 모드: levelIndex를 확인
         if (this.scene.currentLevelIndex === -1) {
             this.startGame(config, null);
             return;
         }
         
+        // 일반 모드: currentLevelIndex에 따라 맵 선택
         if (this.scene.currentLevelIndex >= LEVEL_KEYS.length) {
             this.scene.currentLevelIndex = 0;
         }
-        
         const targetMapKey = LEVEL_KEYS[this.scene.currentLevelIndex];
-        const mapKey = this.scene.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
+        mapKey = this.scene.cache.tilemap.exists(targetMapKey) ? targetMapKey : 'level1';
         
         this.startGame(config, mapKey);
     }
@@ -106,6 +138,7 @@ export default class BattleSceneInitializer {
      * 게임 시작 - 맵 생성, 유닛 스폰, 물리 설정
      */
     startGame(config, mapKey) {
+        console.log('🎮 [BattleSceneInitializer] startGame() called with mapKey:', mapKey);
         this.scene.currentMapKey = mapKey;
         let scriptData = this.scene.levelScript;
 
@@ -126,8 +159,19 @@ export default class BattleSceneInitializer {
             }
         }
 
+        // [Arcade Mode] 아케이드 모드에서 영역별 카메라 줌 정보 읽기
+        let cameraZoom = 1; // 기본 줌 레벨
+        if (this.scene.isArcadeMode) {
+            const currentTerritoryId = parseInt(localStorage.getItem('arcadeCurrentTerritory') || '2');
+            const territoryData = territories.territories[currentTerritoryId.toString()];
+            if (territoryData && territoryData.cameraZoom) {
+                cameraZoom = territoryData.cameraZoom;
+                console.log(`🎮 [ArcadeMode] Territory ${currentTerritoryId} camera zoom: ${cameraZoom}`);
+            }
+        }
+
         // 실제 타일맵 생성
-        this.setupTiledMap(config, mapKey, scriptData);
+        this.setupTiledMap(config, mapKey, scriptData, cameraZoom);
     }
 
     /**
@@ -181,8 +225,10 @@ export default class BattleSceneInitializer {
     /**
      * Tiled 맵 설정
      */
-    setupTiledMap(config, mapKey, scriptData) {
+    setupTiledMap(config, mapKey, scriptData, cameraZoom = 1) {
+        console.log('🎮 [BattleSceneInitializer] setupTiledMap() called with mapKey:', mapKey, 'cameraZoom:', cameraZoom);
         const mapDataObj = this.scene.mapManager.createMap(mapKey);
+        console.log('🎮 [BattleSceneInitializer] Map created successfully');
         
         const map = mapDataObj.map;
         this.scene.currentMap = map;
@@ -201,7 +247,12 @@ export default class BattleSceneInitializer {
         this.scene.mapWidth = map.widthInPixels;
         this.scene.mapHeight = map.heightInPixels;
         
-        // 카메라 핏
+        // [Arcade Mode] 카메라 줌을 미리 설정 (fitToMap에서 사용될 예정)
+        if (cameraZoom !== 1) {
+            this.scene.forceArcadeZoom = cameraZoom;
+        }
+        
+        // 카메라 핏 (forceArcadeZoom이 설정되어 있으면 그것을 사용함)
         this.scene.cameraManager.fitToMap();
         
         // 게임 변수 초기화

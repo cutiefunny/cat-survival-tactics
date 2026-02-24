@@ -16,37 +16,74 @@
       "mapId": "level1",
       "name": "길거리",
       "difficulty": 1,
-      "bgm": "level1"
+      "bgm": "level1",
+      "cameraZoom": 0.5,
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "3": {
       "mapId": "level3",
       "name": "무대륙",
       "difficulty": 2,
-      "bgm": "level1"
+      "bgm": "level1",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "4": {
       "mapId": "level4",
       "name": "상점가",
       "difficulty": 2,
-      "bgm": "level1"
+      "bgm": "level1",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "5": {
       "mapId": "level5",
       "name": "상점가2",
       "difficulty": 2,
-      "bgm": "level1"
+      "bgm": "level1",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "6": {
       "mapId": "level10",
       "name": "광장-서쪽",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level2",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "7": {
       "mapId": "level9",
       "name": "광장-동쪽",
       "difficulty": 2,
-      "bgm": "level2"
+      "bgm": "level2",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "8": {
       "mapId": "level0",
@@ -143,31 +180,63 @@
       "mapId": "level2",
       "name": "공원",
       "difficulty": 2,
-      "bgm": "level3"
+      "bgm": "level3",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "11": {
       "mapId": "level11",
       "name": "상수 우물",
       "difficulty": 2,
-      "bgm": "level3"
+      "bgm": "level3",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "12": {
       "mapId": "level12",
       "name": "오르막길",
       "difficulty": 2,
-      "bgm": "level3"
+      "bgm": "level3",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "13": {
       "mapId": "level7",
       "name": "큰 길",
       "difficulty": 2,
-      "bgm": "level3"
+      "bgm": "level3",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "14": {
       "mapId": "level8",
       "name": "빌라촌",
       "difficulty": 2,
-      "bgm": "level3"
+      "bgm": "level3",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     },
     "15": {
       "mapId": "level15",
@@ -177,6 +246,13 @@
       "unit": "Raccoon",
       "text": "이 곳은 너구리들의 근거지다!",
       "script_condition": "win",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ],
       "script": [
         {
           "type": "dialog",
@@ -211,6 +287,12 @@
       "neutral": true,
       "unit": "Healer",
       "text": "이 구역은 아픈 고양이들이 모여사는 곳이다냥!",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ],
       "script": [
         {
           "type": "dialog",
@@ -267,7 +349,14 @@
       "difficulty": 2,
       "bgm": "level2",
       "unit": "Boss",
-      "text": "최종장"
+      "text": "최종장",
+      "enemies": [
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" },
+        { "type": "NormalDog" }
+      ]
     }
   }
 }

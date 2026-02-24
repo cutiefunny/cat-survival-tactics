@@ -26,7 +26,13 @@ export default class BattleSceneCameraManager {
         
         const zoomX = width / this.scene.mapWidth;
         const zoomY = availableHeight / this.scene.mapHeight;
-        const targetZoom = Math.max(zoomX, zoomY);
+        let targetZoom = Math.max(zoomX, zoomY);
+        
+        // [Arcade Mode] forceArcadeZoom이 설정되어 있으면 그것을 사용
+        if (this.scene.forceArcadeZoom) {
+            targetZoom = this.scene.forceArcadeZoom;
+            console.log(`🎮 [Camera] Using forced arcade zoom: ${targetZoom}`);
+        }
 
         this.camera.setZoom(targetZoom);
         this.camera.setBounds(0, 0, this.scene.mapWidth, this.scene.mapHeight);

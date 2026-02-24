@@ -109,6 +109,14 @@ export default class UnitAI {
         this.baseViewDistance = 350; // 기본 시야 거리 저장
         this.viewAngle = Phaser.Math.DegToRad(120); // 시야각 (120도)
 
+        // [Arcade Mode] 적군 초기 감지 거리 확대
+        if (this.scene.isArcadeMode && unit.team === 'red') {
+            this.viewDistance = 800; // 아케이드 모드에서는 감지 거리 확대
+            this.baseViewDistance = 800;
+            this.viewAngle = Phaser.Math.DegToRad(180); // 시야각을 180도로 확대 (거의 360도 주변 감지)
+            console.log(`🎮 [ArcadeMode] Enemy ${unit.role} enhanced detection - viewDistance: 800, viewAngle: 180°`);
+        }
+
         this._tempStart = new Phaser.Math.Vector2();
         this._tempEnd = new Phaser.Math.Vector2();
 
